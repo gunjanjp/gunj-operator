@@ -1,0 +1,258 @@
+# Platform Administrator role - full access to observability platforms
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gunj-platform-admin
+  labels:
+    app.kubernetes.io/name: gunj-operator
+    app.kubernetes.io/instance: gunj-operator
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+annotations:
+  rbac.authorization.kubernetes.io/autoupdate: "true"
+rules:
+# Full access to ObservabilityPlatforms
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Read access to platform status
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms/status
+  verbs:
+  - get
+  - list
+  - watch
+
+# Manage component resources (read-only)
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - statefulsets
+  - daemonsets
+  verbs:
+  - get
+  - list
+  - watch
+
+# Core resources (read-only)
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - endpoints
+  - persistentvolumeclaims
+  - pods
+  - services
+  - serviceaccounts
+  verbs:
+  - get
+  - list
+  - watch
+
+# Secrets (limited access)
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+
+# Pod logs
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+  - list
+
+# Events
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - get
+  - list
+  - watch
+
+# Metrics
+- apiGroups:
+  - metrics.k8s.io
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+
+---
+# Platform Viewer role - read-only access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gunj-platform-viewer
+  labels:
+    app.kubernetes.io/name: gunj-operator
+    app.kubernetes.io/instance: gunj-operator
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+rules:
+# Read-only access to ObservabilityPlatforms
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms
+  verbs:
+  - get
+  - list
+  - watch
+
+# Read access to platform status
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms/status
+  verbs:
+  - get
+  - list
+  - watch
+
+# View component resources
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - statefulsets
+  - daemonsets
+  verbs:
+  - get
+  - list
+
+# Core resources (read-only)
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - endpoints
+  - persistentvolumeclaims
+  - pods
+  - services
+  verbs:
+  - get
+  - list
+
+# Events
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - get
+  - list
+
+---
+# Developer role - create monitoring resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gunj-developer
+  labels:
+    app.kubernetes.io/name: gunj-operator
+    app.kubernetes.io/instance: gunj-operator
+rules:
+# Read platforms
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms
+  verbs:
+  - get
+  - list
+
+# Create monitoring resources
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - servicemonitors
+  - podmonitors
+  - prometheusrules
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Read services (to create ServiceMonitors)
+- apiGroups:
+  - ""
+  resources:
+  - services
+  - endpoints
+  verbs:
+  - get
+  - list
+  - watch
+
+# Read pods (for PodMonitors)
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+
+# Access logs
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+  - list
+
+---
+# Metrics Reader role - for external systems
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gunj-metrics-reader
+  labels:
+    app.kubernetes.io/name: gunj-operator
+    app.kubernetes.io/instance: gunj-operator
+rules:
+# Read metrics
+- apiGroups:
+  - metrics.k8s.io
+  resources:
+  - pods
+  - nodes
+  verbs:
+  - get
+  - list
+
+# Access Prometheus metrics endpoint
+- nonResourceURLs:
+  - /metrics
+  - /federate
+  verbs:
+  - get

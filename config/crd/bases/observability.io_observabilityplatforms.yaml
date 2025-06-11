@@ -1,0 +1,938 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.13.0
+  name: observabilityplatforms.observability.io
+spec:
+  group: observability.io
+  names:
+    kind: ObservabilityPlatform
+    listKind: ObservabilityPlatformList
+    plural: observabilityplatforms
+    shortNames:
+    - op
+    - ops
+    singular: observabilityplatform
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.message
+      name: Message
+      priority: 1
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ObservabilityPlatform is the Schema for the observabilityplatforms API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ObservabilityPlatformSpec defines the desired state of ObservabilityPlatform
+            properties:
+              alerting:
+                description: Alerting configuration for the platform
+                properties:
+                  alertmanager:
+                    description: AlertManager configuration
+                    properties:
+                      config:
+                        description: Config is the AlertManager configuration
+                        type: string
+                      enabled:
+                        default: true
+                        description: Enabled indicates whether AlertManager should be deployed
+                        type: boolean
+                      replicas:
+                        default: 1
+                        description: Replicas is the number of AlertManager instances
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      resources:
+                        description: Resources defines the compute resources for AlertManager
+                        properties:
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Limits describes the maximum amount of compute resources allowed
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Requests describes the minimum amount of compute resources required
+                            type: object
+                        type: object
+                      version:
+                        description: Version of AlertManager to deploy
+                        type: string
+                    required:
+                    - version
+                    type: object
+                  rules:
+                    description: Rules for alerting
+                    items:
+                      description: AlertingRule defines alerting rule configuration
+                      properties:
+                        annotations:
+                          additionalProperties:
+                            type: string
+                          description: Annotations to add to the alert
+                          type: object
+                        expr:
+                          description: Expr is the PromQL expression
+                          type: string
+                        for:
+                          default: 5m
+                          description: For duration before firing
+                          type: string
+                        labels:
+                          additionalProperties:
+                            type: string
+                          description: Labels to add to the alert
+                          type: object
+                        name:
+                          description: Name of the alerting rule
+                          type: string
+                      required:
+                      - expr
+                      - name
+                      type: object
+                    type: array
+                type: object
+              backup:
+                description: Backup configuration for the platform
+                properties:
+                  destination:
+                    description: Destination for backup storage
+                    properties:
+                      pvc:
+                        description: PVC destination configuration
+                        properties:
+                          claimName:
+                            description: ClaimName of the PVC
+                            type: string
+                          subPath:
+                            description: SubPath within the PVC
+                            type: string
+                        required:
+                        - claimName
+                        type: object
+                      s3:
+                        description: S3 destination configuration
+                        properties:
+                          bucketName:
+                            description: BucketName for backups
+                            type: string
+                          prefix:
+                            description: Prefix for backup objects
+                            type: string
+                          region:
+                            description: Region of the S3 bucket
+                            type: string
+                          secretName:
+                            description: SecretName containing AWS credentials
+                            type: string
+                        required:
+                        - bucketName
+                        - region
+                        type: object
+                    type: object
+                  enabled:
+                    default: false
+                    description: Enabled indicates whether backups are enabled
+                    type: boolean
+                  retentionDays:
+                    default: 7
+                    description: RetentionDays for backup data
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  schedule:
+                    default: 0 2 * * *
+                    description: Schedule in cron format
+                    type: string
+                type: object
+              components:
+                description: Components defines which observability components to deploy
+                properties:
+                  grafana:
+                    description: Grafana configuration
+                    properties:
+                      adminPassword:
+                        description: AdminPassword for the Grafana admin user
+                        type: string
+                      dashboards:
+                        description: Dashboards to provision in Grafana
+                        items:
+                          description: DashboardConfig defines Grafana dashboard configuration
+                          properties:
+                            configMapName:
+                              description: ConfigMapName containing the dashboard JSON
+                              type: string
+                            folder:
+                              description: Folder to place the dashboard in
+                              type: string
+                            name:
+                              description: Name of the dashboard
+                              type: string
+                            url:
+                              description: URL to download the dashboard
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                      dataSources:
+                        description: DataSources to configure in Grafana
+                        items:
+                          description: DataSourceConfig defines Grafana datasource configuration
+                          properties:
+                            config:
+                              additionalProperties: {}
+                              description: Additional datasource configuration
+                              type: object
+                            default:
+                              default: true
+                              description: Default indicates if this is the default datasource
+                              type: boolean
+                            name:
+                              description: Name of the datasource
+                              type: string
+                            type:
+                              description: Type of the datasource
+                              enum:
+                              - prometheus
+                              - loki
+                              - tempo
+                              - elasticsearch
+                              type: string
+                            url:
+                              description: URL of the datasource
+                              type: string
+                          required:
+                          - name
+                          - type
+                          - url
+                          type: object
+                        type: array
+                      enabled:
+                        default: true
+                        description: Enabled indicates whether Grafana should be deployed
+                        type: boolean
+                      ingress:
+                        description: Ingress configuration for external access
+                        properties:
+                          annotations:
+                            additionalProperties:
+                              type: string
+                            description: Annotations for the ingress
+                            type: object
+                          className:
+                            default: nginx
+                            description: ClassName for the ingress controller
+                            type: string
+                          enabled:
+                            default: false
+                            description: Enabled indicates whether ingress is enabled
+                            type: boolean
+                          host:
+                            description: Host for the ingress
+                            type: string
+                          path:
+                            description: Path for the ingress
+                            type: string
+                          tlsSecret:
+                            description: TLSSecret name for HTTPS
+                            type: string
+                        required:
+                        - host
+                        type: object
+                      replicas:
+                        default: 1
+                        description: Replicas is the number of Grafana instances
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      resources:
+                        description: Resources defines the compute resources for Grafana
+                        properties:
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Limits describes the maximum amount of compute resources allowed
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Requests describes the minimum amount of compute resources required
+                            type: object
+                        type: object
+                      version:
+                        description: Version of Grafana to deploy
+                        pattern: ^\d+\.\d+\.\d+$
+                        type: string
+                    required:
+                    - version
+                    type: object
+                  loki:
+                    description: Loki configuration for log aggregation
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled indicates whether Loki should be deployed
+                        type: boolean
+                      resources:
+                        description: Resources defines the compute resources for Loki
+                        properties:
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Limits describes the maximum amount of compute resources allowed
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Requests describes the minimum amount of compute resources required
+                            type: object
+                        type: object
+                      retention:
+                        default: 7d
+                        description: Retention period for log data
+                        pattern: ^\d+[hdwmy]$
+                        type: string
+                      s3:
+                        description: S3 configuration for log storage
+                        properties:
+                          bucketName:
+                            description: BucketName for storing data
+                            type: string
+                          enabled:
+                            description: Enabled indicates whether S3 storage is enabled
+                            type: boolean
+                          endpoint:
+                            description: Endpoint for S3-compatible storage
+                            type: string
+                          region:
+                            description: Region of the S3 bucket
+                            type: string
+                          secretName:
+                            description: SecretName containing AWS credentials
+                            type: string
+                        required:
+                        - bucketName
+                        - enabled
+                        - region
+                        type: object
+                      storage:
+                        description: Storage configuration for Loki data
+                        properties:
+                          accessMode:
+                            default: ReadWriteOnce
+                            description: AccessMode for the storage
+                            enum:
+                            - ReadWriteOnce
+                            - ReadWriteMany
+                            - ReadWriteOncePod
+                            type: string
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: Size of the storage
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          storageClassName:
+                            description: StorageClassName to use for the PVC
+                            type: string
+                        required:
+                        - size
+                        type: object
+                      version:
+                        description: Version of Loki to deploy
+                        pattern: ^\d+\.\d+\.\d+$
+                        type: string
+                    required:
+                    - version
+                    type: object
+                  opentelemetryCollector:
+                    description: OpenTelemetry Collector configuration
+                    properties:
+                      config:
+                        description: Config is the OpenTelemetry Collector configuration
+                        type: string
+                      enabled:
+                        default: true
+                        description: Enabled indicates whether OpenTelemetry Collector should be deployed
+                        type: boolean
+                      replicas:
+                        default: 1
+                        description: Replicas is the number of collector instances
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      resources:
+                        description: Resources defines the compute resources for the collector
+                        properties:
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Limits describes the maximum amount of compute resources allowed
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Requests describes the minimum amount of compute resources required
+                            type: object
+                        type: object
+                      version:
+                        description: Version of OpenTelemetry Collector to deploy
+                        type: string
+                    required:
+                    - version
+                    type: object
+                  prometheus:
+                    description: Prometheus configuration
+                    properties:
+                      customConfig:
+                        additionalProperties:
+                          type: string
+                        description: CustomConfig allows overriding the default Prometheus configuration
+                        type: object
+                      enabled:
+                        default: true
+                        description: Enabled indicates whether Prometheus should be deployed
+                        type: boolean
+                      remoteWrite:
+                        description: RemoteWrite configurations for sending metrics to external systems
+                        items:
+                          description: RemoteWriteSpec defines Prometheus remote write configuration
+                          properties:
+                            basicAuth:
+                              description: BasicAuth configuration
+                              properties:
+                                password:
+                                  description: Password for basic auth (reference to secret)
+                                  properties:
+                                    key:
+                                      description: The key of the secret to select from. Must be a valid secret key.
+                                      type: string
+                                    name:
+                                      description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names TODO: Add other useful fields. apiVersion, kind, uid?'
+                                      type: string
+                                    optional:
+                                      description: Specify whether the Secret or its key must be defined
+                                      type: boolean
+                                  required:
+                                  - key
+                                  type: object
+                                username:
+                                  description: Username for basic auth
+                                  type: string
+                              required:
+                              - password
+                              - username
+                              type: object
+                            bearerToken:
+                              description: BearerToken for authentication
+                              type: string
+                            name:
+                              description: Name of the remote write config
+                              type: string
+                            tlsConfig:
+                              description: TLSConfig for the remote write endpoint
+                              properties:
+                                caFile:
+                                  description: CAFile path for TLS verification
+                                  type: string
+                                certFile:
+                                  description: CertFile path for client certificate
+                                  type: string
+                                insecureSkipVerify:
+                                  default: true
+                                  description: InsecureSkipVerify disables TLS verification
+                                  type: boolean
+                                keyFile:
+                                  description: KeyFile path for client key
+                                  type: string
+                              type: object
+                            url:
+                              description: URL of the remote write endpoint
+                              type: string
+                            writeRelabelConfigs:
+                              description: WriteRelabelConfigs for the remote write
+                              items:
+                                description: RelabelConfig defines Prometheus relabel configuration
+                                properties:
+                                  action:
+                                    default: replace
+                                    description: Action to perform
+                                    enum:
+                                    - replace
+                                    - keep
+                                    - drop
+                                    - hashmod
+                                    - labelmap
+                                    - labeldrop
+                                    - labelkeep
+                                    type: string
+                                  modulus:
+                                    default: 0
+                                    description: Modulus for hash-based relabeling
+                                    format: int64
+                                    type: integer
+                                  regex:
+                                    description: Regex to match
+                                    type: string
+                                  replacement:
+                                    description: Replacement value
+                                    type: string
+                                  separator:
+                                    default: ;
+                                    description: Separator to use between source labels
+                                    type: string
+                                  sourceLabels:
+                                    description: SourceLabels to use for relabeling
+                                    items:
+                                      type: string
+                                    type: array
+                                  targetLabel:
+                                    description: TargetLabel to set
+                                    type: string
+                                type: object
+                              type: array
+                          required:
+                          - url
+                          type: object
+                        type: array
+                      replicas:
+                        default: 1
+                        description: Replicas is the number of Prometheus instances
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      resources:
+                        description: Resources defines the compute resources for Prometheus
+                        properties:
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Limits describes the maximum amount of compute resources allowed
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Requests describes the minimum amount of compute resources required
+                            type: object
+                        type: object
+                      retention:
+                        default: 30d
+                        description: Retention period for metrics data
+                        pattern: ^\d+[hdwmy]$
+                        type: string
+                      serviceMonitorSelector:
+                        description: ServiceMonitorSelector defines which ServiceMonitors should be selected
+                        properties:
+                          matchExpressions:
+                            description: matchExpressions is a list of label selector requirements. The requirements are ANDed.
+                            items:
+                              description: A label selector requirement is a selector that contains values, a key, and an operator that relates the key and values.
+                              properties:
+                                key:
+                                  description: key is the label key that the selector applies to.
+                                  type: string
+                                operator:
+                                  description: operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist.
+                                  type: string
+                                values:
+                                  description: values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch.
+                                  items:
+                                    type: string
+                                  type: array
+                              required:
+                              - key
+                              - operator
+                              type: object
+                            type: array
+                          matchLabels:
+                            additionalProperties:
+                              type: string
+                            description: matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is "key", the operator is "In", and the values array contains only "value". The requirements are ANDed.
+                            type: object
+                        type: object
+                      storage:
+                        description: Storage configuration for Prometheus data
+                        properties:
+                          accessMode:
+                            default: ReadWriteOnce
+                            description: AccessMode for the storage
+                            enum:
+                            - ReadWriteOnce
+                            - ReadWriteMany
+                            - ReadWriteOncePod
+                            type: string
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: Size of the storage
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          storageClassName:
+                            description: StorageClassName to use for the PVC
+                            type: string
+                        required:
+                        - size
+                        type: object
+                      version:
+                        description: Version of Prometheus to deploy
+                        pattern: ^v?\d+\.\d+\.\d+$
+                        type: string
+                    required:
+                    - version
+                    type: object
+                  tempo:
+                    description: Tempo configuration for distributed tracing
+                    properties:
+                      enabled:
+                        default: true
+                        description: Enabled indicates whether Tempo should be deployed
+                        type: boolean
+                      resources:
+                        description: Resources defines the compute resources for Tempo
+                        properties:
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Limits describes the maximum amount of compute resources allowed
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: Requests describes the minimum amount of compute resources required
+                            type: object
+                        type: object
+                      retention:
+                        default: 24h
+                        description: Retention period for trace data
+                        pattern: ^\d+[hdwmy]$
+                        type: string
+                      storage:
+                        description: Storage configuration for Tempo data
+                        properties:
+                          accessMode:
+                            default: ReadWriteOnce
+                            description: AccessMode for the storage
+                            enum:
+                            - ReadWriteOnce
+                            - ReadWriteMany
+                            - ReadWriteOncePod
+                            type: string
+                          size:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: Size of the storage
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          storageClassName:
+                            description: StorageClassName to use for the PVC
+                            type: string
+                        required:
+                        - size
+                        type: object
+                      version:
+                        description: Version of Tempo to deploy
+                        pattern: ^\d+\.\d+\.\d+$
+                        type: string
+                    required:
+                    - version
+                    type: object
+                type: object
+              global:
+                description: Global configuration settings applied to all components
+                properties:
+                  externalLabels:
+                    additionalProperties:
+                      type: string
+                    description: ExternalLabels to add to all metrics
+                    type: object
+                  logLevel:
+                    default: info
+                    description: LogLevel for all components
+                    enum:
+                    - debug
+                    - info
+                    - warn
+                    - error
+                    type: string
+                  nodeSelector:
+                    additionalProperties:
+                      type: string
+                    description: NodeSelector for all component pods
+                    type: object
+                  securityContext:
+                    description: SecurityContext for all component pods
+                    properties:
+                      fsGroup:
+                        default: 65534
+                        description: FSGroup specifies the filesystem group
+                        format: int64
+                        type: integer
+                      readOnlyRootFilesystem:
+                        default: false
+                        description: ReadOnlyRootFilesystem mounts the root filesystem as read-only
+                        type: boolean
+                      runAsGroup:
+                        default: 65534
+                        description: RunAsGroup specifies the group ID
+                        format: int64
+                        type: integer
+                      runAsNonRoot:
+                        default: true
+                        description: RunAsNonRoot indicates the container must run as non-root
+                        type: boolean
+                      runAsUser:
+                        default: 65534
+                        description: RunAsUser specifies the user ID
+                        format: int64
+                        type: integer
+                    type: object
+                  tolerations:
+                    description: Tolerations for all component pods
+                    items:
+                      description: Toleration defines pod toleration
+                      properties:
+                        effect:
+                          description: Effect of the toleration
+                          enum:
+                          - NoSchedule
+                          - PreferNoSchedule
+                          - NoExecute
+                          type: string
+                        key:
+                          description: Key of the toleration
+                          type: string
+                        operator:
+                          description: Operator of the toleration
+                          enum:
+                          - Exists
+                          - Equal
+                          type: string
+                        tolerationSeconds:
+                          description: TolerationSeconds for NoExecute effect
+                          format: int64
+                          type: integer
+                        value:
+                          description: Value of the toleration
+                          type: string
+                      type: object
+                    type: array
+                type: object
+              highAvailability:
+                description: HighAvailability defines the HA configuration for the platform
+                properties:
+                  antiAffinity:
+                    description: AntiAffinity rules for pod distribution
+                    properties:
+                      topologyKey:
+                        default: kubernetes.io/hostname
+                        description: TopologyKey for spreading pods
+                        type: string
+                      type:
+                        default: preferred
+                        description: Type of anti-affinity
+                        enum:
+                        - required
+                        - preferred
+                        type: string
+                    type: object
+                  enabled:
+                    default: true
+                    description: Enabled indicates whether HA mode is enabled
+                    type: boolean
+                  minReplicas:
+                    default: 2
+                    description: MinReplicas for HA components
+                    format: int32
+                    minimum: 2
+                    type: integer
+                type: object
+              paused:
+                default: false
+                description: Paused indicates whether the operator should reconcile this resource
+                type: boolean
+            required:
+            - components
+            type: object
+          status:
+            description: ObservabilityPlatformStatus defines the observed state of ObservabilityPlatform
+            properties:
+              componentStatus:
+                additionalProperties:
+                  description: ComponentStatus represents the status of a single component
+                  properties:
+                    lastUpdateTime:
+                      description: LastUpdateTime of the component
+                      format: date-time
+                      type: string
+                    phase:
+                      description: Phase of the component
+                      enum:
+                      - Pending
+                      - Installing
+                      - Ready
+                      - Failed
+                      - Upgrading
+                      type: string
+                    readyReplicas:
+                      description: ReadyReplicas number
+                      format: int32
+                      type: integer
+                    version:
+                      description: Version currently deployed
+                      type: string
+                  type: object
+                description: ComponentStatus tracks the status of each component
+                type: object
+              conditions:
+                description: Conditions represent the latest available observations
+                items:
+                  description: "Condition contains details for one aspect of the current state of this API Resource. --- This struct is intended for direct use as an array at the field path .status.conditions.  For example, \n type FooStatus struct{ // Represents the observations of a foo's current state. // Known .status.conditions.type are: \"Available\", \"Progressing\", and \"Degraded\" // +patchMergeKey=type // +patchStrategy=merge // +listType=map // +listMapKey=type Conditions []metav1.Condition `json:\"conditions,omitempty\" patchStrategy:\"merge\" patchMergeKey:\"type\" protobuf:\"bytes,1,rep,name=conditions\"` \n // other fields }"
+                  properties:
+                    lastTransitionTime:
+                      description: lastTransitionTime is the last time the condition transitioned from one status to another. This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: message is a human readable message indicating details about the transition. This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: observedGeneration represents the .metadata.generation that the condition was set based upon. For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: reason contains a programmatic identifier indicating the reason for the condition's last transition. Producers of specific condition types may define expected values and meanings for this field, and whether the values are considered a guaranteed API. The value should be a CamelCase string. This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase. --- Many .condition.type values are consistent across resources like Available, but because arbitrary conditions can be useful (see .node.status.conditions), the ability to deconflict is important. The regex it matches is (dns1123SubdomainFmt/)?(qualifiedNameFmt)
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              endpoints:
+                additionalProperties:
+                  type: string
+                description: Endpoints provides access URLs for components
+                type: object
+              lastReconcileTime:
+                description: LastReconcileTime is the last time the resource was reconciled
+                format: date-time
+                type: string
+              message:
+                description: Message provides additional information about the current phase
+                type: string
+              observedGeneration:
+                description: ObservedGeneration reflects the generation of the most recently observed spec
+                format: int64
+                type: integer
+              phase:
+                description: Phase represents the current phase of the platform
+                enum:
+                - Pending
+                - Installing
+                - Ready
+                - Failed
+                - Upgrading
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

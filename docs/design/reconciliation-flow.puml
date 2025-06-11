@@ -1,0 +1,174 @@
+@startuml Reconciliation Flow
+
+!theme cerulean
+
+title Gunj Operator Reconciliation Flow
+
+start
+
+:Reconciliation Triggered;
+note right
+  Triggers:
+  - Resource create/update
+  - Periodic reconciliation (60s)
+  - Manual trigger
+  - Component health change
+end note
+
+:Fetch ObservabilityPlatform Resource;
+
+if (Resource exists?) then (yes)
+  if (DeletionTimestamp set?) then (yes)
+    :Handle Deletion;
+    :Remove Components in Order|
+    note right
+      Order:
+      1. Alertmanager
+      2. Grafana
+      3. OpenTelemetry Collector
+      4. Tempo
+      5. Loki
+      6. Prometheus
+    end note
+    :Clean up PVCs;
+    :Remove Finalizer;
+    :Update Status;
+    stop
+  else (no)
+    if (Finalizer present?) then (no)
+      :Add Finalizer;
+      :Update Resource;
+    endif
+  endif
+else (no)
+  :Return (Not Found);
+  stop
+endif
+
+if (Platform Paused?) then (yes)
+  :Update Status (Paused);
+  :Skip Reconciliation;
+  stop
+endif
+
+:Validate Specification;
+
+if (Specification Valid?) then (yes)
+  :Determine Current Phase;
+  
+  switch (Phase?)
+  case (Pending/Empty)
+    :Set Phase = Installing;
+    :Initialize Component Status;
+  case (Installing)
+    :Continue Installation;
+  case (Ready)
+    if (Needs Upgrade?) then (yes)
+      :Set Phase = Upgrading;
+    else (no)
+      :Maintain State;
+    endif
+  case (Failed)
+    if (Can Retry?) then (yes)
+      :Set Phase = Installing;
+      :Reset Retry Count;
+    else (no)
+      :Require Manual Intervention;
+      stop
+    endif
+  case (Upgrading)
+    :Continue Upgrade;
+  endswitch
+  
+  :Process Components;
+  
+  partition "Component Processing" {
+    :Process Prometheus;
+    if (Prometheus Enabled?) then (yes)
+      :Deploy/Update Prometheus;
+      :Check Prometheus Health;
+      :Update Component Status;
+    endif
+    
+    :Process Loki;
+    if (Loki Enabled?) then (yes)
+      :Deploy/Update Loki;
+      :Check Loki Health;
+      :Update Component Status;
+    endif
+    
+    :Process Tempo;
+    if (Tempo Enabled?) then (yes)
+      :Deploy/Update Tempo;
+      :Check Tempo Health;
+      :Update Component Status;
+    endif
+    
+    :Process OpenTelemetry;
+    if (OTel Enabled?) then (yes)
+      :Deploy/Update Collector;
+      :Check Collector Health;
+      :Update Component Status;
+    endif
+    
+    :Process Grafana;
+    if (Grafana Enabled?) then (yes)
+      :Deploy/Update Grafana;
+      :Configure Data Sources;
+      :Provision Dashboards;
+      :Check Grafana Health;
+      :Update Component Status;
+    endif
+    
+    :Process Alertmanager;
+    if (Alerting Enabled?) then (yes)
+      :Deploy/Update Alertmanager;
+      :Configure Alert Routes;
+      :Check Alertmanager Health;
+      :Update Component Status;
+    endif
+  }
+  
+  :Aggregate Component Status;
+  
+  if (All Components Healthy?) then (yes)
+    :Set Phase = Ready;
+    :Update Endpoints;
+    :Record Success Event;
+  else (no)
+    if (Retryable Error?) then (yes)
+      :Increment Retry Count;
+      if (Retry Count < Max?) then (yes)
+        :Calculate Backoff;
+        :Requeue with Delay;
+      else (no)
+        :Set Phase = Failed;
+        :Record Failure Event;
+      endif
+    else (no)
+      :Set Phase = Failed;
+      :Record Fatal Error;
+    endif
+  endif
+  
+else (no)
+  :Set Phase = Failed;
+  :Record Validation Error;
+endif
+
+:Update Platform Status;
+note right
+  Status includes:
+  - Phase
+  - Component statuses
+  - Conditions
+  - Endpoints
+  - Last reconcile time
+  - Messages
+end note
+
+:Return Reconciliation Result;
+
+stop
+
+@enduml

@@ -1,0 +1,18 @@
+# Kustomization for RBAC resources
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gunj-system
+
+resources:
+- service_account.yaml
+- role.yaml
+- role_binding.yaml
+- user_roles.yaml
+
+commonLabels:
+  app.kubernetes.io/name: gunj-operator
+  app.kubernetes.io/instance: gunj-operator
+  app.kubernetes.io/component: rbac
+  app.kubernetes.io/part-of: gunj-operator
+  app.kubernetes.io/managed-by: kustomize

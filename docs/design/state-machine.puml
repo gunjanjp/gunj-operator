@@ -1,0 +1,116 @@
+@startuml ObservabilityPlatform State Machine
+
+!define PENDING #FFF5B4
+!define INSTALLING #B4E7CE
+!define READY #90EE90
+!define FAILED #FFB6C1
+!define UPGRADING #87CEEB
+!define DELETING #D3D3D3
+
+title ObservabilityPlatform State Machine
+
+[*] --> Pending : Create Resource
+
+state Pending PENDING {
+  Pending : - Validate specification
+  Pending : - Check prerequisites
+  Pending : - Reserve resources
+  Pending : - Add finalizers
+}
+
+state Installing INSTALLING {
+  Installing : - Deploy Prometheus
+  Installing : - Deploy Loki
+  Installing : - Deploy Tempo
+  Installing : - Deploy OTel Collector
+  Installing : - Deploy Grafana
+  Installing : - Configure integrations
+  Installing : - Verify health
+}
+
+state Ready READY {
+  Ready : - All components healthy
+  Ready : - Endpoints available
+  Ready : - Metrics flowing
+  Ready : - Continuous reconciliation
+}
+
+state Failed FAILED {
+  Failed : - Error details recorded
+  Failed : - Retry count tracked
+  Failed : - Manual intervention needed
+  Failed : - Events generated
+}
+
+state Upgrading UPGRADING {
+  Upgrading : - Version compatibility check
+  Upgrading : - Backup current state
+  Upgrading : - Rolling updates
+  Upgrading : - Data migration
+  Upgrading : - Verify upgrade
+}
+
+state Deleting DELETING {
+  Deleting : - Stop reconciliation
+  Deleting : - Delete Grafana
+  Deleting : - Delete collectors
+  Deleting : - Delete backends
+  Deleting : - Clean up PVCs
+  Deleting : - Remove finalizers
+}
+
+Pending --> Installing : Validation Success
+Pending --> Failed : Validation Failed\n[Non-retryable]
+
+Installing --> Ready : All Components\nHealthy
+Installing --> Failed : Component Error\n[After Max Retries]
+Installing --> Installing : Retry\n[Retryable Error]
+
+Ready --> Upgrading : Version Change\nDetected
+Ready --> Failed : Health Check\nFailed
+Ready --> Deleting : Deletion\nRequested
+Ready --> Ready : Maintain State\n[Reconcile Loop]
+
+Failed --> Installing : Manual Fix\nApplied
+Failed --> Deleting : Deletion\nRequested
+
+Upgrading --> Ready : Upgrade\nSuccessful
+Upgrading --> Failed : Upgrade\nFailed
+Upgrading --> Upgrading : Retry Upgrade\n[Retryable]
+
+Deleting --> [*] : Cleanup\nComplete
+
+note right of Pending
+  Initial state for new platforms.
+  Performs validation and setup.
+end note
+
+note right of Installing
+  Deploys components in order:
+  1. Backends (Prometheus, Loki, Tempo)
+  2. Collectors (OpenTelemetry)
+  3. Frontend (Grafana)
+  4. Alerting (Alertmanager)
+end note
+
+note right of Ready
+  Steady state with continuous
+  reconciliation every 60s.
+end note
+
+note right of Failed
+  Requires manual intervention
+  after max retries exceeded.
+end note
+
+note left of Upgrading
+  Handles version updates with
+  zero-downtime deployments.
+end note
+
+note left of Deleting
+  Removes components in reverse
+  order to handle dependencies.
+end note
+
+@enduml

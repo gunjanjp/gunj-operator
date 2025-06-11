@@ -1,0 +1,269 @@
+# Example ObservabilityPlatform resource
+apiVersion: observability.io/v1alpha1
+kind: ObservabilityPlatform
+metadata:
+  name: production-platform
+  namespace: monitoring
+spec:
+  # Component Configuration
+  components:
+    # Prometheus configuration for metrics
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 2
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 100Gi
+        storageClassName: fast-ssd
+        enableAutoResize: true
+      retention: 30d
+      remoteWrite:
+      - url: https://thanos-receiver.monitoring.svc:19291/api/v1/receive
+        basicAuth:
+          usernameRef:
+            name: thanos-auth
+            key: username
+          passwordRef:
+            name: thanos-auth
+            key: password
+    
+    # Grafana configuration for visualization
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      adminPassword: changeme123!  # Please use a secret in production
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      ingress:
+        enabled: true
+        host: grafana.observability.example.com
+        className: nginx
+        tlsSecret: grafana-tls
+        annotations:
+          cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      persistence:
+        enabled: true
+        size: 10Gi
+      dataSources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-operated:9090
+        isDefault: true
+      - name: Loki
+        type: loki
+        url: http://loki:3100
+      - name: Tempo
+        type: tempo
+        url: http://tempo-query:16686
+    
+    # Loki configuration for logs
+    loki:
+      enabled: true
+      version: "2.9.0"
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      storage:
+        size: 200Gi
+      retention: 168h  # 7 days
+      s3:
+        enabled: true
+        bucketName: observability-loki-logs
+        region: us-east-1
+        secretRef:
+          name: loki-s3-secret
+          namespace: monitoring
+      compactor:
+        enabled: true
+        retentionEnabled: true
+        retentionDeleteDelay: 2h
+    
+    # Tempo configuration for traces
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      storage:
+        size: 50Gi
+      retention: 72h  # 3 days
+      receivers:
+        otlp:
+          enabled: true
+          grpc:
+            endpoint: "0.0.0.0:4317"
+          http:
+            endpoint: "0.0.0.0:4318"
+            cors:
+              allowedOrigins:
+              - "*"
+        jaeger:
+          enabled: true
+          thriftHTTP:
+            endpoint: "0.0.0.0:14268"
+          grpc:
+            endpoint: "0.0.0.0:14250"
+    
+    # OpenTelemetry Collector
+    openTelemetryCollector:
+      enabled: true
+      version: "0.91.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+  
+  # Global configuration
+  global:
+    externalLabels:
+      cluster: production
+      region: us-east-1
+      environment: prod
+    logLevel: info
+    storageClass: fast-ssd
+    nodeSelector:
+      observability: "true"
+    tolerations:
+    - key: observability
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      fsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+  
+  # High Availability
+  highAvailability:
+    enabled: true
+    replicationFactor: 3
+    antiAffinity:
+      type: required
+      topologyKey: kubernetes.io/hostname
+  
+  # Backup Configuration
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retentionDays: 30
+    s3:
+      enabled: true
+      bucketName: observability-backups
+      region: us-east-1
+      secretRef:
+        name: backup-s3-secret
+        namespace: monitoring
+  
+  # Alerting Configuration
+  alerting:
+    alertmanager:
+      enabled: true
+      version: v0.26.0
+      replicas: 3
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "100m"
+        limits:
+          memory: "512Mi"
+          cpu: "200m"
+      config:
+        route:
+          groupBy: ['alertname', 'cluster', 'service']
+          groupWait: 10s
+          groupInterval: 10s
+          repeatInterval: 12h
+          receiver: 'default-receiver'
+          routes:
+          - matchers:
+            - severity="critical"
+            receiver: 'pagerduty-critical'
+          - matchers:
+            - severity="warning"
+            receiver: 'slack-warnings'
+        receivers:
+        - name: 'default-receiver'
+          webhookConfigs:
+          - url: 'http://alertmanager-webhook:8080/webhook'
+            sendResolved: true
+        - name: 'pagerduty-critical'
+          pagerdutyConfigs:
+          - serviceKey: '<service-key>'
+            severity: critical
+        - name: 'slack-warnings'
+          slackConfigs:
+          - apiURL: '<slack-webhook-url>'
+            channel: '#alerts'
+            title: 'Alert: {{ .GroupLabels.alertname }}'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+    
+    # Default alerting rules
+    rules:
+    - alert: PrometheusDown
+      expr: up{job="prometheus"} == 0
+      for: 5m
+      labels:
+        severity: critical
+        component: prometheus
+      annotations:
+        summary: "Prometheus is down in {{ $labels.instance }}"
+        description: "Prometheus has been down for more than 5 minutes."
+    
+    - alert: GrafanaDown
+      expr: up{job="grafana"} == 0
+      for: 5m
+      labels:
+        severity: critical
+        component: grafana
+      annotations:
+        summary: "Grafana is down in {{ $labels.instance }}"
+        description: "Grafana has been down for more than 5 minutes."
+    
+    - alert: HighMemoryUsage
+      expr: |
+        (sum by (pod, namespace) (container_memory_working_set_bytes{namespace="monitoring"}) /
+         sum by (pod, namespace) (container_spec_memory_limit_bytes{namespace="monitoring"}) > 0.9)
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High memory usage in pod {{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is using more than 90% of its memory limit."
+    
+    - alert: PersistentVolumeSpaceLow
+      expr: |
+        (kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes) < 0.1
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Low disk space on PV {{ $labels.persistentvolumeclaim }}"
+        description: "Persistent volume {{ $labels.persistentvolumeclaim }} has less than 10% free space."

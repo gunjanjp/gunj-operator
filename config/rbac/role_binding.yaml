@@ -1,0 +1,18 @@
+# Operator cluster role binding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gunj-operator-rolebinding
+  labels:
+    app.kubernetes.io/name: gunj-operator
+    app.kubernetes.io/instance: gunj-operator
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/managed-by: kustomize
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gunj-operator-role
+subjects:
+- kind: ServiceAccount
+  name: gunj-operator
+  namespace: gunj-system

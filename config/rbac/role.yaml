@@ -1,0 +1,195 @@
+# Operator cluster role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gunj-operator-role
+  labels:
+    app.kubernetes.io/name: gunj-operator
+    app.kubernetes.io/instance: gunj-operator
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/managed-by: kustomize
+rules:
+# ObservabilityPlatform resources
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms/status
+  verbs:
+  - get
+  - patch
+  - update
+
+# Core resources
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - endpoints
+  - events
+  - persistentvolumeclaims
+  - pods
+  - secrets
+  - serviceaccounts
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Apps resources
+- apiGroups:
+  - apps
+  resources:
+  - daemonsets
+  - deployments
+  - replicasets
+  - statefulsets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Batch resources
+- apiGroups:
+  - batch
+  resources:
+  - cronjobs
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Networking resources
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# RBAC resources (for creating component service accounts)
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  - roles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Policy resources
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Monitoring resources (for Prometheus Operator integration)
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - prometheuses
+  - prometheusrules
+  - servicemonitors
+  - podmonitors
+  - alertmanagers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Autoscaling resources
+- apiGroups:
+  - autoscaling
+  resources:
+  - horizontalpodautoscalers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Pod logs (for troubleshooting)
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+  - list
+
+# Pod exec (for debugging - should be removed in production)
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+  - get
+
+# Metrics
+- apiGroups:
+  - metrics.k8s.io
+  resources:
+  - pods
+  - nodes
+  verbs:
+  - get
+  - list
