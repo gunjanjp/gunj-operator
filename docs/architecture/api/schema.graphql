@@ -1,0 +1,1291 @@
+# Gunj Operator GraphQL Schema
+# Version: 1.0.0
+# Generated: 2025-06-12
+
+# ====================
+# SCALAR TYPES
+# ====================
+
+"""ISO 8601 date-time string (e.g., 2025-06-12T10:00:00Z)"""
+scalar DateTime
+
+"""Arbitrary JSON data"""
+scalar JSON
+
+"""Duration in Go format (e.g., '5m', '1h', '30d')"""
+scalar Duration
+
+"""Kubernetes resource quantity (e.g., '100Mi', '2Gi', '1000m')"""
+scalar Quantity
+
+"""Percentage value between 0 and 100"""
+scalar Percentage
+
+"""Valid URL string"""
+scalar URL
+
+"""Semantic version string (e.g., 'v2.48.0', '10.2.0')"""
+scalar SemVer
+
+# ====================
+# ENUM TYPES
+# ====================
+
+"""Platform lifecycle phases"""
+enum PlatformPhase {
+  PENDING
+  INSTALLING
+  READY
+  FAILED
+  UPGRADING
+  TERMINATING
+}
+
+"""Supported observability components"""
+enum ComponentType {
+  PROMETHEUS
+  GRAFANA
+  LOKI
+  TEMPO
+  ALERTMANAGER
+}
+
+"""Component health status"""
+enum ComponentStatus {
+  HEALTHY
+  UNHEALTHY
+  DEGRADED
+  UNKNOWN
+}
+
+"""Platform operation types"""
+enum OperationType {
+  BACKUP
+  RESTORE
+  UPGRADE
+  SCALE
+  RESTART
+}
+
+"""Operation execution status"""
+enum OperationStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+"""Sort order direction"""
+enum SortOrder {
+  ASC
+  DESC
+}
+
+"""Fields available for platform sorting"""
+enum PlatformSortField {
+  NAME
+  NAMESPACE
+  CREATED_AT
+  UPDATED_AT
+  PHASE
+}
+
+"""Kubernetes event types"""
+enum EventType {
+  NORMAL
+  WARNING
+  ERROR
+}
+
+"""Backup compression algorithms"""
+enum CompressionType {
+  NONE
+  GZIP
+  ZSTD
+}
+
+"""Time period for cost analysis"""
+enum CostPeriod {
+  HOUR
+  DAY
+  WEEK
+  MONTH
+  YEAR
+}
+
+"""Types of platform recommendations"""
+enum RecommendationType {
+  RESOURCE_OPTIMIZATION
+  STORAGE_CLEANUP
+  VERSION_UPGRADE
+  SECURITY_UPDATE
+  COST_REDUCTION
+}
+
+"""Metric types for real-time subscriptions"""
+enum MetricType {
+  CPU
+  MEMORY
+  DISK
+  NETWORK
+  REQUEST_RATE
+  ERROR_RATE
+  LATENCY
+}
+
+# ====================
+# DIRECTIVES
+# ====================
+
+"""Requires authentication with specific scopes"""
+directive @auth(requires: [String!]!) on FIELD_DEFINITION
+
+"""Requires user to have specific roles"""
+directive @hasRole(roles: [String!]!) on FIELD_DEFINITION
+
+"""Requires user to have specific permissions"""
+directive @hasPermission(permissions: [String!]!) on FIELD_DEFINITION
+
+"""Marks field as deprecated with reason"""
+directive @deprecated(reason: String!) on FIELD_DEFINITION | ENUM_VALUE
+
+"""Specifies query complexity for rate limiting"""
+directive @complexity(value: Int!) on FIELD_DEFINITION
+
+"""Rate limit configuration for field"""
+directive @rateLimit(max: Int!, window: String!) on FIELD_DEFINITION
+
+# ====================
+# INPUT TYPES
+# ====================
+
+"""Pagination parameters"""
+input PaginationInput {
+  page: Int = 1
+  limit: Int = 20
+  sort: PlatformSortField
+  order: SortOrder = DESC
+}
+
+"""Kubernetes label selector"""
+input LabelSelectorInput {
+  matchLabels: JSON
+  matchExpressions: [LabelSelectorRequirementInput!]
+}
+
+"""Label selector requirement"""
+input LabelSelectorRequirementInput {
+  key: String!
+  operator: String!
+  values: [String!]
+}
+
+"""Time range for metrics queries"""
+input TimeRangeInput {
+  start: DateTime!
+  end: DateTime!
+  step: Duration
+}
+
+"""Container resource requirements"""
+input ResourceRequirementsInput {
+  requests: ResourceListInput
+  limits: ResourceListInput
+}
+
+"""Resource quantities"""
+input ResourceListInput {
+  cpu: Quantity
+  memory: Quantity
+  storage: Quantity
+}
+
+"""Create new platform"""
+input CreatePlatformInput {
+  name: String!
+  namespace: String = "default"
+  labels: JSON
+  annotations: JSON
+  spec: PlatformSpecInput!
+}
+
+"""Platform specification"""
+input PlatformSpecInput {
+  components: ComponentsInput!
+  global: GlobalConfigInput
+  alerting: AlertingConfigInput
+}
+
+"""Components configuration"""
+input ComponentsInput {
+  prometheus: PrometheusSpecInput
+  grafana: GrafanaSpecInput
+  loki: LokiSpecInput
+  tempo: TempoSpecInput
+}
+
+"""Prometheus configuration"""
+input PrometheusSpecInput {
+  enabled: Boolean = true
+  version: SemVer!
+  replicas: Int = 1
+  resources: ResourceRequirementsInput
+  storage: StorageConfigInput
+  retention: Duration = "30d"
+  externalLabels: JSON
+  remoteWrite: [RemoteWriteConfigInput!]
+}
+
+"""Storage configuration"""
+input StorageConfigInput {
+  size: Quantity!
+  storageClassName: String
+  volumeMode: String = "Filesystem"
+}
+
+"""Prometheus remote write configuration"""
+input RemoteWriteConfigInput {
+  url: URL!
+  basicAuth: BasicAuthInput
+  tlsConfig: TLSConfigInput
+  writeRelabelConfigs: JSON
+}
+
+"""Basic authentication credentials"""
+input BasicAuthInput {
+  username: String!
+  passwordSecretRef: SecretKeySelectorInput!
+}
+
+"""Kubernetes secret reference"""
+input SecretKeySelectorInput {
+  name: String!
+  key: String!
+}
+
+"""TLS configuration"""
+input TLSConfigInput {
+  insecureSkipVerify: Boolean = false
+  ca: String
+  cert: String
+  key: String
+}
+
+"""Grafana configuration"""
+input GrafanaSpecInput {
+  enabled: Boolean = true
+  version: SemVer!
+  replicas: Int = 1
+  resources: ResourceRequirementsInput
+  adminPassword: String
+  ingress: IngressConfigInput
+  datasources: [DatasourceConfigInput!]
+}
+
+"""Ingress configuration"""
+input IngressConfigInput {
+  enabled: Boolean = false
+  className: String
+  host: String!
+  path: String = "/"
+  tls: IngressTLSInput
+}
+
+"""Ingress TLS configuration"""
+input IngressTLSInput {
+  enabled: Boolean = false
+  secretName: String
+}
+
+"""Grafana datasource configuration"""
+input DatasourceConfigInput {
+  name: String!
+  type: String!
+  url: URL!
+  access: String = "proxy"
+  isDefault: Boolean = false
+}
+
+"""Loki configuration"""
+input LokiSpecInput {
+  enabled: Boolean = true
+  version: SemVer!
+  replicas: Int = 1
+  resources: ResourceRequirementsInput
+  storage: StorageConfigInput
+  s3: S3ConfigInput
+}
+
+"""S3 storage configuration"""
+input S3ConfigInput {
+  enabled: Boolean = false
+  bucketName: String!
+  region: String!
+  endpoint: URL
+  accessKeyId: String
+  secretAccessKey: String
+}
+
+"""Tempo configuration"""
+input TempoSpecInput {
+  enabled: Boolean = true
+  version: SemVer!
+  replicas: Int = 1
+  resources: ResourceRequirementsInput
+  storage: StorageConfigInput
+}
+
+"""Global platform configuration"""
+input GlobalConfigInput {
+  externalLabels: JSON
+  logLevel: String = "info"
+}
+
+"""Alerting configuration"""
+input AlertingConfigInput {
+  alertmanager: AlertmanagerConfigInput
+}
+
+"""Alertmanager configuration"""
+input AlertmanagerConfigInput {
+  enabled: Boolean = true
+  config: JSON!
+}
+
+"""Update existing platform"""
+input UpdatePlatformInput {
+  labels: JSON
+  annotations: JSON
+  spec: PlatformSpecInput
+}
+
+"""JSON Patch operation"""
+input JSONPatchInput {
+  op: String!
+  path: String!
+  value: JSON
+  from: String
+}
+
+"""Patch platform using JSON Patch"""
+input PatchPlatformInput {
+  patches: [JSONPatchInput!]!
+}
+
+"""Backup operation configuration"""
+input BackupInput {
+  destination: String!
+  includeData: Boolean = true
+  includeConfigs: Boolean = true
+  compression: CompressionType = GZIP
+}
+
+"""Restore operation configuration"""
+input RestoreInput {
+  source: String!
+  overwrite: Boolean = false
+  components: [ComponentType!]
+}
+
+"""Upgrade operation configuration"""
+input UpgradeInput {
+  targetVersion: SemVer!
+  strategy: String = "rolling"
+  backupFirst: Boolean = true
+}
+
+"""Scale component configuration"""
+input ScaleInput {
+  replicas: Int!
+}
+
+"""Webhook configuration"""
+input WebhookInput {
+  name: String!
+  url: URL!
+  events: [String!]!
+  headers: JSON
+  active: Boolean = true
+}
+
+"""User login credentials"""
+input LoginInput {
+  username: String!
+  password: String!
+}
+
+"""Token refresh request"""
+input RefreshTokenInput {
+  refreshToken: String!
+}
+
+"""Log filter for streaming"""
+input LogFilter {
+  level: String
+  component: String
+  search: String
+  since: DateTime
+}
+
+# ====================
+# OBJECT TYPES
+# ====================
+
+"""Kubernetes object metadata"""
+type ObjectMeta {
+  name: String!
+  namespace: String!
+  uid: String!
+  resourceVersion: String!
+  generation: Int!
+  creationTimestamp: DateTime!
+  deletionTimestamp: DateTime
+  labels: JSON
+  annotations: JSON
+  finalizers: [String!]
+}
+
+"""Observability platform resource"""
+type Platform {
+  metadata: ObjectMeta!
+  spec: PlatformSpec!
+  status: PlatformStatus!
+  
+  # Computed fields
+  components: [Component!]!
+  metrics(range: TimeRangeInput!): PlatformMetrics!
+  health: PlatformHealth!
+  events(since: DateTime, limit: Int = 100): [Event!]!
+  operations(status: OperationStatus): [Operation!]!
+  cost(period: CostPeriod = MONTH): CostAnalysis! @hasRole(roles: ["admin", "finance"])
+  recommendations: [Recommendation!]!
+}
+
+"""Platform specification"""
+type PlatformSpec {
+  components: Components!
+  global: GlobalConfig
+  alerting: AlertingConfig
+}
+
+"""Platform runtime status"""
+type PlatformStatus {
+  phase: PlatformPhase!
+  message: String
+  reason: String
+  conditions: [Condition!]!
+  componentStatuses: JSON
+  observedGeneration: Int
+  lastUpdated: DateTime!
+}
+
+"""Kubernetes condition"""
+type Condition {
+  type: String!
+  status: String!
+  reason: String
+  message: String
+  lastTransitionTime: DateTime!
+}
+
+"""Platform components configuration"""
+type Components {
+  prometheus: PrometheusSpec
+  grafana: GrafanaSpec
+  loki: LokiSpec
+  tempo: TempoSpec
+}
+
+"""Base component interface"""
+interface Component {
+  type: ComponentType!
+  enabled: Boolean!
+  version: SemVer!
+  status: ComponentStatus!
+  health: ComponentHealth!
+  resources: ResourceRequirements
+}
+
+"""Prometheus component"""
+type PrometheusComponent implements Component {
+  type: ComponentType!
+  enabled: Boolean!
+  version: SemVer!
+  status: ComponentStatus!
+  health: ComponentHealth!
+  resources: ResourceRequirements
+  spec: PrometheusSpec!
+  metrics: PrometheusMetrics!
+  targets: [ScrapeTarget!]!
+}
+
+"""Grafana component"""
+type GrafanaComponent implements Component {
+  type: ComponentType!
+  enabled: Boolean!
+  version: SemVer!
+  status: ComponentStatus!
+  health: ComponentHealth!
+  resources: ResourceRequirements
+  spec: GrafanaSpec!
+  dashboards: [Dashboard!]!
+  datasources: [Datasource!]!
+}
+
+"""Loki component"""
+type LokiComponent implements Component {
+  type: ComponentType!
+  enabled: Boolean!
+  version: SemVer!
+  status: ComponentStatus!
+  health: ComponentHealth!
+  resources: ResourceRequirements
+  spec: LokiSpec!
+  ingestionRate: Float!
+  storageUsage: Quantity!
+}
+
+"""Tempo component"""
+type TempoComponent implements Component {
+  type: ComponentType!
+  enabled: Boolean!
+  version: SemVer!
+  status: ComponentStatus!
+  health: ComponentHealth!
+  resources: ResourceRequirements
+  spec: TempoSpec!
+  traceCount: Int!
+  spanRate: Float!
+}
+
+# Component specification types
+type PrometheusSpec {
+  enabled: Boolean!
+  version: SemVer!
+  replicas: Int!
+  resources: ResourceRequirements
+  storage: StorageConfig
+  retention: Duration!
+  externalLabels: JSON
+  remoteWrite: [RemoteWriteConfig!]
+}
+
+type GrafanaSpec {
+  enabled: Boolean!
+  version: SemVer!
+  replicas: Int!
+  resources: ResourceRequirements
+  ingress: IngressConfig
+  datasources: [DatasourceConfig!]
+}
+
+type LokiSpec {
+  enabled: Boolean!
+  version: SemVer!
+  replicas: Int!
+  resources: ResourceRequirements
+  storage: StorageConfig
+  s3: S3Config
+}
+
+type TempoSpec {
+  enabled: Boolean!
+  version: SemVer!
+  replicas: Int!
+  resources: ResourceRequirements
+  storage: StorageConfig
+}
+
+# Supporting types
+type ResourceRequirements {
+  requests: ResourceList
+  limits: ResourceList
+}
+
+type ResourceList {
+  cpu: Quantity
+  memory: Quantity
+  storage: Quantity
+}
+
+type StorageConfig {
+  size: Quantity!
+  storageClassName: String
+  volumeMode: String!
+}
+
+type RemoteWriteConfig {
+  url: URL!
+  writeRelabelConfigs: JSON
+}
+
+type IngressConfig {
+  enabled: Boolean!
+  className: String
+  host: String!
+  path: String!
+  tls: IngressTLS
+}
+
+type IngressTLS {
+  enabled: Boolean!
+  secretName: String
+}
+
+type DatasourceConfig {
+  name: String!
+  type: String!
+  url: URL!
+  access: String!
+  isDefault: Boolean!
+}
+
+type S3Config {
+  enabled: Boolean!
+  bucketName: String!
+  region: String!
+  endpoint: URL
+}
+
+type GlobalConfig {
+  externalLabels: JSON
+  logLevel: String!
+}
+
+type AlertingConfig {
+  alertmanager: AlertmanagerConfig
+}
+
+type AlertmanagerConfig {
+  enabled: Boolean!
+  config: JSON!
+}
+
+# Metrics and monitoring types
+type PlatformHealth {
+  overall: ComponentStatus!
+  components: JSON!
+  lastCheck: DateTime!
+}
+
+type ComponentHealth {
+  status: ComponentStatus!
+  ready: Boolean!
+  replicas: ReplicaStatus!
+  lastProbe: DateTime!
+}
+
+type ReplicaStatus {
+  desired: Int!
+  ready: Int!
+  available: Int!
+}
+
+type PlatformMetrics {
+  cpu: TimeSeriesData!
+  memory: TimeSeriesData!
+  storage: TimeSeriesData!
+  requestRate: TimeSeriesData!
+  errorRate: TimeSeriesData!
+  latency: LatencyMetrics!
+}
+
+type TimeSeriesData {
+  timestamps: [DateTime!]!
+  values: [Float!]!
+  unit: String!
+}
+
+type LatencyMetrics {
+  p50: Float!
+  p90: Float!
+  p95: Float!
+  p99: Float!
+}
+
+type PrometheusMetrics {
+  samplesIngested: Float!
+  targetsActive: Int!
+  seriesCount: Int!
+  memoryUsage: Quantity!
+}
+
+type ComponentMetrics {
+  component: ComponentType!
+  cpu: Float!
+  memory: Float!
+  disk: Float!
+  timestamp: DateTime!
+}
+
+# Event and operation types
+type Event {
+  type: EventType!
+  reason: String!
+  message: String!
+  source: EventSource!
+  firstTimestamp: DateTime!
+  lastTimestamp: DateTime!
+  count: Int!
+}
+
+type EventSource {
+  component: String
+  host: String
+}
+
+type Operation {
+  id: String!
+  type: OperationType!
+  status: OperationStatus!
+  platform: Platform!
+  startedAt: DateTime!
+  completedAt: DateTime
+  error: String
+  details: JSON
+}
+
+# Cost and recommendations
+type CostAnalysis {
+  period: CostPeriod!
+  total: Float!
+  breakdown: CostBreakdown!
+  trend: CostTrend!
+  recommendations: [CostRecommendation!]!
+}
+
+type CostBreakdown {
+  byComponent: JSON!
+  byResource: JSON!
+  byNamespace: JSON!
+}
+
+type CostTrend {
+  current: Float!
+  previous: Float!
+  change: Float!
+  changePercent: Percentage!
+}
+
+type CostRecommendation {
+  type: RecommendationType!
+  description: String!
+  potentialSavings: Float!
+  effort: String!
+  risk: String!
+}
+
+type Recommendation {
+  id: String!
+  type: RecommendationType!
+  priority: String!
+  title: String!
+  description: String!
+  impact: String!
+  effort: String!
+  automated: Boolean!
+}
+
+# Monitoring resources
+type Dashboard {
+  uid: String!
+  title: String!
+  tags: [String!]!
+  panels: [Panel!]!
+  variables: [Variable!]!
+}
+
+type Panel {
+  id: Int!
+  title: String!
+  type: String!
+  gridPos: GridPos!
+  targets: [Target!]!
+}
+
+type GridPos {
+  x: Int!
+  y: Int!
+  w: Int!
+  h: Int!
+}
+
+type Target {
+  refId: String!
+  expr: String!
+  datasource: String!
+}
+
+type Variable {
+  name: String!
+  type: String!
+  query: String!
+  current: JSON
+}
+
+type Datasource {
+  uid: String!
+  name: String!
+  type: String!
+  url: URL!
+  access: String!
+  isDefault: Boolean!
+  status: DatasourceStatus!
+}
+
+type DatasourceStatus {
+  connected: Boolean!
+  message: String
+  lastCheck: DateTime!
+}
+
+type ScrapeTarget {
+  endpoint: String!
+  state: String!
+  labels: JSON!
+  lastScrape: DateTime!
+  lastError: String
+}
+
+# User and authentication
+type User {
+  id: String!
+  username: String!
+  email: String!
+  roles: [String!]!
+  permissions: [String!]!
+  createdAt: DateTime!
+  lastLogin: DateTime
+}
+
+type AuthResponse {
+  token: String!
+  expiresIn: Int!
+  refreshToken: String!
+  user: User!
+}
+
+# Webhook management
+type Webhook {
+  id: String!
+  name: String!
+  url: URL!
+  events: [String!]!
+  headers: JSON
+  active: Boolean!
+  createdAt: DateTime!
+  lastTriggered: DateTime
+  failureCount: Int!
+}
+
+# System information
+type VersionInfo {
+  version: SemVer!
+  gitCommit: String!
+  buildDate: DateTime!
+  goVersion: String!
+  platform: String!
+  features: [String!]!
+}
+
+type SystemHealth {
+  status: String!
+  checks: JSON!
+  timestamp: DateTime!
+}
+
+# Validation
+type ValidationResult {
+  valid: Boolean!
+  errors: [ValidationError!]!
+  warnings: [ValidationWarning!]!
+}
+
+type ValidationError {
+  field: String!
+  message: String!
+  code: String!
+}
+
+type ValidationWarning {
+  field: String!
+  message: String!
+  code: String!
+}
+
+# Pagination
+type PageInfo {
+  page: Int!
+  limit: Int!
+  total: Int!
+  pages: Int!
+  hasNext: Boolean!
+  hasPrev: Boolean!
+}
+
+type PlatformConnection {
+  items: [Platform!]!
+  pageInfo: PageInfo!
+}
+
+type PlatformEdge {
+  cursor: String!
+  node: Platform!
+}
+
+# Operation results
+type ApplyRecommendationResult {
+  success: Boolean!
+  changes: [Change!]!
+  error: String
+}
+
+type Change {
+  resource: String!
+  field: String!
+  oldValue: JSON
+  newValue: JSON
+}
+
+type WebhookTestResult {
+  success: Boolean!
+  statusCode: Int
+  response: String
+  error: String
+  duration: Int!
+}
+
+# Real-time updates
+type MetricUpdate {
+  type: MetricType!
+  timestamp: DateTime!
+  value: Float!
+  labels: JSON!
+}
+
+type LogEntry {
+  timestamp: DateTime!
+  level: String!
+  component: String!
+  message: String!
+  labels: JSON!
+}
+
+type Alert {
+  fingerprint: String!
+  status: String!
+  labels: JSON!
+  annotations: JSON!
+  startsAt: DateTime!
+  endsAt: DateTime
+  generatorURL: URL!
+}
+
+# ====================
+# ROOT TYPES
+# ====================
+
+"""Root query type"""
+type Query {
+  # Platform queries
+  """List platforms with optional filtering and pagination"""
+  platforms(
+    namespace: String
+    labels: LabelSelectorInput
+    pagination: PaginationInput
+  ): PlatformConnection! @complexity(value: 10)
+  
+  """Get a specific platform by name"""
+  platform(name: String!, namespace: String = "default"): Platform
+  
+  # Component queries
+  """List all components for a platform"""
+  components(
+    platformName: String!
+    namespace: String = "default"
+  ): [Component!]!
+  
+  """Get a specific component"""
+  component(
+    platformName: String!
+    componentType: ComponentType!
+    namespace: String = "default"
+  ): Component
+  
+  # Metrics queries
+  """Get platform metrics for a time range"""
+  platformMetrics(
+    name: String!
+    namespace: String = "default"
+    range: TimeRangeInput!
+  ): PlatformMetrics! @complexity(value: 50)
+  
+  # Health queries
+  """Get platform health status"""
+  platformHealth(
+    name: String!
+    namespace: String = "default"
+  ): PlatformHealth!
+  
+  # Events queries
+  """List platform events"""
+  events(
+    platformName: String
+    namespace: String
+    type: EventType
+    since: DateTime
+    limit: Int = 100
+  ): [Event!]!
+  
+  # Operations queries
+  """List platform operations"""
+  operations(
+    platformName: String
+    namespace: String
+    type: OperationType
+    status: OperationStatus
+    limit: Int = 50
+  ): [Operation!]!
+  
+  """Get a specific operation"""
+  operation(id: String!): Operation
+  
+  # Cost queries
+  """Get cost analysis for a platform"""
+  costAnalysis(
+    platformName: String!
+    namespace: String = "default"
+    period: CostPeriod = MONTH
+  ): CostAnalysis! @hasRole(roles: ["admin", "finance"])
+  
+  # Recommendations
+  """Get platform recommendations"""
+  recommendations(
+    platformName: String!
+    namespace: String = "default"
+    type: RecommendationType
+  ): [Recommendation!]!
+  
+  # User queries
+  """Get current authenticated user"""
+  currentUser: User @auth(requires: ["read:user"])
+  
+  """List all users (admin only)"""
+  users(role: String): [User!]! @hasRole(roles: ["admin"])
+  
+  # Webhook queries
+  """List webhooks"""
+  webhooks(active: Boolean): [Webhook!]!
+  
+  """Get a specific webhook"""
+  webhook(id: String!): Webhook
+  
+  # System queries
+  """Get operator version information"""
+  version: VersionInfo!
+  
+  """Get system health status"""
+  health: SystemHealth!
+  
+  # Configuration validation
+  """Validate platform configuration"""
+  validatePlatformConfig(input: CreatePlatformInput!): ValidationResult!
+}
+
+"""Root mutation type"""
+type Mutation {
+  # Platform mutations
+  """Create a new platform"""
+  createPlatform(input: CreatePlatformInput!): Platform! 
+    @hasPermission(permissions: ["platform:create"])
+  
+  """Update an existing platform"""
+  updatePlatform(
+    name: String!
+    namespace: String = "default"
+    input: UpdatePlatformInput!
+  ): Platform! @hasPermission(permissions: ["platform:update"])
+  
+  """Patch a platform using JSON Patch"""
+  patchPlatform(
+    name: String!
+    namespace: String = "default"
+    input: PatchPlatformInput!
+  ): Platform! @hasPermission(permissions: ["platform:update"])
+  
+  """Delete a platform"""
+  deletePlatform(
+    name: String!
+    namespace: String = "default"
+    cascade: Boolean = true
+    gracePeriod: Int = 30
+  ): Boolean! @hasPermission(permissions: ["platform:delete"])
+  
+  # Component mutations
+  """Enable a component"""
+  enableComponent(
+    platformName: String!
+    componentType: ComponentType!
+    namespace: String = "default"
+  ): Component! @hasPermission(permissions: ["component:update"])
+  
+  """Disable a component"""
+  disableComponent(
+    platformName: String!
+    componentType: ComponentType!
+    namespace: String = "default"
+  ): Component! @hasPermission(permissions: ["component:update"])
+  
+  """Update component configuration"""
+  updateComponent(
+    platformName: String!
+    componentType: ComponentType!
+    namespace: String = "default"
+    spec: JSON!
+  ): Component! @hasPermission(permissions: ["component:update"])
+  
+  # Operation mutations
+  """Start a platform backup"""
+  backupPlatform(
+    name: String!
+    namespace: String = "default"
+    input: BackupInput!
+  ): Operation! @hasPermission(permissions: ["platform:backup"])
+  
+  """Restore a platform from backup"""
+  restorePlatform(
+    name: String!
+    namespace: String = "default"
+    input: RestoreInput!
+  ): Operation! @hasPermission(permissions: ["platform:restore"])
+  
+  """Upgrade a platform"""
+  upgradePlatform(
+    name: String!
+    namespace: String = "default"
+    input: UpgradeInput!
+  ): Operation! @hasPermission(permissions: ["platform:upgrade"])
+  
+  """Scale a component"""
+  scaleComponent(
+    platformName: String!
+    componentType: ComponentType!
+    namespace: String = "default"
+    input: ScaleInput!
+  ): Component! @hasPermission(permissions: ["component:scale"])
+  
+  """Cancel a running operation"""
+  cancelOperation(id: String!): Operation! 
+    @hasPermission(permissions: ["operation:cancel"])
+  
+  # Recommendation mutations
+  """Apply a recommendation"""
+  applyRecommendation(
+    recommendationId: String!
+    dryRun: Boolean = false
+  ): ApplyRecommendationResult! 
+    @hasPermission(permissions: ["recommendation:apply"])
+  
+  """Dismiss a recommendation"""
+  dismissRecommendation(
+    recommendationId: String!
+    reason: String
+  ): Recommendation!
+  
+  # Authentication mutations
+  """User login"""
+  login(input: LoginInput!): AuthResponse!
+  
+  """Refresh authentication token"""
+  refreshToken(input: RefreshTokenInput!): AuthResponse!
+  
+  """User logout"""
+  logout: Boolean! @auth(requires: ["authenticated"])
+  
+  # Webhook mutations
+  """Create a new webhook"""
+  createWebhook(input: WebhookInput!): Webhook! 
+    @hasPermission(permissions: ["webhook:create"])
+  
+  """Update a webhook"""
+  updateWebhook(id: String!, input: WebhookInput!): Webhook! 
+    @hasPermission(permissions: ["webhook:update"])
+  
+  """Delete a webhook"""
+  deleteWebhook(id: String!): Boolean! 
+    @hasPermission(permissions: ["webhook:delete"])
+  
+  """Test a webhook"""
+  testWebhook(id: String!): WebhookTestResult! 
+    @hasPermission(permissions: ["webhook:test"])
+}
+
+"""Root subscription type"""
+type Subscription {
+  # Platform subscriptions
+  """Subscribe to platform status updates"""
+  platformStatus(
+    name: String!
+    namespace: String = "default"
+  ): PlatformStatus! @auth(requires: ["platform:watch"])
+  
+  """Subscribe to platform events"""
+  platformEvents(
+    name: String!
+    namespace: String = "default"
+    types: [EventType!]
+  ): Event! @auth(requires: ["platform:watch"])
+  
+  # Component subscriptions
+  """Subscribe to component status updates"""
+  componentStatus(
+    platformName: String!
+    componentType: ComponentType!
+    namespace: String = "default"
+  ): ComponentStatus! @auth(requires: ["component:watch"])
+  
+  """Subscribe to component metrics"""
+  componentMetrics(
+    platformName: String!
+    componentType: ComponentType!
+    namespace: String = "default"
+  ): ComponentMetrics! @auth(requires: ["metrics:watch"])
+  
+  # Operation subscriptions
+  """Subscribe to operation status updates"""
+  operationStatus(id: String!): Operation! 
+    @auth(requires: ["operation:watch"])
+  
+  # Real-time metrics
+  """Subscribe to real-time metrics"""
+  metrics(
+    platformName: String!
+    namespace: String = "default"
+    metricTypes: [MetricType!]
+  ): MetricUpdate! @auth(requires: ["metrics:watch"])
+  
+  # Log streaming
+  """Subscribe to log stream"""
+  logs(
+    platformName: String!
+    componentType: ComponentType!
+    namespace: String = "default"
+    filter: LogFilter
+  ): LogEntry! @auth(requires: ["logs:watch"])
+  
+  # Alert streaming
+  """Subscribe to alerts"""
+  alerts(
+    platformName: String
+    namespace: String
+    severity: [String!]
+  ): Alert! @auth(requires: ["alerts:watch"])
+}
+
+# Schema entry point
+schema {
+  query: Query
+  mutation: Mutation
+  subscription: Subscription
+}

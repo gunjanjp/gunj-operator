@@ -1,0 +1,1606 @@
+openapi: 3.0.3
+info:
+  title: Gunj Operator API
+  description: |
+    Enterprise Observability Platform Operator API
+    
+    The Gunj Operator API provides comprehensive management capabilities for observability platforms
+    running on Kubernetes. It enables programmatic control over Prometheus, Grafana, Loki, and Tempo
+    deployments with enterprise features like multi-tenancy, cost optimization, and GitOps integration.
+    
+    ## Authentication
+    
+    The API uses JWT tokens for authentication. Obtain a token via the `/auth/login` endpoint
+    or through OIDC/SAML providers.
+    
+    ## Rate Limiting
+    
+    - Default: 100 requests per minute per user
+    - Burst: 200 requests
+    - Headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+    
+    ## Versioning
+    
+    This API follows semantic versioning. The current version is v1.
+    Breaking changes will result in a new major version (v2).
+    
+  version: 1.0.0
+  contact:
+    name: Gunj Operator Support
+    email: gunjanjp@gmail.com
+    url: https://github.com/gunjanjp/gunj-operator
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+    
+servers:
+  - url: https://api.gunj-operator.yourdomain.com/api/v1
+    description: Production API
+  - url: https://staging-api.gunj-operator.yourdomain.com/api/v1
+    description: Staging API
+  - url: http://localhost:8080/api/v1
+    description: Local development
+
+tags:
+  - name: Authentication
+    description: Authentication and authorization endpoints
+  - name: Platforms
+    description: ObservabilityPlatform management
+  - name: Components
+    description: Individual component management
+  - name: Operations
+    description: Platform operations (backup, restore, upgrade)
+  - name: Metrics
+    description: Platform metrics and monitoring
+  - name: Health
+    description: Health and readiness checks
+  - name: Admin
+    description: Administrative operations
+
+security:
+  - bearerAuth: []
+
+paths:
+  # Authentication endpoints
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Login with credentials
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Successful authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+          
+  /auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh authentication token
+      operationId: refreshToken
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+          
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: Logout and invalidate token
+      operationId: logout
+      responses:
+        '204':
+          description: Successfully logged out
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # Platform management endpoints
+  /platforms:
+    get:
+      tags:
+        - Platforms
+      summary: List all observability platforms
+      operationId: listPlatforms
+      parameters:
+        - $ref: '#/components/parameters/namespace'
+        - $ref: '#/components/parameters/labelSelector'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/limit'
+        - $ref: '#/components/parameters/sortBy'
+        - $ref: '#/components/parameters/sortOrder'
+      responses:
+        '200':
+          description: List of platforms
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformList'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+          
+    post:
+      tags:
+        - Platforms
+      summary: Create a new observability platform
+      operationId: createPlatform
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformCreateRequest'
+      responses:
+        '201':
+          description: Platform created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Platform'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+          
+  /platforms/{name}:
+    get:
+      tags:
+        - Platforms
+      summary: Get a specific platform
+      operationId: getPlatform
+      parameters:
+        - $ref: '#/components/parameters/platformName'
+        - $ref: '#/components/parameters/namespace'
+      responses:
+        '200':
+          description: Platform details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Platform'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+          
+    put:
+      tags:
+        - Platforms
+      summary: Update an existing platform
+      operationId: updatePlatform
+      parameters:
+        - $ref: '#/components/parameters/platformName'
+        - $ref: '#/components/parameters/namespace'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformUpdateRequest'
+      responses:
+        '200':
+          description: Platform updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Platform'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          $ref: '#/components/responses/ConflictError'
+          
+    patch:
+      tags:
+        - Platforms
+      summary: Partially update a platform
+      operationId: patchPlatform
+      parameters:
+        - $ref: '#/components/parameters/platformName'
+        - $ref: '#/components/parameters/namespace'
+      requestBody:
+        required: true
+        content:
+          application/json-patch+json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/JSONPatchOperation'
+      responses:
+        '200':
+          description: Platform patched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Platform'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+          
+    delete:
+      tags:
+        - Platforms
+      summary: Delete a platform
+      operationId: deletePlatform
+      parameters:
+        - $ref: '#/components/parameters/platformName'
+        - $ref: '#/components/parameters/namespace'
+        - name: cascade
+          in: query
+          description: Delete all dependent resources
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '204':
+          description: Platform deleted successfully
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # Component management
+  /platforms/{name}/components:
+    get:
+      tags:
+        - Components
+      summary: List all components of a platform
+      operationId: listComponents
+      parameters:
+        - $ref: '#/components/parameters/platformName'
+        - $ref: '#/components/parameters/namespace'
+      responses:
+        '200':
+          description: List of components
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComponentList'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+          
+  /platforms/{name}/components/{component}:
+    put:
+      tags:
+        - Components
+      summary: Update a specific component configuration
+      operationId: updateComponent
+      parameters:
+        - $ref: '#/components/parameters/platformName'
+        - $ref: '#/components/parameters/namespace'
+        - $ref: '#/components/parameters/componentName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComponentConfig'
+      responses:
+        '200':
+          description: Component updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Component'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # Operations
+  /platforms/{name}/operations/backup:
+    post:
+      tags:
+        - Operations
+      summary: Create a backup of the platform
+      operationId: backupPlatform
+      parameters:
+        - $ref: '#/components/parameters/platformName'
+        - $ref: '#/components/parameters/namespace'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BackupRequest'
+      responses:
+        '202':
+          description: Backup initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+          
+  /platforms/{name}/operations/restore:
+    post:
+      tags:
+        - Operations
+      summary: Restore platform from backup
+      operationId: restorePlatform
+      parameters:
+        - $ref: '#/components/parameters/platformName'
+        - $ref: '#/components/parameters/namespace'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreRequest'
+      responses:
+        '202':
+          description: Restore initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+          
+  /platforms/{name}/operations/upgrade:
+    post:
+      tags:
+        - Operations
+      summary: Upgrade platform components
+      operationId: upgradePlatform
+      parameters:
+        - $ref: '#/components/parameters/platformName'
+        - $ref: '#/components/parameters/namespace'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpgradeRequest'
+      responses:
+        '202':
+          description: Upgrade initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # Metrics and monitoring
+  /platforms/{name}/metrics:
+    get:
+      tags:
+        - Metrics
+      summary: Get platform metrics
+      operationId: getPlatformMetrics
+      parameters:
+        - $ref: '#/components/parameters/platformName'
+        - $ref: '#/components/parameters/namespace'
+        - name: metric
+          in: query
+          description: Specific metric to retrieve
+          schema:
+            type: string
+            enum: [cpu, memory, storage, availability, cost]
+        - name: timeRange
+          in: query
+          description: Time range for metrics
+          schema:
+            type: string
+            default: 1h
+            enum: [5m, 15m, 1h, 6h, 24h, 7d, 30d]
+        - name: resolution
+          in: query
+          description: Data point resolution
+          schema:
+            type: string
+            default: auto
+            enum: [auto, 30s, 1m, 5m, 1h]
+      responses:
+        '200':
+          description: Platform metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /platforms/{name}/health:
+    get:
+      tags:
+        - Health
+      summary: Get platform health status
+      operationId: getPlatformHealth
+      parameters:
+        - $ref: '#/components/parameters/platformName'
+        - $ref: '#/components/parameters/namespace'
+      responses:
+        '200':
+          description: Platform health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # Health check endpoints
+  /health:
+    get:
+      tags:
+        - Health
+      summary: API health check
+      operationId: healthCheck
+      security: []
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: API is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+                
+  /ready:
+    get:
+      tags:
+        - Health
+      summary: API readiness check
+      operationId: readinessCheck
+      security: []
+      responses:
+        '200':
+          description: API is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+        '503':
+          description: API is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /auth/login endpoint
+
+  parameters:
+    platformName:
+      name: name
+      in: path
+      required: true
+      description: Name of the platform
+      schema:
+        type: string
+        pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+        minLength: 1
+        maxLength: 63
+        
+    namespace:
+      name: namespace
+      in: query
+      description: Kubernetes namespace
+      schema:
+        type: string
+        default: default
+        pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+        
+    componentName:
+      name: component
+      in: path
+      required: true
+      description: Component name
+      schema:
+        type: string
+        enum: [prometheus, grafana, loki, tempo, alertmanager]
+        
+    labelSelector:
+      name: labelSelector
+      in: query
+      description: Kubernetes label selector
+      schema:
+        type: string
+        example: 'environment=production,team=platform'
+        
+    page:
+      name: page
+      in: query
+      description: Page number for pagination
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+        
+    limit:
+      name: limit
+      in: query
+      description: Number of items per page
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+        
+    sortBy:
+      name: sortBy
+      in: query
+      description: Field to sort by
+      schema:
+        type: string
+        enum: [name, namespace, createdAt, updatedAt, phase]
+        default: name
+        
+    sortOrder:
+      name: sortOrder
+      in: query
+      description: Sort order
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
+
+  schemas:
+    # Authentication schemas
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 255
+          example: admin
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: SecurePassword123!
+          
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT authentication token
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        expiresIn:
+          type: integer
+          description: Token expiration time in seconds
+          example: 3600
+        refreshToken:
+          type: string
+          description: Refresh token for obtaining new access tokens
+          example: 7f3a4c89-1234-5678-9abc-def012345678
+        tokenType:
+          type: string
+          description: Token type
+          example: Bearer
+          default: Bearer
+        user:
+          $ref: '#/components/schemas/User'
+          
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 123e4567-e89b-12d3-a456-426614174000
+        username:
+          type: string
+          example: admin
+        email:
+          type: string
+          format: email
+          example: admin@example.com
+        roles:
+          type: array
+          items:
+            type: string
+          example: [admin, platform-operator]
+        groups:
+          type: array
+          items:
+            type: string
+          example: [platform-team, sre]
+
+    # Platform schemas
+    Platform:
+      type: object
+      properties:
+        apiVersion:
+          type: string
+          description: API version
+          example: observability.io/v1beta1
+        kind:
+          type: string
+          description: Resource kind
+          example: ObservabilityPlatform
+        metadata:
+          $ref: '#/components/schemas/ObjectMeta'
+        spec:
+          $ref: '#/components/schemas/PlatformSpec'
+        status:
+          $ref: '#/components/schemas/PlatformStatus'
+          
+    ObjectMeta:
+      type: object
+      properties:
+        name:
+          type: string
+          example: production-platform
+        namespace:
+          type: string
+          example: monitoring
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            environment: production
+            team: platform
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            description: Production observability platform
+        uid:
+          type: string
+          format: uuid
+          readOnly: true
+          example: 550e8400-e29b-41d4-a716-446655440000
+        resourceVersion:
+          type: string
+          readOnly: true
+          example: "12345"
+        generation:
+          type: integer
+          readOnly: true
+          example: 2
+        creationTimestamp:
+          type: string
+          format: date-time
+          readOnly: true
+          example: 2025-06-12T10:30:00Z
+          
+    PlatformSpec:
+      type: object
+      required:
+        - components
+      properties:
+        components:
+          $ref: '#/components/schemas/Components'
+        global:
+          $ref: '#/components/schemas/GlobalConfig'
+        alerting:
+          $ref: '#/components/schemas/AlertingConfig'
+        backup:
+          $ref: '#/components/schemas/BackupConfig'
+        highAvailability:
+          type: boolean
+          default: false
+          description: Enable high availability mode
+          
+    Components:
+      type: object
+      properties:
+        prometheus:
+          $ref: '#/components/schemas/PrometheusConfig'
+        grafana:
+          $ref: '#/components/schemas/GrafanaConfig'
+        loki:
+          $ref: '#/components/schemas/LokiConfig'
+        tempo:
+          $ref: '#/components/schemas/TempoConfig'
+          
+    PrometheusConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: true
+        version:
+          type: string
+          pattern: '^v?\d+\.\d+\.\d+$'
+          example: v2.48.0
+        replicas:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 1
+        resources:
+          $ref: '#/components/schemas/ResourceRequirements'
+        storage:
+          $ref: '#/components/schemas/StorageConfig'
+        retention:
+          type: string
+          pattern: '^\d+[hdwmy]$'
+          default: 30d
+          example: 30d
+        externalLabels:
+          type: object
+          additionalProperties:
+            type: string
+        remoteWrite:
+          type: array
+          items:
+            $ref: '#/components/schemas/RemoteWriteConfig'
+            
+    GrafanaConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: true
+        version:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+          example: "10.2.0"
+        replicas:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 1
+        resources:
+          $ref: '#/components/schemas/ResourceRequirements'
+        adminPassword:
+          type: string
+          format: password
+          writeOnly: true
+        ingress:
+          $ref: '#/components/schemas/IngressConfig'
+        persistence:
+          type: boolean
+          default: true
+        datasources:
+          type: array
+          items:
+            $ref: '#/components/schemas/GrafanaDatasource'
+            
+    LokiConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        version:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+          example: "2.9.0"
+        replicas:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 1
+        resources:
+          $ref: '#/components/schemas/ResourceRequirements'
+        storage:
+          $ref: '#/components/schemas/StorageConfig'
+        s3:
+          $ref: '#/components/schemas/S3Config'
+          
+    TempoConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        version:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+          example: "2.3.0"
+        replicas:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 1
+        resources:
+          $ref: '#/components/schemas/ResourceRequirements'
+        storage:
+          $ref: '#/components/schemas/StorageConfig'
+          
+    ResourceRequirements:
+      type: object
+      properties:
+        requests:
+          type: object
+          properties:
+            cpu:
+              type: string
+              pattern: '^\d+(\.\d+)?[m]?$'
+              example: "1"
+            memory:
+              type: string
+              pattern: '^\d+(\.\d+)?[EPTGMK]i?$'
+              example: "4Gi"
+        limits:
+          type: object
+          properties:
+            cpu:
+              type: string
+              pattern: '^\d+(\.\d+)?[m]?$'
+              example: "2"
+            memory:
+              type: string
+              pattern: '^\d+(\.\d+)?[EPTGMK]i?$'
+              example: "8Gi"
+              
+    StorageConfig:
+      type: object
+      properties:
+        size:
+          type: string
+          pattern: '^\d+(\.\d+)?[EPTGMK]i?$'
+          example: "100Gi"
+        storageClassName:
+          type: string
+          example: "fast-ssd"
+        volumeMode:
+          type: string
+          enum: [Filesystem, Block]
+          default: Filesystem
+          
+    IngressConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        host:
+          type: string
+          format: hostname
+          example: grafana.example.com
+        tlsSecret:
+          type: string
+          example: grafana-tls
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+            
+    GlobalConfig:
+      type: object
+      properties:
+        externalLabels:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            cluster: production
+            region: us-east-1
+        logLevel:
+          type: string
+          enum: [debug, info, warn, error]
+          default: info
+          
+    AlertingConfig:
+      type: object
+      properties:
+        alertmanager:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+              default: true
+            config:
+              type: object
+              description: Alertmanager configuration
+              
+    BackupConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        schedule:
+          type: string
+          description: Cron schedule for backups
+          example: "0 2 * * *"
+        retention:
+          type: integer
+          description: Number of backups to retain
+          default: 7
+        destination:
+          type: string
+          description: Backup destination URL
+          example: "s3://backups/gunj-operator"
+          
+    S3Config:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        bucketName:
+          type: string
+          example: my-loki-logs
+        region:
+          type: string
+          example: us-east-1
+        endpoint:
+          type: string
+          format: uri
+          example: https://s3.amazonaws.com
+        accessKeyId:
+          type: string
+          writeOnly: true
+        secretAccessKey:
+          type: string
+          format: password
+          writeOnly: true
+          
+    RemoteWriteConfig:
+      type: object
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          format: uri
+          example: https://prometheus-remote.example.com/api/v1/write
+        remoteTimeout:
+          type: string
+          default: 30s
+          example: 30s
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+            
+    GrafanaDatasource:
+      type: object
+      required:
+        - name
+        - type
+        - url
+      properties:
+        name:
+          type: string
+          example: Prometheus
+        type:
+          type: string
+          enum: [prometheus, loki, tempo, elasticsearch, mysql, postgres]
+          example: prometheus
+        url:
+          type: string
+          format: uri
+          example: http://prometheus:9090
+        isDefault:
+          type: boolean
+          default: false
+          
+    PlatformStatus:
+      type: object
+      properties:
+        phase:
+          type: string
+          enum: [Pending, Installing, Ready, Failed, Upgrading, Deleting]
+          example: Ready
+        message:
+          type: string
+          example: All components are running
+        reason:
+          type: string
+          example: ReconciliationSuccessful
+        conditions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Condition'
+        components:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ComponentStatus'
+        observedGeneration:
+          type: integer
+          example: 2
+        lastReconcileTime:
+          type: string
+          format: date-time
+          example: 2025-06-12T10:35:00Z
+          
+    Condition:
+      type: object
+      properties:
+        type:
+          type: string
+          example: Ready
+        status:
+          type: string
+          enum: [True, False, Unknown]
+          example: True
+        lastTransitionTime:
+          type: string
+          format: date-time
+          example: 2025-06-12T10:30:00Z
+        reason:
+          type: string
+          example: AllComponentsReady
+        message:
+          type: string
+          example: All components are successfully deployed and running
+          
+    ComponentStatus:
+      type: object
+      properties:
+        ready:
+          type: boolean
+          example: true
+        version:
+          type: string
+          example: v2.48.0
+        replicas:
+          type: integer
+          example: 3
+        readyReplicas:
+          type: integer
+          example: 3
+        endpoint:
+          type: string
+          format: uri
+          example: http://prometheus:9090
+          
+    # Request/Response schemas
+    PlatformCreateRequest:
+      type: object
+      required:
+        - name
+        - spec
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+          minLength: 1
+          maxLength: 63
+          example: production-platform
+        namespace:
+          type: string
+          pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+          default: default
+          example: monitoring
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            environment: production
+            team: platform
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+        spec:
+          $ref: '#/components/schemas/PlatformSpec'
+          
+    PlatformUpdateRequest:
+      type: object
+      required:
+        - spec
+      properties:
+        spec:
+          $ref: '#/components/schemas/PlatformSpec'
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+            
+    PlatformList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Platform'
+        metadata:
+          $ref: '#/components/schemas/ListMeta'
+          
+    ListMeta:
+      type: object
+      properties:
+        total:
+          type: integer
+          example: 42
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        hasMore:
+          type: boolean
+          example: true
+          
+    Component:
+      type: object
+      properties:
+        name:
+          type: string
+          enum: [prometheus, grafana, loki, tempo]
+          example: prometheus
+        config:
+          $ref: '#/components/schemas/ComponentConfig'
+        status:
+          $ref: '#/components/schemas/ComponentStatus'
+          
+    ComponentConfig:
+      oneOf:
+        - $ref: '#/components/schemas/PrometheusConfig'
+        - $ref: '#/components/schemas/GrafanaConfig'
+        - $ref: '#/components/schemas/LokiConfig'
+        - $ref: '#/components/schemas/TempoConfig'
+      discriminator:
+        propertyName: componentType
+        
+    ComponentList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Component'
+            
+    # Operations schemas
+    BackupRequest:
+      type: object
+      required:
+        - destination
+      properties:
+        destination:
+          type: string
+          description: Backup destination URL
+          example: s3://backups/production-2025-06-12
+        components:
+          type: array
+          description: Specific components to backup (empty for all)
+          items:
+            type: string
+            enum: [prometheus, grafana, loki, tempo]
+        includeSecrets:
+          type: boolean
+          default: true
+          description: Include sensitive data in backup
+          
+    RestoreRequest:
+      type: object
+      required:
+        - source
+      properties:
+        source:
+          type: string
+          description: Backup source URL
+          example: s3://backups/production-2025-06-12
+        components:
+          type: array
+          description: Specific components to restore (empty for all)
+          items:
+            type: string
+            enum: [prometheus, grafana, loki, tempo]
+        overwrite:
+          type: boolean
+          default: false
+          description: Overwrite existing data
+          
+    UpgradeRequest:
+      type: object
+      properties:
+        targetVersions:
+          type: object
+          description: Target versions for components
+          properties:
+            prometheus:
+              type: string
+              pattern: '^v?\d+\.\d+\.\d+$'
+            grafana:
+              type: string
+              pattern: '^\d+\.\d+\.\d+$'
+            loki:
+              type: string
+              pattern: '^\d+\.\d+\.\d+$'
+            tempo:
+              type: string
+              pattern: '^\d+\.\d+\.\d+$'
+        strategy:
+          type: string
+          enum: [RollingUpdate, Recreate, BlueGreen]
+          default: RollingUpdate
+        dryRun:
+          type: boolean
+          default: false
+          description: Validate upgrade without applying changes
+          
+    Operation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+        type:
+          type: string
+          enum: [backup, restore, upgrade]
+          example: backup
+        status:
+          type: string
+          enum: [pending, running, succeeded, failed]
+          example: running
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          example: 45
+        startTime:
+          type: string
+          format: date-time
+          example: 2025-06-12T10:30:00Z
+        completionTime:
+          type: string
+          format: date-time
+          example: 2025-06-12T10:35:00Z
+        message:
+          type: string
+          example: Backing up Prometheus data
+        error:
+          type: string
+          example: null
+          
+    # Metrics schemas
+    MetricsResponse:
+      type: object
+      properties:
+        metric:
+          type: string
+          example: cpu
+        unit:
+          type: string
+          example: cores
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricSeries'
+            
+    MetricSeries:
+      type: object
+      properties:
+        component:
+          type: string
+          example: prometheus
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricDataPoint'
+            
+    MetricDataPoint:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          example: 2025-06-12T10:30:00Z
+        value:
+          type: number
+          format: double
+          example: 1.5
+          
+    # Health schemas
+    HealthStatus:
+      type: object
+      properties:
+        platform:
+          type: string
+          example: production-platform
+        healthy:
+          type: boolean
+          example: true
+        components:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ComponentHealth'
+        lastCheck:
+          type: string
+          format: date-time
+          example: 2025-06-12T10:35:00Z
+          
+    ComponentHealth:
+      type: object
+      properties:
+        healthy:
+          type: boolean
+          example: true
+        ready:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Component is running normally
+        checks:
+          type: object
+          additionalProperties:
+            type: boolean
+          example:
+            connectivity: true
+            storage: true
+            configuration: true
+            
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+          example: healthy
+        version:
+          type: string
+          example: v1.0.0
+        uptime:
+          type: string
+          example: 72h15m30s
+        checks:
+          type: object
+          additionalProperties:
+            type: boolean
+          example:
+            database: true
+            cache: true
+            kubernetes: true
+            
+    ReadinessResponse:
+      type: object
+      properties:
+        ready:
+          type: boolean
+          example: true
+        checks:
+          type: object
+          additionalProperties:
+            type: boolean
+          example:
+            database: true
+            cache: true
+            kubernetes: true
+            initialization: true
+            
+    # JSON Patch
+    JSONPatchOperation:
+      type: object
+      required:
+        - op
+        - path
+      properties:
+        op:
+          type: string
+          enum: [add, remove, replace, move, copy, test]
+          example: replace
+        path:
+          type: string
+          example: /spec/components/prometheus/replicas
+        value:
+          description: The value to apply (required for add, replace, test)
+          example: 3
+        from:
+          type: string
+          description: Source path (required for move, copy)
+          example: /spec/components/prometheus/resources
+          
+    # Error schemas
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: PLATFORM_NOT_FOUND
+        message:
+          type: string
+          example: The requested platform does not exist
+        details:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            platform: production-platform
+            namespace: monitoring
+        timestamp:
+          type: string
+          format: date-time
+          example: 2025-06-12T10:30:00Z
+        requestId:
+          type: string
+          format: uuid
+          example: 550e8400-e29b-41d4-a716-446655440000
+          
+    ValidationError:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            validationErrors:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                    example: spec.components.prometheus.version
+                  message:
+                    type: string
+                    example: Invalid version format
+                  value:
+                    type: string
+                    example: 2.48.0
+
+  responses:
+    BadRequestError:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+          example:
+            code: VALIDATION_ERROR
+            message: Request validation failed
+            validationErrors:
+              - field: spec.components.prometheus.version
+                message: Invalid version format
+                value: "2.48.0"
+                
+    UnauthorizedError:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNAUTHORIZED
+            message: Authentication required
+            
+    ForbiddenError:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: FORBIDDEN
+            message: Insufficient permissions to perform this operation
+            
+    NotFoundError:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: NOT_FOUND
+            message: The requested resource was not found
+            
+    ConflictError:
+      description: Resource conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: CONFLICT
+            message: Resource already exists
+            
+    RateLimitError:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: Request limit per hour
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Remaining requests in window
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Unix timestamp when limit resets
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: RATE_LIMIT_EXCEEDED
+            message: API rate limit exceeded
+            details:
+              limit: 100
+              remaining: 0
+              reset: 1718190600
