@@ -1,0 +1,52 @@
+# <type>(<scope>): <subject>
+#
+# <body>
+#
+# <footer>
+
+# --- COMMIT MESSAGE GUIDELINES ---
+#
+# Type (required):
+#   feat     - New feature
+#   fix      - Bug fix
+#   docs     - Documentation changes
+#   style    - Code style changes (formatting, etc)
+#   refactor - Code refactoring
+#   perf     - Performance improvements
+#   test     - Adding or updating tests
+#   build    - Build system or dependencies
+#   ci       - CI/CD configuration changes
+#   chore    - Maintenance tasks
+#   revert   - Revert a previous commit
+#
+# Scope (required):
+#   operator, api, ui, cli, controller, webhook, crd, rbac,
+#   rest, graphql, auth, components, pages, hooks, store,
+#   docker, k8s, helm, ci, docs, examples, test, e2e, deps, *
+#
+# Subject (required):
+#   - Use imperative, present tense ("add" not "added")
+#   - Don't capitalize first letter
+#   - No period at the end
+#   - Max 50 characters
+#
+# Body (optional):
+#   - Use imperative, present tense
+#   - Include motivation for change
+#   - Wrap at 72 characters
+#
+# Footer (optional):
+#   - Breaking changes: "BREAKING CHANGE: description"
+#   - Issue references: "Closes #123", "Fixes #456"
+#   - Co-authors: "Co-authored-by: Name <email>"
+#
+# --- EXAMPLES ---
+#
+# feat(operator): add health check endpoint
+#
+# fix(controller): prevent duplicate resource creation
+#
+# Added mutex locking to ensure only one reconciliation
+# process can create resources at a time.
+#
+# Fixes #201

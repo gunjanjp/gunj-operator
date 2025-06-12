@@ -1,117 +1,68 @@
-# golangci-lint configuration for Gunj Operator
-# Version: v1.55.2
-# Documentation: https://golangci-lint.run/usage/configuration/
+# Gunj Operator - golangci-lint configuration
+# Version: v2.0
+# Purpose: Comprehensive Go linting for CNCF compliance
 
+# Configuration version
 run:
+  # Timeout for analysis
   timeout: 10m
+  
+  # Number of CPUs to use
+  concurrency: 4
+  
+  # Go version
+  go: '1.21'
+  
+  # Include test files
   tests: true
-  build-tags:
-    - integration
-    - e2e
+  
+  # Vendor mode - skip vendor directory
+  modules-download-mode: readonly
+  
+  # Skip directories
   skip-dirs:
-    - hack
     - vendor
     - third_party
+    - testdata
+    - examples
+    - hack
+  
+  # Skip files
   skip-files:
-    - zz_generated.deepcopy.go
-    - .*_generated.go
+    - ".*\\.pb\\.go$"
+    - ".*\\.generated\\.go$"
+    - "zz_generated\\..+\\.go$"
 
+# Output configuration
+output:
+  # Format: line-number, json, checkstyle, code-climate, junit-xml, github-actions
+  format: colored-line-number
+  
+  # Print lines of code with issue
+  print-issued-lines: true
+  
+  # Print linter name
+  print-linter-name: true
+  
+  # Make issues output unique by line
+  uniq-by-line: true
+  
+  # Sort results
+  sort-results: true
+
+# Linter settings
 linters-settings:
-  # Go vet configuration
-  govet:
-    check-shadowing: true
-    enable-all: true
-    disable:
-      - fieldalignment # Too many false positives
-
-  # Error check configuration
+  # errcheck - check for unchecked errors
   errcheck:
     check-type-assertions: true
     check-blank: true
-    exclude-functions:
-      - io.Copy(*bytes.Buffer)
-      - io.Copy(os.Stdout)
-
-  # Static check configuration
-  staticcheck:
-    checks: ["all", "-SA1019", "-SA4006", "-SA6002"]
-
-  # Unused configuration
-  unused:
-    check-exported: true
-
-  # Gosimple configuration
-  gosimple:
-    checks: ["all", "-S1005", "-S1000"]
-
-  # Stylecheck configuration
-  stylecheck:
-    checks: ["all", "-ST1000", "-ST1003"]
-    initialisms: ["ACL", "API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTP", "HTTPS", "ID", "IP", "JSON", "JWT", "QPS", "RAM", "RPC", "SLA", "SMTP", "SQL", "SSH", "TCP", "TLS", "TTL", "UDP", "UI", "GID", "UID", "UUID", "URI", "URL", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS", "YAML", "CRD", "RBAC"]
-
-  # Gocyclo - cyclomatic complexity
-  gocyclo:
-    min-complexity: 15
-
-  # Gocognit - cognitive complexity
-  gocognit:
-    min-complexity: 20
-
-  # Dupl - code duplication
-  dupl:
-    threshold: 100
-
-  # Goconst - repeated strings
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-
-  # Gofmt
-  gofmt:
-    simplify: true
-
-  # Goimports
-  goimports:
-    local-prefixes: github.com/gunjanjp/gunj-operator
-
-  # Misspell
-  misspell:
-    locale: US
-
-  # Lll - line length limit
-  lll:
-    line-length: 140
-    tab-width: 1
-
-  # Nakedret - naked returns
-  nakedret:
-    max-func-lines: 30
-
-  # Prealloc
-  prealloc:
-    simple: true
-    range-loops: true
-    for-loops: true
-
-  # Nolintlint
-  nolintlint:
-    allow-unused: false
-    allow-leading-space: false
-    require-explanation: true
-    require-specific: true
-
-  # Gosec - security
-  gosec:
-    severity: medium
-    confidence: medium
-    excludes:
-      - G101 # Potential hardcoded credentials (too many false positives)
-      - G401 # Use of weak cryptographic primitive (we'll handle case by case)
-
-  # Revive
+    
+  # govet - Go vet checks
+  govet:
+    enable-all: true
+    
+  # golint replacement
   revive:
-    ignore-generated-header: true
-    severity: error
     rules:
       - name: blank-imports
       - name: context-as-argument
@@ -121,6 +72,7 @@ linters-settings:
       - name: error-strings
       - name: error-naming
       - name: exported
+      - name: if-return
       - name: increment-decrement
       - name: var-naming
       - name: var-declaration
@@ -136,23 +88,204 @@ linters-settings:
       - name: unused-parameter
       - name: unreachable-code
       - name: redefines-builtin-id
-
-  # Depguard
+  
+  # gofmt - format checking
+  gofmt:
+    simplify: true
+    
+  # goimports - import checking
+  goimports:
+    local-prefixes: github.com/gunjanjp/gunj-operator
+    
+  # gocyclo - cyclomatic complexity
+  gocyclo:
+    min-complexity: 15
+    
+  # gocognit - cognitive complexity
+  gocognit:
+    min-complexity: 20
+    
+  # goconst - repeated strings
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+    
+  # gocritic - various checks
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+      - experimental
+      - opinionated
+    disabled-checks:
+      - whyNoLint
+      - hugeParam
+      - paramTypeCombine
+      
+  # gofumpt - stricter gofmt
+  gofumpt:
+    extra-rules: true
+    
+  # depguard - package imports whitelist/blacklist
   depguard:
     rules:
       main:
+        files:
+          - $all
+        allow:
+          - $gostd
+          - github.com/gunjanjp/gunj-operator
+          - k8s.io
+          - sigs.k8s.io
+          - github.com/gin-gonic/gin
+          - github.com/go-logr/logr
+          - github.com/prometheus/client_golang
+          - github.com/stretchr/testify
+          - github.com/onsi/ginkgo
+          - github.com/onsi/gomega
         deny:
-          - pkg: "github.com/sirupsen/logrus"
-            desc: "Use github.com/go-logr/logr instead"
-          - pkg: "github.com/pkg/errors"
-            desc: "Use fmt.Errorf with %w instead"
-          - pkg: "io/ioutil"
-            desc: "Deprecated: use io or os packages instead"
+          - pkg: github.com/sirupsen/logrus
+            desc: "use go-logr/logr instead"
+          - pkg: github.com/pkg/errors
+            desc: "use fmt.Errorf with %w instead"
+            
+  # misspell - spell checking
+  misspell:
+    locale: US
+    
+  # lll - line length limit
+  lll:
+    line-length: 120
+    tab-width: 4
+    
+  # nakedret - naked returns
+  nakedret:
+    max-func-lines: 30
+    
+  # prealloc - slice preallocation
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: true
+    
+  # unparam - unused parameters
+  unparam:
+    check-exported: true
+    
+  # whitespace
+  whitespace:
+    multi-if: true
+    multi-func: true
+    
+  # wsl - whitespace linter
+  wsl:
+    allow-cuddle-declarations: false
+    force-err-cuddling: true
+    
+  # gci - import order
+  gci:
+    sections:
+      - standard
+      - default
+      - prefix(github.com/gunjanjp/gunj-operator)
+      
+  # godot - comment ending dot
+  godot:
+    scope: all
+    capital: true
+    
+  # godox - TODO/FIXME/BUG comments
+  godox:
+    keywords:
+      - TODO
+      - FIXME
+      - BUG
+      - HACK
+      - OPTIMIZE
+      
+  # funlen - function length
+  funlen:
+    lines: 80
+    statements: 60
+    
+  # dupl - code duplication
+  dupl:
+    threshold: 100
 
+# Linters to enable
 linters:
-  enable-all: true
+  enable-all: false
+  enable:
+    # Default linters
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    
+    # Additional linters for quality
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - contextcheck
+    - cyclop
+    - dupl
+    - durationcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - exportloopref
+    - forbidigo
+    - forcetypeassert
+    - funlen
+    - gci
+    - gochecknoglobals
+    - gochecknoinits
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - godox
+    - gofmt
+    - gofumpt
+    - goimports
+    - gomnd
+    - gomodguard
+    - goprintffuncname
+    - gosec
+    - ifshort
+    - importas
+    - lll
+    - makezero
+    - misspell
+    - nakedret
+    - nestif
+    - nilerr
+    - nilnil
+    - noctx
+    - nolintlint
+    - prealloc
+    - predeclared
+    - promlinter
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - stylecheck
+    - tagliatelle
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - wastedassign
+    - whitespace
+    - wsl
+    
   disable:
-    # Deprecated linters
+    # Deprecated
     - deadcode
     - exhaustivestruct
     - golint
@@ -164,71 +297,75 @@ linters:
     - structcheck
     - varcheck
     
-    # Too strict or not relevant
-    - exhaustive # Too strict for our use case
-    - exhaustruct # Replaced exhaustivestruct
-    - gochecknoglobals # We need some globals
-    - gochecknoinits # Init functions are needed
-    - godox # We want to allow TODOs
-    - goerr113 # Too strict for error handling
-    - gomnd # Magic numbers are fine in some cases
-    - nlreturn # Too strict
-    - paralleltest # Not all tests need to be parallel
-    - testpackage # We prefer internal test packages
-    - tparallel # Not all tests need to be parallel
-    - varnamelen # Sometimes short names are fine
-    - wrapcheck # Too strict for error wrapping
-    - wsl # Too strict on whitespace
-    - nonamedreturns # Named returns are useful sometimes
-    - tagliatelle # We have our own struct tag conventions
-    - ireturn # Sometimes returning interfaces is necessary
-    - forcetypeassert # We handle type assertions carefully
+    # Too strict
+    - depguard
+    - exhaustruct
+    - gochecknoglobals
+    - gochecknoinits
+    - goerr113
+    - gomnd
+    - ireturn
+    - nlreturn
+    - paralleltest
+    - testpackage
+    - varnamelen
+    - wrapcheck
 
+# Issues configuration
 issues:
+  # Exclude specific issues
   exclude-rules:
-    # Exclude some linters from running on tests files
+    # Exclude test files from some linters
     - path: _test\.go
       linters:
         - dupl
-        - gosec
-        - maintidx
-
-    # Exclude some linters from running on generated files
-    - path: _generated\.go
-      linters:
-        - gocritic
+        - funlen
+        - gocognit
+        - goconst
         - gocyclo
-        - errcheck
-        - dupl
         - gosec
-
-    # Exclude known issues in vendor/third-party code
-    - path: vendor/
+        
+    # Exclude generated files
+    - path: \.pb\.go
       linters:
-        - typecheck
-        - unused
-
-    # Exclude lll issues for long lines with URLs
-    - linters:
-        - lll
-      source: "https://"
-
+        - all
+        
+    # Exclude specific directories
+    - path: pkg/generated
+      linters:
+        - all
+        
+    # Exclude godox in specific files
+    - path: 'cmd|internal'
+      linters:
+        - godox
+        
+    # Allow fmt.Printf in main
+    - path: cmd/.+/main\.go
+      linters:
+        - forbidigo
+        
   # Maximum issues count per one linter
   max-issues-per-linter: 50
-
+  
   # Maximum count of issues with the same text
   max-same-issues: 3
-
-  # Show only new issues
+  
+  # Show only new issues for faster feedback
   new: false
-
+  
   # Fix found issues (if it's supported by the linter)
   fix: false
 
 severity:
+  # Default severity
   default-severity: error
-  case-sensitive: false
+  
+  # Specific severities
   rules:
+    - linters:
+        - godox
+      severity: warning
     - linters:
         - dupl
       severity: info

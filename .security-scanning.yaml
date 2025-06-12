@@ -1,0 +1,393 @@
+# Security Scanning Configuration
+# Gunj Operator Project
+
+# This file configures all security scanning tools used in the project
+
+#############################################
+# Trivy Configuration
+#############################################
+trivy:
+  # Scan configuration
+  scan:
+    security-checks:
+      - vuln        # Vulnerability detection
+      - config      # Misconfiguration detection
+      - secret      # Secret detection
+      - license     # License compliance
+    
+    severity:
+      - CRITICAL
+      - HIGH
+      - MEDIUM
+    
+    ignore-unfixed: false
+    
+  # Skip directories
+  skip-dirs:
+    - .git
+    - node_modules
+    - vendor
+    - test
+    - docs
+  
+  # Skip files
+  skip-files:
+    - "*.test.go"
+    - "*_test.go"
+    - "testdata/*"
+  
+  # Ignored vulnerabilities (with justification)
+  ignorefile: .trivyignore
+  
+  # Output formats
+  format: table
+  output: trivy-report.txt
+  
+  # Exit codes
+  exit-code: 1        # Exit with 1 on findings
+  exit-on-eol: 0      # Don't exit on EOL
+
+#############################################
+# Gosec Configuration
+#############################################
+gosec:
+  # Rules to include
+  includes:
+    - G101  # Look for hardcoded credentials
+    - G102  # Bind to all interfaces
+    - G103  # Audit the use of unsafe block
+    - G104  # Audit errors not checked
+    - G106  # Audit the use of ssh.InsecureIgnoreHostKey
+    - G107  # Url provided to HTTP request as taint input
+    - G201  # SQL query construction using format string
+    - G202  # SQL query construction using string concatenation
+    - G203  # Use of unescaped data in HTML templates
+    - G204  # Audit use of command execution
+    - G301  # Poor file permissions used when creating a directory
+    - G302  # Poor file permissions used with chmod
+    - G303  # Creating tempfile using a predictable path
+    - G304  # File path provided as taint input
+    - G401  # Detect the usage of DES, RC4, MD5 or SHA1
+    - G402  # Look for bad TLS connection settings
+    - G403  # Ensure minimum RSA key length of 2048 bits
+    - G404  # Insecure random number source (rand)
+    - G501  # Import blocklist: crypto/md5
+    - G502  # Import blocklist: crypto/des
+    - G503  # Import blocklist: crypto/rc4
+    - G504  # Import blocklist: net/http/cgi
+    - G505  # Import blocklist: crypto/sha1
+    - G601  # Implicit memory aliasing of items from a range statement
+  
+  # Severity levels
+  severity: medium
+  confidence: medium
+  
+  # Output format
+  fmt: sarif
+  out: gosec-results.sarif
+  
+  # Exclude files
+  exclude:
+    - "*_test.go"
+    - "vendor/*"
+    - "test/*"
+
+#############################################
+# Nancy Configuration
+#############################################
+nancy:
+  # Vulnerability database
+  db-cache-path: ~/.nancy-cache
+  
+  # Output format
+  output: json
+  
+  # Quiet mode
+  quiet: false
+  
+  # Exit code on vulnerabilities
+  exit-code: 1
+  
+  # Exclude vulnerabilities
+  exclude-vulnerability:
+    - CVE-2020-12345  # False positive, not applicable
+
+#############################################
+# Semgrep Configuration
+#############################################
+semgrep:
+  # Rulesets to use
+  config:
+    - p/security-audit
+    - p/owasp-top-ten
+    - p/golang
+    - p/kubernetes
+    - p/docker
+    - p/ci
+  
+  # Custom rules
+  rules:
+    - id: hardcoded-secret
+      pattern: |
+        $KEY = "..."
+      patterns:
+        - pattern-either:
+          - pattern: $KEY = "..."
+          - pattern: $KEY := "..."
+        - metavariable-regex:
+            metavariable: $KEY
+            regex: '.*(password|secret|token|key|api_key|apikey).*'
+        - metavariable-regex:
+            metavariable: $X
+            regex: '.{8,}'
+      message: "Hardcoded secret detected"
+      severity: ERROR
+  
+  # Output
+  output: semgrep-results.sarif
+  
+  # Exclude paths
+  exclude:
+    - test/
+    - vendor/
+    - "*.test.go"
+
+#############################################
+# Gitleaks Configuration
+#############################################
+gitleaks:
+  # Version
+  version: 8.16.0
+  
+  # Allowlist
+  allowlist:
+    - description: "Allow test files"
+      files:
+        - ".*_test\\.go$"
+        - "test/.*"
+    
+    - description: "Allow documentation"
+      paths:
+        - "docs/.*"
+        - "README.md"
+  
+  # Rules
+  rules:
+    - id: generic-api-key
+      description: Generic API Key
+      regex: >-
+        (?i)((api[_\-\s]?key|apikey)[_\-\s]?[:=][_\-\s]?['\"]?)([0-9a-zA-Z\-_]+)
+      tags:
+        - key
+        - API
+        - generic
+    
+    - id: aws-access-key
+      description: AWS Access Key
+      regex: >-
+        (A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}
+      tags:
+        - key
+        - AWS
+    
+    - id: github-token
+      description: GitHub Personal Access Token
+      regex: >-
+        ghp_[0-9a-zA-Z]{36}
+      tags:
+        - key
+        - GitHub
+
+#############################################
+# OWASP Dependency Check
+#############################################
+dependency-check:
+  # Project info
+  project: "Gunj Operator"
+  scan:
+    - "."
+  
+  # Formats
+  format:
+    - HTML
+    - JSON
+    - SARIF
+  
+  # Output directory
+  out: "./dependency-check-report"
+  
+  # Fail build on CVSS score
+  failBuildOnCVSS: 7
+  
+  # Suppression file
+  suppression: "dependency-check-suppressions.xml"
+  
+  # Exclude patterns
+  exclude:
+    - "**/*test*"
+    - "**/vendor/**"
+
+#############################################
+# License Scanning Configuration
+#############################################
+license-scanning:
+  # Allowed licenses
+  allowed:
+    - MIT
+    - Apache-2.0
+    - BSD-3-Clause
+    - BSD-2-Clause
+    - ISC
+    - MPL-2.0
+  
+  # Denied licenses
+  denied:
+    - GPL-2.0
+    - GPL-3.0
+    - AGPL-3.0
+    - CC-BY-NC-4.0
+  
+  # Exclude paths
+  exclude:
+    - docs/
+    - test/
+    - examples/
+
+#############################################
+# Container Scanning Configuration
+#############################################
+container-scanning:
+  # Grype configuration
+  grype:
+    # Fail on severity
+    fail-on: high
+    
+    # Output format
+    output: sarif
+    
+    # Scope
+    scope: all-layers
+    
+    # Database
+    db:
+      auto-update: true
+      cache-dir: ~/.grype/db
+  
+  # Syft configuration (SBOM)
+  syft:
+    # Output formats
+    output:
+      - spdx-json
+      - cyclonedx-json
+    
+    # Package cataloger
+    catalogers:
+      - go-mod-cataloger
+      - javascript-package-cataloger
+      - python-package-cataloger
+      - ruby-gemspec-cataloger
+      - docker-cataloger
+
+#############################################
+# Policy as Code (OPA)
+#############################################
+opa:
+  # Policy files
+  policies:
+    - policies/security.rego
+    - policies/rbac.rego
+    - policies/network.rego
+    - policies/container.rego
+  
+  # Data files
+  data:
+    - data/exemptions.json
+    - data/approved-images.json
+  
+  # Test files
+  tests:
+    - policies/*_test.rego
+
+#############################################
+# Falco Runtime Security
+#############################################
+falco:
+  # Rules files
+  rules_file:
+    - /etc/falco/falco_rules.yaml
+    - /etc/falco/falco_rules.local.yaml
+    - /etc/falco/k8s_audit_rules.yaml
+    - /etc/falco/rules.d/
+  
+  # Output configuration
+  json_output: true
+  json_include_output_property: true
+  
+  # Alert outputs
+  outputs:
+    - stdout
+    - file:
+        filename: /var/log/falco.log
+    - http:
+        url: http://security-webhook:8080/falco
+  
+  # Priority level
+  priority: NOTICE
+
+#############################################
+# Integration Configuration
+#############################################
+integrations:
+  # GitHub Security Advisories
+  github:
+    enable-security-advisories: true
+    enable-dependabot: true
+    enable-code-scanning: true
+    enable-secret-scanning: true
+  
+  # Slack notifications
+  slack:
+    webhook-url: ${SLACK_WEBHOOK_URL}
+    channel: "#security-alerts"
+    notify-on:
+      - critical-vulnerability
+      - security-incident
+      - failed-scan
+  
+  # JIRA integration
+  jira:
+    project: SEC
+    issue-type: "Security Vulnerability"
+    auto-create: true
+    priority-mapping:
+      critical: Highest
+      high: High
+      medium: Medium
+      low: Low
+
+#############################################
+# Reporting Configuration
+#############################################
+reporting:
+  # Report generation
+  schedule: "0 0 * * 1"  # Weekly on Monday
+  
+  # Report formats
+  formats:
+    - html
+    - pdf
+    - json
+  
+  # Report contents
+  include:
+    - executive-summary
+    - vulnerability-trends
+    - compliance-status
+    - remediation-progress
+    - risk-metrics
+  
+  # Distribution
+  recipients:
+    - security@gunjoperator.io
+    - compliance@gunjoperator.io
+    - leadership@gunjoperator.io

@@ -1,39 +1,156 @@
-# Auto-assign configuration
+# Auto Assignment Configuration
+# This file configures automatic reviewer assignment for pull requests
+
+# Add reviewers and assignees
 addReviewers: true
-addAssignees: author
+addAssignees: false
 
+# Configure reviewer groups
 reviewers:
-  - gunjanjp
-  # Add more reviewers as the team grows
+  defaults:
+    - gunjanjp
+  
+  groups:
+    # Operator team - reviews operator-related code
+    operator-team:
+      - gunjanjp
+      - operator-lead
+      - backend-dev-1
+      - backend-dev-2
+    
+    # API team - reviews API changes
+    api-team:
+      - gunjanjp
+      - api-lead
+      - backend-dev-1
+      - backend-dev-3
+    
+    # Frontend team - reviews UI changes
+    frontend-team:
+      - frontend-lead
+      - frontend-dev-1
+      - frontend-dev-2
+    
+    # Documentation team
+    docs-team:
+      - docs-lead
+      - technical-writer
+    
+    # Security team - for security-related changes
+    security-team:
+      - security-lead
+      - security-engineer
+    
+    # DevOps team - for CI/CD and infrastructure
+    devops-team:
+      - devops-lead
+      - sre-engineer
 
-skipKeywords:
-  - wip
-  - draft
-
+# Number of reviewers to assign
 numberOfReviewers: 2
 
-# Different reviewers for different file patterns
-reviewerGroups:
-  operator:
-    - gunjanjp
-    # Add operator team members
-  api:
-    - gunjanjp
-    # Add API team members
-  ui:
-    - gunjanjp
-    # Add UI team members
+# Skip assignment for these cases
+skipKeywords:
+  - "[WIP]"
+  - "[DRAFT]"
+  - "[DO NOT REVIEW]"
 
-fileGroups:
-  operator:
-    - '**/*.go'
-    - '!ui/**'
-    - '!internal/api/**'
-  api:
-    - 'internal/api/**'
-    - 'cmd/api-server/**'
+# Assign based on files changed
+fileReviewers:
+  # Operator files
+  "operator/**":
+    - operator-team
+  "controllers/**":
+    - operator-team
+  "api/v*/":
+    - operator-team
+  
+  # API server files
+  "internal/api/**":
+    - api-team
+  "pkg/api/**":
+    - api-team
+  
+  # UI files
+  "ui/**":
+    - frontend-team
+  "*.tsx":
+    - frontend-team
+  "*.ts":
+    - frontend-team
+  
+  # Documentation
+  "docs/**":
+    - docs-team
+  "*.md":
+    - docs-team
+  
+  # CI/CD files
+  ".github/**":
+    - devops-team
+  "Dockerfile*":
+    - devops-team
+  "Makefile":
+    - devops-team
+  
+  # Security sensitive files
+  "**/*auth*":
+    - security-team
+  "**/*security*":
+    - security-team
+  "**/*rbac*":
+    - security-team
+
+# Assign based on PR labels
+labelReviewers:
+  security:
+    - security-team
+  documentation:
+    - docs-team
   ui:
-    - 'ui/**'
-    - '**/*.ts'
-    - '**/*.tsx'
-    - '**/*.jsx'
+    - frontend-team
+  api:
+    - api-team
+  operator:
+    - operator-team
+  performance:
+    - operator-team
+    - devops-team
+
+# Special rules
+rules:
+  # Always include security team for certain patterns
+  - paths:
+      - "**/auth/**"
+      - "**/security/**"
+      - "**/rbac/**"
+    reviewers:
+      - security-team
+    mandatory: true
+  
+  # Breaking changes need senior reviewers
+  - labels:
+      - "breaking-change"
+    reviewers:
+      - gunjanjp
+      - operator-lead
+      - api-lead
+    mandatory: true
+    numberOfReviewers: 3
+
+# Review assignment options
+options:
+  # Don't assign PR author as reviewer
+  ignoreAuthor: true
+  
+  # Assign reviewers even if some are unavailable
+  assignWhenAvailable: true
+  
+  # Rotate reviewers for load balancing
+  useReviewerRotation: true
+  
+  # Prefer reviewers who have context
+  preferPreviousReviewers: true
+  
+  # Maximum reviewers to assign
+  maxReviewers: 4

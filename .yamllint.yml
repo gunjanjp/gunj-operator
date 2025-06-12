@@ -1,0 +1,106 @@
+# Gunj Operator - yamllint Configuration  
+# Version: v2.0
+# Purpose: YAML linting for Kubernetes manifests and configurations
+
+extends: default
+
+# Rules configuration
+rules:
+  # Line length
+  line-length:
+    max: 120
+    level: warning
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+    
+  # Indentation
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+    check-multi-line-strings: false
+    
+  # Comments
+  comments:
+    min-spaces-from-content: 2
+    require-starting-space: true
+    
+  # Empty lines
+  empty-lines:
+    max: 2
+    max-start: 0
+    max-end: 1
+    
+  # Truthy values
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+    check-keys: false
+    
+  # Document markers
+  document-start:
+    present: false
+    
+  document-end:
+    present: false
+    
+  # Brackets
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+    min-spaces-inside-empty: 0
+    max-spaces-inside-empty: 0
+    
+  # Braces
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+    min-spaces-inside-empty: 0
+    max-spaces-inside-empty: 0
+    
+  # Colons
+  colons:
+    max-spaces-before: 0
+    max-spaces-after: 1
+    
+  # Commas
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1
+    max-spaces-after: 1
+    
+  # Hyphens
+  hyphens:
+    max-spaces-after: 1
+    
+  # Key ordering
+  key-ordering: disable
+  
+  # Quoted strings
+  quoted-strings:
+    quote-type: any
+    required: only-when-needed
+    extra-required: []
+    extra-allowed: []
+    
+  # Trailing spaces
+  trailing-spaces: enable
+  
+  # New line at end of file
+  new-line-at-end-of-file: enable
+  
+  # New lines
+  new-lines:
+    type: unix
+    
+# File patterns to lint
+yaml-files:
+  - '*.yaml'
+  - '*.yml'
+  - '.yamllint'
+
+# Ignore paths
+ignore: |
+  .git/
+  node_modules/
+  vendor/
+  charts/*/charts/
+  config/crd/bases/

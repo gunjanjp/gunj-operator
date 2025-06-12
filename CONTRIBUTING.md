@@ -116,51 +116,41 @@ See [TypeScript/React Coding Standards](docs/development/coding-standards-typesc
 
 ### Commit Messages
 
-We use [Conventional Commits](https://www.conventionalcommits.org/):
+We follow [Conventional Commits](https://www.conventionalcommits.org/) specification. All commit messages are automatically validated using commitlint.
 
-```
+**📚 Full Guidelines**: See [Commit Message Conventions](docs/development/commit-conventions.md) for detailed rules and examples.
+
+**🚀 Quick Start**:
+
+```bash
+# Set up commit conventions (first time only)
+./scripts/setup-commit-conventions.sh
+
+# Format
 <type>(<scope>): <subject>
-
-<body>
-
-<footer>
 ```
 
-#### Types
+**Types**: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert  
+**Scopes**: operator, api, ui, controller, webhook, crd, rest, graphql, auth, etc.
 
-- **feat**: A new feature
-- **fix**: A bug fix
-- **docs**: Documentation only changes
-- **style**: Changes that don't affect code meaning
-- **refactor**: Code change that neither fixes a bug nor adds a feature
-- **perf**: Code change that improves performance
-- **test**: Adding missing tests or correcting existing tests
-- **build**: Changes that affect the build system
-- **ci**: Changes to our CI configuration files and scripts
-- **chore**: Other changes that don't modify src or test files
+**Examples**:
+```bash
+# Simple commit
+git commit -m "feat(api): add health check endpoint"
 
-#### Examples
+# Commit with body (use git commit without -m)
+feat(operator): add multi-cluster support
 
-```
-feat(operator): add support for Tempo tracing
+Implemented federation controller to manage platforms
+across multiple Kubernetes clusters.
 
-- Implement Tempo component manager
-- Add Tempo CRD fields
-- Create Tempo deployment logic
-- Add integration tests
-
-Closes #123
+Closes #234
 ```
 
-```
-fix(ui): correct platform status color
-
-The platform status indicator was showing green for failed
-platforms. This fixes the color mapping to correctly show
-red for failed status.
-
-Fixes #456
-```
+**Resources**:
+- [Commit Examples](docs/development/commit-examples.md) - Real-world examples
+- [Quick Reference](docs/development/commit-quick-ref.md) - Handy cheat sheet
+- Run `echo "your message" | npx commitlint` to test messages
 
 ### Testing
 

@@ -1,74 +1,85 @@
-# See https://pre-commit.com for more information
-# See https://pre-commit.com/hooks.html for more hooks
+# Gunj Operator - Pre-commit Configuration
+# Version: v2.0
+# Purpose: Automated code quality checks before commits
+
+# Minimum pre-commit version
+minimum_pre_commit_version: 2.20.0
+
+# Default stages
+default_stages: [commit]
+
+# Repository configurations
 repos:
-  # General checks
+  # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
-      - id: trailing-whitespace
-        exclude: \.md$
-      - id: end-of-file-fixer
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+      - id: check-case-conflict
+      - id: check-executables-have-shebangs
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-shebang-scripts-are-executable
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-xml
       - id: check-yaml
         args: ['--unsafe']
-      - id: check-json
-      - id: check-xml
-      - id: check-added-large-files
-        args: ['--maxkb=1000']
-      - id: check-case-conflict
-      - id: check-merge-conflict
-      - id: check-executables-have-shebangs
-      - id: check-shebang-scripts-are-executable
       - id: detect-private-key
+      - id: end-of-file-fixer
+      - id: fix-byte-order-marker
       - id: mixed-line-ending
         args: ['--fix=lf']
+      - id: trailing-whitespace
+        args: ['--markdown-linebreak-ext=md']
       - id: no-commit-to-branch
         args: ['--branch', 'main', '--branch', 'master']
 
-  # Go specific hooks
-  - repo: https://github.com/golangci/golangci-lint
-    rev: v1.55.2
-    hooks:
-      - id: golangci-lint
-        args: ['--timeout=10m', '--config=.golangci.yml']
-        
-  - repo: local
+  # Go formatting and linting
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
     hooks:
       - id: go-fmt
-        name: go fmt
-        entry: go fmt ./...
-        language: system
-        types: [go]
-        pass_filenames: false
-        
-      - id: go-imports
-        name: go imports
-        entry: goimports -w -local github.com/gunjanjp/gunj-operator
-        language: system
-        types: [go]
-        pass_filenames: true
-        
       - id: go-vet
-        name: go vet
-        entry: go vet ./...
-        language: system
-        types: [go]
-        pass_filenames: false
-        
+      - id: go-imports
+        args: ['-local', 'github.com/gunjanjp/gunj-operator']
+      - id: go-cyclo
+        args: ['-over', '15']
       - id: go-mod-tidy
-        name: go mod tidy
-        entry: go mod tidy
-        language: system
-        types: [go]
-        pass_filenames: false
-        
-      - id: go-generate
-        name: go generate
-        entry: go generate ./...
-        language: system
-        types: [go]
-        pass_filenames: false
+      - id: go-unit-tests
+      - id: golangci-lint
+        args: ['--config', '.golangci.yml']
 
-  # JavaScript/TypeScript hooks
+  # YAML linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.33.0
+    hooks:
+      - id: yamllint
+        args: ['-c', '.yamllint.yml']
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.38.0
+    hooks:
+      - id: markdownlint
+        args: ['--config', '.markdownlint.json']
+
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint
+        args: ['--config', '.hadolint.yaml']
+
+  # Shell script linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+        args: ['-x']
+
+  # JavaScript/TypeScript linting and formatting
   - repo: https://github.com/pre-commit/mirrors-eslint
     rev: v8.56.0
     hooks:
@@ -80,105 +91,52 @@ repos:
           - eslint-config-prettier@9.1.0
           - eslint-plugin-react@7.33.2
           - eslint-plugin-react-hooks@4.6.0
-          - '@typescript-eslint/eslint-plugin@6.19.0'
-          - '@typescript-eslint/parser@6.19.0'
-        args: ['--fix', '--max-warnings=0']
+          - '@typescript-eslint/eslint-plugin@6.18.1'
+          - '@typescript-eslint/parser@6.18.1'
 
+  # Prettier formatting
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v3.1.0
     hooks:
       - id: prettier
-        files: \.(js|jsx|ts|tsx|css|scss|json|md)$
+        types_or: [css, javascript, jsx, ts, tsx, json, yaml, markdown]
         additional_dependencies:
-          - prettier@3.1.1
-          - '@trivago/prettier-plugin-sort-imports@4.3.0'
+          - prettier@3.1.0
+          - '@prettier/plugin-xml@3.2.2'
 
-  # Security scanning
+  # Security checks
   - repo: https://github.com/zricethezav/gitleaks
     rev: v8.18.1
     hooks:
       - id: gitleaks
 
-  - repo: https://github.com/trufflesecurity/trufflehog
-    rev: v3.63.7
+  # Commit message linting
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.13.0
     hooks:
-      - id: trufflehog
-        args: ['--no-update', 'filesystem', '.']
-
-  # Kubernetes and YAML
-  - repo: https://github.com/syntaqx/kube-score
-    rev: v1.16.1
-    hooks:
-      - id: kube-score
-        files: (^|/).*\.(yaml|yml)$
-        exclude: ^(hack/|vendor/|charts/)
-
-  # Documentation
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.38.0
-    hooks:
-      - id: markdownlint
-        args: ['--fix']
+      - id: commitizen
+        stages: [commit-msg]
 
   # License headers
   - repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: v1.5.4
     hooks:
       - id: insert-license
-        name: Add license headers (Go)
+        name: Add license header to Go files
         files: \.go$
-        exclude: (^vendor/|_generated\.go$|\.pb\.go$)
         args:
           - --license-filepath
           - hack/boilerplate.go.txt
           - --comment-style
           - //
       - id: insert-license
-        name: Add license headers (TypeScript/JavaScript)
-        files: \.(ts|tsx|js|jsx)$
-        exclude: (^node_modules/|\.d\.ts$)
+        name: Add license header to Shell scripts
+        files: \.sh$
         args:
           - --license-filepath
-          - hack/boilerplate.js.txt
+          - hack/boilerplate.sh.txt
           - --comment-style
-          - //
+          - '#'
 
-  # Custom checks
-  - repo: local
-    hooks:
-      - id: check-generated
-        name: Check generated files are up to date
-        entry: make verify-generate
-        language: system
-        pass_filenames: false
-        
-      - id: check-manifests
-        name: Check Kubernetes manifests
-        entry: make verify-manifests
-        language: system
-        pass_filenames: false
-        
-      - id: check-deps
-        name: Check dependencies
-        entry: make verify-deps
-        language: system
-        pass_filenames: false
-        
-      - id: unit-tests
-        name: Run unit tests
-        entry: make test-unit-fast
-        language: system
-        pass_filenames: false
-        stages: [push]
-
-# Global exclusions
-exclude: |
-  (?x)^(
-    vendor/.*|
-    node_modules/.*|
-    \.git/.*|
-    .*\.generated\..*|
-    .*\.pb\.go|
-    zz_generated\..*|
-    hack/tools/.*
-  )$
+# Configuration for specific hooks
+fail_fast: false

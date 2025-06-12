@@ -1,0 +1,80 @@
+{
+  "default": true,
+  "line-length": {
+    "line_length": 120,
+    "tables": false,
+    "code_blocks": false
+  },
+  "no-hard-tabs": true,
+  "no-reversed-links": true,
+  "no-multiple-blanks": {
+    "maximum": 2
+  },
+  "no-trailing-spaces": true,
+  "no-multiple-space-atx": true,
+  "no-missing-space-atx": true,
+  "no-multiple-space-closed-atx": true,
+  "blanks-around-headings": true,
+  "heading-start-left": true,
+  "no-duplicate-heading": {
+    "siblings_only": true
+  },
+  "single-title": {
+    "level": 1,
+    "front_matter_title": "^\\s*title\\s*[:=]"
+  },
+  "no-trailing-punctuation": {
+    "punctuation": ".,;:!"
+  },
+  "no-multiple-space-blockquote": true,
+  "no-blanks-blockquote": false,
+  "ol-prefix": {
+    "style": "ordered"
+  },
+  "list-indent": true,
+  "blanks-around-fences": true,
+  "blanks-around-lists": true,
+  "no-inline-html": false,
+  "no-bare-urls": true,
+  "hr-style": {
+    "style": "---"
+  },
+  "no-emphasis-as-heading": true,
+  "no-space-in-emphasis": true,
+  "no-space-in-code": true,
+  "no-space-in-links": true,
+  "fenced-code-language": true,
+  "first-line-heading": false,
+  "no-empty-links": true,
+  "proper-names": {
+    "names": [
+      "Kubernetes",
+      "Docker", 
+      "Prometheus",
+      "Grafana",
+      "Loki",
+      "Tempo",
+      "OpenTelemetry",
+      "CNCF",
+      "GitHub",
+      "GitOps",
+      "ArgoCD",
+      "Flux",
+      "TypeScript",
+      "JavaScript",
+      "React",
+      "Node.js",
+      "Go",
+      "Golang"
+    ],
+    "code_blocks": false
+  },
+  "no-alt-text": true,
+  "code-block-style": {
+    "style": "fenced"
+  },
+  "single-trailing-newline": true,
+  "code-fence-style": {
+    "style": "backtick"
+  }
+}

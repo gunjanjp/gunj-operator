@@ -1,6 +1,11 @@
-# EditorConfig helps maintain consistent coding styles across different editors and IDEs
+# Gunj Operator - EditorConfig
+# Version: v2.0
+# https://editorconfig.org
+
+# Top-most EditorConfig file
 root = true
 
+# Default settings for all files
 [*]
 charset = utf-8
 end_of_line = lf
@@ -9,15 +14,80 @@ trim_trailing_whitespace = true
 indent_style = space
 indent_size = 2
 
+# Go files
 [*.go]
 indent_style = tab
 indent_size = 4
+max_line_length = 120
 
-[*.{yaml,yml}]
+# YAML files
+[*.{yml,yaml}]
+indent_size = 2
+quote_type = single
+
+# JSON files
+[*.json]
 indent_size = 2
 
-[Makefile]
-indent_style = tab
+# TypeScript and JavaScript
+[*.{ts,tsx,js,jsx}]
+indent_size = 2
+quote_type = single
+max_line_length = 100
 
+# Markdown files
 [*.md]
 trim_trailing_whitespace = false
+max_line_length = 120
+
+# Makefile
+[Makefile]
+indent_style = tab
+indent_size = 4
+
+# Shell scripts
+[*.{sh,bash}]
+indent_size = 2
+shell_variant = bash
+
+# PowerShell scripts
+[*.{ps1,psm1,psd1}]
+indent_size = 4
+
+# Dockerfiles
+[{Dockerfile,Dockerfile.*}]
+indent_size = 2
+
+# Protocol Buffers
+[*.proto]
+indent_size = 2
+
+# HTML files
+[*.html]
+indent_size = 2
+quote_type = double
+
+# CSS files
+[*.{css,scss,sass}]
+indent_size = 2
+quote_type = single
+
+# Configuration files
+[*.{ini,toml,conf,cfg}]
+indent_size = 2
+
+# Git files
+[{.gitignore,.gitattributes}]
+indent_size = 2
+
+# GitHub Actions
+[.github/workflows/*.{yml,yaml}]
+indent_size = 2
+
+# Helm charts
+[charts/**.yaml]
+indent_size = 2
+
+# CRD files
+[config/crd/**.yaml]
+indent_size = 2

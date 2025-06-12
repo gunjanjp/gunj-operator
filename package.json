@@ -26,9 +26,13 @@
     "dev:ui": "npm run dev --workspace=ui",
     "clean": "make clean && npm run clean --workspace=ui",
     "docker:build": "make docker-build-all",
-    "prepare": "husky install"
+    "prepare": "husky install",
+    "commitlint": "commitlint --edit",
+    "commit": "cz"
   },
   "devDependencies": {
+    "@commitlint/cli": "^19.3.0",
+    "@commitlint/config-conventional": "^19.2.2",
     "concurrently": "^8.2.2",
     "husky": "^9.0.11",
     "lint-staged": "^15.2.0"

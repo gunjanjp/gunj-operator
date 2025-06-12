@@ -1,0 +1,98 @@
+# Code Owners for Gunj Operator
+# This file defines code ownership for automatic review requests
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+* @gunjanjp
+
+# Operator Core
+/operator/ @gunjanjp @operator-team
+/controllers/ @gunjanjp @operator-team
+/api/v*/ @gunjanjp @operator-team @api-team
+/config/ @gunjanjp @operator-team @devops-team
+
+# API Server
+/internal/api/ @gunjanjp @api-team
+/pkg/api/ @gunjanjp @api-team
+/internal/graphql/ @api-team
+/internal/handlers/ @api-team
+/internal/middleware/ @api-team @security-team
+
+# UI/Frontend
+/ui/ @frontend-team
+/ui/src/components/ @frontend-team @ux-team
+/ui/src/api/ @frontend-team @api-team
+/ui/public/ @frontend-team @ux-team
+*.tsx @frontend-team
+*.ts @frontend-team
+*.css @frontend-team @ux-team
+
+# Documentation
+/docs/ @docs-team @gunjanjp
+*.md @docs-team
+/examples/ @docs-team @operator-team
+README.md @gunjanjp @docs-team
+CONTRIBUTING.md @gunjanjp @docs-team
+
+# CI/CD and DevOps
+/.github/ @devops-team @gunjanjp
+/.github/workflows/ @devops-team @gunjanjp
+/hack/ @devops-team @operator-team
+/build/ @devops-team
+/scripts/ @devops-team
+Dockerfile* @devops-team @security-team
+docker-compose*.yml @devops-team
+Makefile @devops-team @gunjanjp
+.dockerignore @devops-team
+
+# Testing
+/test/ @gunjanjp @operator-team
+/test/e2e/ @operator-team @qa-team
+/test/integration/ @operator-team @api-team
+/test/performance/ @operator-team @performance-team
+*_test.go @operator-team
+*.test.ts @frontend-team
+*.test.tsx @frontend-team
+
+# Security
+/internal/auth/ @security-team @gunjanjp
+/internal/rbac/ @security-team @gunjanjp
+/pkg/security/ @security-team
+/config/rbac/ @security-team @operator-team
+SECURITY.md @security-team @gunjanjp
+
+# Helm Charts
+/charts/ @devops-team @operator-team
+/charts/*/templates/ @devops-team @operator-team
+/charts/*/values.yaml @devops-team @gunjanjp
+
+# Dependencies
+go.mod @gunjanjp @operator-team
+go.sum @gunjanjp @operator-team
+package.json @frontend-team @gunjanjp
+package-lock.json @frontend-team @gunjanjp
+yarn.lock @frontend-team @gunjanjp
+
+# Legal and Compliance
+LICENSE @gunjanjp
+NOTICE @gunjanjp
+CODE_OF_CONDUCT.md @gunjanjp
+.github/SECURITY.md @security-team @gunjanjp
+
+# Project Configuration
+.gitignore @gunjanjp
+.gitattributes @gunjanjp
+.editorconfig @gunjanjp
+PROJECT @gunjanjp
+
+# Special Files Requiring Multiple Approvals
+# Breaking changes to APIs need multiple teams
+/api/v*/types.go @gunjanjp @operator-team @api-team
+/pkg/api/openapi.yaml @api-team @docs-team @frontend-team
+
+# Performance critical paths
+/controllers/reconcile.go @operator-team @performance-team
+/internal/cache/ @operator-team @performance-team
+
+# Data migration and schema changes
+/internal/migrations/ @gunjanjp @operator-team @database-team
