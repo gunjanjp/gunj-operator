@@ -1,0 +1,421 @@
+# Documentation Pipeline
+# Builds and deploys documentation to GitHub Pages
+name: Documentation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'api/**/*.go'
+      - 'README.md'
+      - 'mkdocs.yml'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'api/**/*.go'
+      - 'README.md'
+      - 'mkdocs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.21'
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # Generate API documentation
+  api-docs:
+    name: Generate API Documentation
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Install tools
+      run: |
+        # Install swag for OpenAPI generation
+        go install github.com/swaggo/swag/cmd/swag@latest
+        
+        # Install controller-gen for CRD documentation
+        go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.13.0
+        
+        # Install crd-ref-docs for better CRD documentation
+        go install github.com/elastic/crd-ref-docs@latest
+
+    - name: Generate OpenAPI documentation
+      run: |
+        # Generate OpenAPI spec for REST API
+        swag init -g cmd/api-server/main.go -o docs/api/openapi
+        
+        # Generate OpenAPI spec for operator
+        swag init -g cmd/operator/main.go -o docs/api/operator
+
+    - name: Generate CRD documentation
+      run: |
+        # Generate CRD reference documentation
+        crd-ref-docs \
+          --source-path=./api/v1beta1 \
+          --config=./hack/crd-ref-docs-config.yaml \
+          --output-path=./docs/api/crd-reference.md
+        
+        # Generate CRD YAML documentation
+        controller-gen crd paths="./..." output:crd:artifacts:config=docs/api/crds
+
+    - name: Generate Go documentation
+      run: |
+        # Install godoc
+        go install golang.org/x/tools/cmd/godoc@latest
+        
+        # Generate static godoc
+        godoc -http=:6060 &
+        GODOC_PID=$!
+        sleep 5
+        
+        # Download godoc pages
+        mkdir -p docs/api/godoc
+        wget -r -np -k -E -p -erobots=off \
+          --directory-prefix=docs/api/godoc \
+          --include-directories=/pkg/github.com/gunjanjp/gunj-operator \
+          http://localhost:6060/pkg/github.com/gunjanjp/gunj-operator/
+        
+        kill $GODOC_PID
+
+    - name: Upload API docs
+      uses: actions/upload-artifact@v4
+      with:
+        name: api-docs
+        path: docs/api/
+        retention-days: 1
+
+  # Generate CLI documentation
+  cli-docs:
+    name: Generate CLI Documentation
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Build CLI
+      run: |
+        go build -o gunj-cli cmd/cli/main.go
+
+    - name: Generate CLI documentation
+      run: |
+        # Generate markdown documentation
+        ./gunj-cli docs markdown --output-dir docs/cli
+        
+        # Generate man pages
+        ./gunj-cli docs man --output-dir docs/man
+        
+        # Generate completion scripts
+        mkdir -p docs/cli/completions
+        ./gunj-cli completion bash > docs/cli/completions/gunj-cli.bash
+        ./gunj-cli completion zsh > docs/cli/completions/gunj-cli.zsh
+        ./gunj-cli completion fish > docs/cli/completions/gunj-cli.fish
+        ./gunj-cli completion powershell > docs/cli/completions/gunj-cli.ps1
+
+    - name: Upload CLI docs
+      uses: actions/upload-artifact@v4
+      with:
+        name: cli-docs
+        path: docs/cli/
+        retention-days: 1
+
+  # Build main documentation
+  build-docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    needs: [api-docs, cli-docs]
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download API docs
+      uses: actions/download-artifact@v4
+      with:
+        name: api-docs
+        path: docs/api/
+
+    - name: Download CLI docs
+      uses: actions/download-artifact@v4
+      with:
+        name: cli-docs
+        path: docs/cli/
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install MkDocs and extensions
+      run: |
+        pip install -r docs/requirements.txt
+
+    - name: Build documentation site
+      run: |
+        mkdocs build --strict --verbose
+
+    - name: Upload documentation site
+      uses: actions/upload-artifact@v4
+      with:
+        name: documentation-site
+        path: site/
+        retention-days: 1
+
+  # Deploy to GitHub Pages
+  deploy-docs:
+    name: Deploy Documentation
+    runs-on: ubuntu-latest
+    needs: build-docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download documentation site
+      uses: actions/download-artifact@v4
+      with:
+        name: documentation-site
+        path: site/
+
+    - name: Setup Pages
+      uses: actions/configure-pages@v4
+
+    - name: Upload to Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: site/
+
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
+
+  # Generate and publish Helm documentation
+  helm-docs:
+    name: Generate Helm Documentation
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install helm-docs
+      run: |
+        wget https://github.com/norwoodj/helm-docs/releases/download/v1.11.0/helm-docs_1.11.0_Linux_x86_64.tar.gz
+        tar xzf helm-docs_1.11.0_Linux_x86_64.tar.gz
+        sudo mv helm-docs /usr/local/bin/
+
+    - name: Generate Helm documentation
+      run: |
+        helm-docs --chart-search-root=charts
+
+    - name: Check for changes
+      run: |
+        if [[ -n $(git status -s) ]]; then
+          echo "Helm documentation is out of date!"
+          git diff
+          exit 1
+        fi
+
+  # Validate documentation
+  validate-docs:
+    name: Validate Documentation
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Validate markdown
+      uses: DavidAnson/markdownlint-cli2-action@v14
+      with:
+        globs: |
+          docs/**/*.md
+          *.md
+
+    - name: Check spelling
+      uses: streetsidesoftware/cspell-action@v5
+      with:
+        config: .cspell.json
+        files: |
+          docs/**/*.md
+          *.md
+
+    - name: Validate YAML
+      run: |
+        pip install yamllint
+        yamllint -c .yamllint docs/**/*.yaml docs/**/*.yml
+
+    - name: Check broken links
+      uses: lycheeverse/lychee-action@v1
+      with:
+        args: >-
+          --exclude-mail
+          --exclude-loopback
+          --exclude-private
+          --accept 200,204,301,302
+          docs/
+          README.md
+
+  # Generate architecture diagrams
+  generate-diagrams:
+    name: Generate Architecture Diagrams
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install PlantUML
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y plantuml
+
+    - name: Install Mermaid CLI
+      run: |
+        npm install -g @mermaid-js/mermaid-cli
+
+    - name: Generate PlantUML diagrams
+      run: |
+        find docs -name "*.puml" -type f | while read -r file; do
+          echo "Generating diagram for $file"
+          plantuml -tsvg "$file"
+        done
+
+    - name: Generate Mermaid diagrams
+      run: |
+        find docs -name "*.mmd" -type f | while read -r file; do
+          echo "Generating diagram for $file"
+          mmdc -i "$file" -o "${file%.mmd}.svg" -t dark -b transparent
+        done
+
+    - name: Upload diagrams
+      uses: actions/upload-artifact@v4
+      with:
+        name: architecture-diagrams
+        path: |
+          docs/**/*.svg
+          docs/**/*.png
+        retention-days: 30
+
+  # Generate video tutorials
+  generate-videos:
+    name: Generate Video Tutorials
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install manim
+      run: |
+        pip install manim
+
+    - name: Generate tutorial videos
+      run: |
+        cd docs/videos
+        for script in *.py; do
+          echo "Generating video from $script"
+          manim -qh "$script"
+        done
+
+    - name: Upload videos
+      uses: actions/upload-artifact@v4
+      with:
+        name: tutorial-videos
+        path: docs/videos/media/videos/
+        retention-days: 30
+
+  # Documentation quality report
+  docs-report:
+    name: Documentation Quality Report
+    runs-on: ubuntu-latest
+    needs: [build-docs, validate-docs, helm-docs]
+    if: always()
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Generate documentation report
+      run: |
+        cat > docs-report.md << EOF
+        # Documentation Quality Report
+        
+        Date: $(date -u +%Y-%m-%d)
+        Commit: ${{ github.sha }}
+        
+        ## Coverage Analysis
+        
+        \`\`\`
+        Total Markdown Files: $(find docs -name "*.md" | wc -l)
+        Total Words: $(find docs -name "*.md" -exec wc -w {} + | tail -1 | awk '{print $1}')
+        Total Code Examples: $(find docs -name "*.md" -exec grep -c '```' {} + | awk '{sum+=$1} END {print sum/2}')
+        \`\`\`
+        
+        ## Build Status
+        
+        | Component | Status |
+        |-----------|--------|
+        | API Docs | ${{ needs.api-docs.result }} |
+        | CLI Docs | ${{ needs.cli-docs.result }} |
+        | Main Docs | ${{ needs.build-docs.result }} |
+        | Validation | ${{ needs.validate-docs.result }} |
+        | Helm Docs | ${{ needs.helm-docs.result }} |
+        
+        ## TODO Items
+        
+        \`\`\`
+        $(grep -r "TODO" docs/ --include="*.md" | wc -l) TODO items found
+        $(grep -r "FIXME" docs/ --include="*.md" | wc -l) FIXME items found
+        \`\`\`
+        
+        ## Recommendations
+        
+        1. Keep documentation in sync with code changes
+        2. Add more examples and tutorials
+        3. Include troubleshooting guides
+        4. Update screenshots regularly
+        EOF
+
+    - name: Upload report
+      uses: actions/upload-artifact@v4
+      with:
+        name: docs-report
+        path: docs-report.md
+        retention-days: 30
+
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('docs-report.md', 'utf8');
+          
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: report
+          });

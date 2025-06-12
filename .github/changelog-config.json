@@ -1,0 +1,75 @@
+# Changelog configuration for release workflow
+{
+  "categories": [
+    {
+      "title": "## 🚀 Features",
+      "labels": ["feat", "feature", "enhancement"]
+    },
+    {
+      "title": "## 🐛 Bug Fixes",
+      "labels": ["fix", "bug", "bugfix"]
+    },
+    {
+      "title": "## 📚 Documentation",
+      "labels": ["docs", "documentation"]
+    },
+    {
+      "title": "## 🧪 Testing",
+      "labels": ["test", "testing"]
+    },
+    {
+      "title": "## 🔧 Maintenance",
+      "labels": ["chore", "maintenance", "ci", "build"]
+    },
+    {
+      "title": "## ⚡ Performance",
+      "labels": ["perf", "performance"]
+    },
+    {
+      "title": "## 🔒 Security",
+      "labels": ["security"]
+    },
+    {
+      "title": "## 💥 Breaking Changes",
+      "labels": ["breaking", "breaking-change"]
+    }
+  ],
+  "ignore_labels": [
+    "ignore-changelog",
+    "duplicate",
+    "invalid",
+    "wontfix"
+  ],
+  "sort": {
+    "order": "DESC"
+  },
+  "template": "${{CHANGELOG}}\n\n## Contributors\n\nWe'd like to thank all the contributors who made this release possible!\n\n${{CONTRIBUTORS}}",
+  "pr_template": "- ${{TITLE}} (#${{NUMBER}}) @${{AUTHOR}}",
+  "empty_template": "- No changes in this category",
+  "label_extractor": [
+    {
+      "pattern": "^(feat|fix|docs|test|chore|perf|refactor|revert|ci|build)(\\(.+\\))?:",
+      "target": "$1"
+    }
+  ],
+  "duplicate_filter": {
+    "pattern": "^(Revert|revert)",
+    "labels": ["revert"]
+  },
+  "transformers": [
+    {
+      "pattern": "^(feat|fix|docs|test|chore|perf|refactor|revert|ci|build)(\\(.+\\))?:\\s*(.*)$",
+      "target": "$3"
+    }
+  ],
+  "max_tags_to_fetch": 10,
+  "max_pull_requests": 250,
+  "max_back_track_time_days": 365,
+  "exclude_merge_branches": ["main"],
+  "tag_resolver": {
+    "method": "semver",
+    "filter": {
+      "pattern": "^v(\\d+\\.\\d+\\.\\d+)$"
+    }
+  }
+}

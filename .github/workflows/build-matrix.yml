@@ -1,0 +1,413 @@
+# Build Matrix Workflow for Gunj Operator
+# Supports multi-architecture builds for all components
+# Version: 2.0
+# Last Updated: June 12, 2025
+
+name: Build Matrix
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'release/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+  schedule:
+    # Nightly builds at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      components:
+        description: 'Components to build (comma-separated: operator,api,ui,cli)'
+        required: false
+        default: 'all'
+      architectures:
+        description: 'Architectures to build (comma-separated: amd64,arm64,arm/v7)'
+        required: false
+        default: 'all'
+
+env:
+  # Global environment variables
+  GO_VERSION: '1.21'
+  NODE_VERSION: '20'
+  DOCKER_BUILDKIT: 1
+  REGISTRY: docker.io
+  REGISTRY_USER: gunjanjp
+  # Version tagging
+  VERSION: ${{ github.sha }}
+  # Caching
+  GOCACHE: /tmp/.cache/go-build
+  GOMODCACHE: /tmp/.cache/go-mod
+
+jobs:
+  # Determine build matrix based on inputs or defaults
+  setup-matrix:
+    name: Setup Build Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      components: ${{ steps.set-matrix.outputs.components }}
+      architectures: ${{ steps.set-matrix.outputs.architectures }}
+      go-version: ${{ steps.set-matrix.outputs.go-version }}
+      node-version: ${{ steps.set-matrix.outputs.node-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set build matrix
+        id: set-matrix
+        run: |
+          # Components matrix
+          if [[ "${{ github.event.inputs.components }}" == "all" ]] || [[ -z "${{ github.event.inputs.components }}" ]]; then
+            echo "components=[\"operator\",\"api\",\"ui\",\"cli\"]" >> $GITHUB_OUTPUT
+          else
+            IFS=',' read -ra COMP_ARRAY <<< "${{ github.event.inputs.components }}"
+            COMP_JSON=$(printf '"%s",' "${COMP_ARRAY[@]}" | sed 's/,$//')
+            echo "components=[$COMP_JSON]" >> $GITHUB_OUTPUT
+          fi
+
+          # Architectures matrix
+          if [[ "${{ github.event.inputs.architectures }}" == "all" ]] || [[ -z "${{ github.event.inputs.architectures }}" ]]; then
+            echo "architectures=[\"linux/amd64\",\"linux/arm64\",\"linux/arm/v7\"]" >> $GITHUB_OUTPUT
+          else
+            IFS=',' read -ra ARCH_ARRAY <<< "${{ github.event.inputs.architectures }}"
+            ARCH_JSON=$(printf '"linux/%s",' "${ARCH_ARRAY[@]}" | sed 's/,$//')
+            echo "architectures=[$ARCH_JSON]" >> $GITHUB_OUTPUT
+          fi
+
+          # Version information
+          echo "go-version=${{ env.GO_VERSION }}" >> $GITHUB_OUTPUT
+          echo "node-version=${{ env.NODE_VERSION }}" >> $GITHUB_OUTPUT
+
+  # Build Go-based components (operator, api, cli)
+  build-go:
+    name: Build Go Component
+    needs: setup-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJson(needs.setup-matrix.outputs.components) }}
+        arch: ${{ fromJson(needs.setup-matrix.outputs.architectures) }}
+        exclude:
+          # UI is not a Go component
+          - component: ui
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        if: matrix.component != 'ui'
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ needs.setup-matrix.outputs.go-version }}
+          cache: true
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ matrix.component }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ matrix.component }}-
+            ${{ runner.os }}-go-
+
+      - name: Determine build parameters
+        id: build-params
+        run: |
+          # Extract GOOS and GOARCH from platform
+          PLATFORM="${{ matrix.arch }}"
+          GOOS="${PLATFORM%%/*}"
+          GOARCH_FULL="${PLATFORM#*/}"
+          
+          # Handle ARM variants
+          if [[ "$GOARCH_FULL" == "arm/v7" ]]; then
+            GOARCH="arm"
+            GOARM="7"
+          else
+            GOARCH="$GOARCH_FULL"
+            GOARM=""
+          fi
+          
+          echo "goos=$GOOS" >> $GITHUB_OUTPUT
+          echo "goarch=$GOARCH" >> $GITHUB_OUTPUT
+          echo "goarm=$GOARM" >> $GITHUB_OUTPUT
+          echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
+
+          # Component-specific build paths
+          case "${{ matrix.component }}" in
+            "operator")
+              echo "main_path=./cmd/operator" >> $GITHUB_OUTPUT
+              echo "binary_name=gunj-operator" >> $GITHUB_OUTPUT
+              echo "dockerfile=Dockerfile" >> $GITHUB_OUTPUT
+              ;;
+            "api")
+              echo "main_path=./cmd/api-server" >> $GITHUB_OUTPUT
+              echo "binary_name=gunj-api-server" >> $GITHUB_OUTPUT
+              echo "dockerfile=Dockerfile.api" >> $GITHUB_OUTPUT
+              ;;
+            "cli")
+              echo "main_path=./cmd/cli" >> $GITHUB_OUTPUT
+              echo "binary_name=gunj-cli" >> $GITHUB_OUTPUT
+              echo "dockerfile=Dockerfile.cli" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Run tests
+        if: matrix.arch == 'linux/amd64'
+        run: |
+          make test-${{ matrix.component }}
+
+      - name: Build binary
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ steps.build-params.outputs.goos }}
+          GOARCH: ${{ steps.build-params.outputs.goarch }}
+          GOARM: ${{ steps.build-params.outputs.goarm }}
+        run: |
+          # Build flags
+          VERSION_FLAGS="-X main.version=${{ github.sha }} -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          BUILD_FLAGS="-ldflags '-w -s $VERSION_FLAGS' -a -trimpath"
+          
+          # Create output directory
+          mkdir -p dist/${{ matrix.component }}/${{ steps.build-params.outputs.platform }}
+          
+          # Build binary
+          go build $BUILD_FLAGS \
+            -o dist/${{ matrix.component }}/${{ steps.build-params.outputs.platform }}/${{ steps.build-params.outputs.binary_name }} \
+            ${{ steps.build-params.outputs.main_path }}
+
+      - name: Build container image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ${{ steps.build-params.outputs.dockerfile }}
+          platforms: ${{ matrix.arch }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:${{ github.sha }}-${{ steps.build-params.outputs.goarch }}
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:latest-${{ steps.build-params.outputs.goarch }}
+          build-args: |
+            VERSION=${{ github.sha }}
+            BUILD_DATE=${{ steps.build-params.outputs.build_date }}
+            TARGETPLATFORM=${{ matrix.arch }}
+            BUILDPLATFORM=${{ runner.os }}/${{ runner.arch }}
+          cache-from: type=gha,scope=${{ matrix.component }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}-${{ matrix.arch }}
+          outputs: type=docker,dest=/tmp/${{ matrix.component }}-${{ steps.build-params.outputs.goarch }}.tar
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.component }}-binary-${{ steps.build-params.outputs.goos }}-${{ steps.build-params.outputs.goarch }}${{ steps.build-params.outputs.goarm }}
+          path: dist/${{ matrix.component }}/${{ steps.build-params.outputs.platform }}/*
+          retention-days: 7
+
+      - name: Upload container artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.component }}-container-${{ steps.build-params.outputs.goarch }}
+          path: /tmp/${{ matrix.component }}-${{ steps.build-params.outputs.goarch }}.tar
+          retention-days: 1
+
+  # Build UI component (React/Node.js based)
+  build-ui:
+    name: Build UI Component
+    needs: setup-matrix
+    runs-on: ubuntu-latest
+    if: contains(fromJson(needs.setup-matrix.outputs.components), 'ui')
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJson(needs.setup-matrix.outputs.architectures) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ needs.setup-matrix.outputs.node-version }}
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ui/node_modules
+            ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('ui/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install dependencies
+        working-directory: ./ui
+        run: npm ci
+
+      - name: Run tests
+        if: matrix.arch == 'linux/amd64'
+        working-directory: ./ui
+        run: |
+          npm run test:unit
+          npm run test:coverage
+
+      - name: Build UI
+        working-directory: ./ui
+        env:
+          REACT_APP_VERSION: ${{ github.sha }}
+          REACT_APP_BUILD_DATE: ${{ steps.build-params.outputs.build_date }}
+        run: |
+          npm run build
+          
+      - name: Build container image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.ui
+          platforms: ${{ matrix.arch }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/gunj-ui:${{ github.sha }}-${{ matrix.arch }}
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/gunj-ui:latest-${{ matrix.arch }}
+          cache-from: type=gha,scope=ui-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=ui-${{ matrix.arch }}
+          outputs: type=docker,dest=/tmp/ui-${{ matrix.arch }}.tar
+
+      - name: Upload UI build artifact
+        if: matrix.arch == 'linux/amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-build
+          path: ui/dist/*
+          retention-days: 7
+
+      - name: Upload container artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-container-${{ matrix.arch }}
+          path: /tmp/ui-${{ matrix.arch }}.tar
+          retention-days: 1
+
+  # Create multi-arch manifests
+  create-manifests:
+    name: Create Multi-arch Manifests
+    needs: [build-go, build-ui, setup-matrix]
+    runs-on: ubuntu-latest
+    if: always() && (needs.build-go.result == 'success' || needs.build-ui.result == 'success')
+    strategy:
+      matrix:
+        component: ${{ fromJson(needs.setup-matrix.outputs.components) }}
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.REGISTRY_USER }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Download container artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ matrix.component }}-container-*
+          path: /tmp/containers
+
+      - name: Load container images
+        run: |
+          for tarfile in /tmp/containers/${{ matrix.component }}-container-*/*.tar; do
+            docker load -i $tarfile
+          done
+
+      - name: Create and push manifest
+        if: github.event_name != 'pull_request'
+        run: |
+          # Create manifest for SHA tag
+          docker manifest create \
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:${{ github.sha }} \
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:${{ github.sha }}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:${{ github.sha }}-arm64 \
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:${{ github.sha }}-arm
+
+          # Create manifest for latest tag
+          docker manifest create \
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:latest \
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:latest-amd64 \
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:latest-arm64 \
+            ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:latest-arm
+
+          # Push manifests
+          docker manifest push ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:${{ github.sha }}
+          docker manifest push ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/${{ matrix.component }}:latest
+
+  # Build summary and notifications
+  build-summary:
+    name: Build Summary
+    needs: [create-manifests, setup-matrix]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Create build summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # Build Summary for Gunj Operator
+          
+          ## Build Information
+          - **Commit:** ${{ github.sha }}
+          - **Branch:** ${{ github.ref_name }}
+          - **Triggered by:** ${{ github.actor }}
+          - **Event:** ${{ github.event_name }}
+          
+          ## Components Built
+          ${{ needs.setup-matrix.outputs.components }}
+          
+          ## Architectures
+          ${{ needs.setup-matrix.outputs.architectures }}
+          
+          ## Build Status
+          - Go Builds: ${{ needs.build-go.result }}
+          - UI Build: ${{ needs.build-ui.result }}
+          - Manifest Creation: ${{ needs.create-manifests.result }}
+          
+          ## Container Images
+          EOF
+          
+          for component in operator api ui cli; do
+            echo "- \`${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/$component:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          done
+
+      - name: Send Slack notification
+        if: github.event_name != 'pull_request' && always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            Build Matrix Complete for Gunj Operator
+            Components: ${{ needs.setup-matrix.outputs.components }}
+            Commit: ${{ github.sha }}
+            Status: ${{ job.status }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

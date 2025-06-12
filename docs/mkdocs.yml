@@ -1,0 +1,231 @@
+# MkDocs Configuration for Gunj Operator
+
+site_name: Gunj Operator Documentation
+site_description: Enterprise Observability Platform for Kubernetes
+site_author: Gunjan Patel
+site_url: https://gunjanjp.github.io/gunj-operator
+repo_name: gunjanjp/gunj-operator
+repo_url: https://github.com/gunjanjp/gunj-operator
+edit_uri: edit/main/docs/
+
+# Copyright
+copyright: Copyright &copy; 2025 Gunjan Patel
+
+# Theme configuration
+theme:
+  name: material
+  custom_dir: overrides
+  favicon: assets/favicon.png
+  logo: assets/logo.png
+  
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.annotate
+    - content.code.copy
+    - content.tabs.link
+    - toc.follow
+    - toc.integrate
+    
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  
+  font:
+    text: Roboto
+    code: Roboto Mono
+  
+  icon:
+    repo: fontawesome/brands/github
+    
+# Plugins
+plugins:
+  - search:
+      separator: '[\s\-\.]+'
+      lang: en
+  - minify:
+      minify_html: true
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: date
+  - awesome-pages
+  - macros
+  - include-markdown
+  - mermaid2
+  
+# Extensions
+markdown_extensions:
+  # Python Markdown
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - meta
+  - md_in_html
+  - toc:
+      permalink: true
+      toc_depth: 3
+  
+  # Python Markdown Extensions
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.critic
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets:
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Page tree
+nav:
+  - Home:
+    - index.md
+    - getting-started.md
+    - concepts.md
+    - installation.md
+    
+  - User Guide:
+    - user-guide/index.md
+    - user-guide/platforms.md
+    - user-guide/components.md
+    - user-guide/configuration.md
+    - user-guide/monitoring.md
+    - user-guide/alerting.md
+    - user-guide/backup-restore.md
+    - user-guide/upgrades.md
+    - user-guide/troubleshooting.md
+    
+  - Architecture:
+    - architecture/index.md
+    - architecture/overview.md
+    - architecture/operator.md
+    - architecture/api.md
+    - architecture/ui.md
+    - architecture/security.md
+    - architecture/scalability.md
+    
+  - API Reference:
+    - api/index.md
+    - api/rest.md
+    - api/graphql.md
+    - api/webhooks.md
+    - api/crd-reference.md
+    
+  - Development:
+    - development/index.md
+    - development/getting-started.md
+    - development/coding-standards.md
+    - development/testing.md
+    - development/debugging.md
+    - development/contributing.md
+    
+  - Operations:
+    - operations/index.md
+    - operations/deployment.md
+    - operations/monitoring.md
+    - operations/security.md
+    - operations/performance.md
+    - operations/disaster-recovery.md
+    
+  - Tutorials:
+    - tutorials/index.md
+    - tutorials/quick-start.md
+    - tutorials/production-setup.md
+    - tutorials/multi-cluster.md
+    - tutorials/gitops-integration.md
+    - tutorials/cost-optimization.md
+    
+  - Reference:
+    - reference/index.md
+    - reference/cli.md
+    - reference/configuration.md
+    - reference/metrics.md
+    - reference/glossary.md
+    
+  - Community:
+    - community/index.md
+    - community/contributing.md
+    - community/code-of-conduct.md
+    - community/roadmap.md
+    - community/support.md
+
+# Extra configuration
+extra:
+  generator: false
+  version:
+    provider: mike
+    default: stable
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/gunjanjp/gunj-operator
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com/GunjOperator
+    - icon: fontawesome/brands/slack
+      link: https://kubernetes.slack.com/messages/gunj-operator
+  analytics:
+    provider: google
+    property: !ENV GOOGLE_ANALYTICS_KEY
+  consent:
+    title: Cookie consent
+    description: >- 
+      We use cookies to recognize your repeated visits and preferences, as well
+      as to measure the effectiveness of our documentation and whether users
+      find what they're searching for. With your consent, you're helping us to
+      make our documentation better.
+
+# Extra CSS
+extra_css:
+  - stylesheets/extra.css
+
+# Extra JavaScript
+extra_javascript:
+  - javascripts/extra.js
+  - https://unpkg.com/mermaid@8.8.4/dist/mermaid.min.js

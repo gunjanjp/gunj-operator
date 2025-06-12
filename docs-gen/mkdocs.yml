@@ -1,0 +1,258 @@
+site_name: Gunj Operator Documentation
+site_description: Enterprise Observability Platform for Kubernetes
+site_author: Gunjan Patel
+site_url: https://gunjanjp.github.io/gunj-operator
+repo_name: gunjanjp/gunj-operator
+repo_url: https://github.com/gunjanjp/gunj-operator
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2025 Gunjan Patel
+
+# Theme configuration
+theme:
+  name: material
+  custom_dir: overrides
+  language: en
+  features:
+    - announce.dismiss
+    - content.action.edit
+    - content.action.view
+    - content.code.annotate
+    - content.code.copy
+    - content.code.select
+    - content.tabs.link
+    - content.tooltips
+    - header.autohide
+    - navigation.expand
+    - navigation.footer
+    - navigation.indexes
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.instant.progress
+    - navigation.prune
+    - navigation.sections
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
+    - search.suggest
+    - toc.follow
+    - toc.integrate
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  font:
+    text: Roboto
+    code: Roboto Mono
+  favicon: assets/favicon.png
+  icon:
+    logo: material/kubernetes
+    repo: fontawesome/brands/github
+    edit: material/pencil
+    view: material/eye
+
+# Extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+      emoji_index: !!python/name:materialx.emoji.twemoji
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      normalize_issue_symbols: true
+      repo_url_shorthand: true
+      user: gunjanjp
+      repo: gunj-operator
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets:
+      auto_append:
+        - includes/mkdocs.md
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+      combine_header_slug: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Plugins
+plugins:
+  - search:
+      separator: '[\s\u200b\-_,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - redirects:
+      redirect_maps:
+        'getting-started.md': 'user-guide/getting-started.md'
+  - minify:
+      minify_html: true
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: iso_datetime
+  - mike:
+      version_selector: true
+      css_dir: css
+      javascript_dir: js
+      canonical_version: stable
+
+# Extra configuration
+extra:
+  version:
+    provider: mike
+    default: stable
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/gunjanjp
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com/gunjanjp
+    - icon: fontawesome/brands/linkedin
+      link: https://linkedin.com/in/gunjanjp
+  analytics:
+    provider: google
+    property: G-XXXXXXXXXX
+  consent:
+    title: Cookie consent
+    description: >- 
+      We use cookies to recognize your repeated visits and preferences, as well
+      as to measure the effectiveness of our documentation and whether users
+      find what they're searching for. With your consent, you're helping us to
+      make our documentation better.
+
+# Extra CSS
+extra_css:
+  - stylesheets/extra.css
+
+# Extra JavaScript
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+# Navigation
+nav:
+  - Home:
+    - index.md
+    - getting-started.md
+    - architecture.md
+    - roadmap.md
+  
+  - User Guide:
+    - user-guide/index.md
+    - Installation:
+      - user-guide/installation/requirements.md
+      - user-guide/installation/quick-start.md
+      - user-guide/installation/production.md
+      - user-guide/installation/upgrade.md
+    - Configuration:
+      - user-guide/configuration/platforms.md
+      - user-guide/configuration/components.md
+      - user-guide/configuration/security.md
+      - user-guide/configuration/networking.md
+    - Operations:
+      - user-guide/operations/monitoring.md
+      - user-guide/operations/backup-restore.md
+      - user-guide/operations/troubleshooting.md
+      - user-guide/operations/performance.md
+  
+  - Developer Guide:
+    - development/index.md
+    - development/getting-started.md
+    - development/architecture.md
+    - development/coding-standards-go.md
+    - development/coding-standards-typescript.md
+    - API Development:
+      - development/api/rest.md
+      - development/api/graphql.md
+      - development/api/webhooks.md
+    - Operator Development:
+      - development/operator/controllers.md
+      - development/operator/crd.md
+      - development/operator/testing.md
+    - UI Development:
+      - development/ui/components.md
+      - development/ui/state-management.md
+      - development/ui/testing.md
+  
+  - API Reference:
+    - api/index.md
+    - CRD Reference:
+      - api/crd/observabilityplatform.md
+      - api/crd/alertingrule.md
+      - api/crd/dashboard.md
+    - REST API:
+      - api/rest/platforms.md
+      - api/rest/components.md
+      - api/rest/operations.md
+    - GraphQL API:
+      - api/graphql/schema.md
+      - api/graphql/queries.md
+      - api/graphql/mutations.md
+  
+  - Architecture:
+    - architecture/index.md
+    - architecture/operator-internals.md
+    - architecture/api-architecture.md
+    - architecture/ui-architecture.md
+    - architecture/security-architecture.md
+    - architecture/scalability.md
+    - architecture/integrations.md
+    - Decision Records:
+      - architecture/decisions/adr-001-operator-framework.md
+      - architecture/decisions/adr-002-api-design.md
+      - architecture/decisions/adr-003-ui-framework.md
+  
+  - Community:
+    - community/index.md
+    - community/contributing.md
+    - community/code-of-conduct.md
+    - community/meetings.md
+    - community/roadmap.md
+    - community/support.md
+  
+  - Releases:
+    - releases/index.md
+    - releases/v2.0.0.md
+    - releases/migration-guide.md
+    - releases/breaking-changes.md

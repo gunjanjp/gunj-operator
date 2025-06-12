@@ -1,0 +1,180 @@
+{
+  "name": "Gunj Operator Development",
+  "dockerComposeFile": [
+    "../docker-compose.yml"
+  ],
+  "service": "dev",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  
+  // Features to add to the dev container
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "enableNonRootDocker": "true",
+      "moby": "true"
+    },
+    "ghcr.io/devcontainers/features/git:1": {
+      "version": "latest",
+      "ppa": "false"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {
+      "installDirectlyFromGitHubRelease": "true",
+      "version": "latest"
+    }
+  },
+
+  // Configure tool-specific properties
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "go.toolsManagement.checkForUpdates": "local",
+        "go.useLanguageServer": true,
+        "go.gopath": "/home/developer/go",
+        "go.goroot": "/usr/local/go",
+        "go.lintTool": "golangci-lint",
+        "go.lintFlags": [
+          "--fast"
+        ],
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.organizeImports": true
+        },
+        "[go]": {
+          "editor.defaultFormatter": "golang.go"
+        },
+        "[typescript]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[typescriptreact]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[javascript]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[javascriptreact]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[json]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[yaml]": {
+          "editor.defaultFormatter": "redhat.vscode-yaml"
+        },
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "terminal.integrated.profiles.linux": {
+          "bash": {
+            "path": "/bin/bash",
+            "icon": "terminal-bash"
+          }
+        },
+        "files.associations": {
+          "*.yaml": "yaml",
+          "*.yml": "yaml"
+        },
+        "yaml.schemas": {
+          "kubernetes": "/*.yaml"
+        },
+        "redhat.telemetry.enabled": false,
+        "gopls": {
+          "ui.semanticTokens": true,
+          "ui.completion.usePlaceholders": true
+        },
+        "files.exclude": {
+          "**/.git": true,
+          "**/.DS_Store": true,
+          "**/node_modules": true,
+          "**/bin": true,
+          "**/dist": true,
+          "**/*.test": true
+        },
+        "search.exclude": {
+          "**/node_modules": true,
+          "**/vendor": true,
+          "**/bin": true,
+          "**/dist": true,
+          "**/.git": true
+        }
+      },
+      
+      // VS Code extensions to install
+      "extensions": [
+        "golang.go",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "redhat.vscode-yaml",
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "ms-azuretools.vscode-docker",
+        "hashicorp.terraform",
+        "eamodio.gitlens",
+        "mhutchie.git-graph",
+        "yzhang.markdown-all-in-one",
+        "davidanson.vscode-markdownlint",
+        "streetsidesoftware.code-spell-checker",
+        "ms-vscode.makefile-tools",
+        "zxh404.vscode-proto3",
+        "foxundermoon.shell-format",
+        "timonwong.shellcheck",
+        "redhat.vscode-openshift-connector",
+        "mindaro.mindaro",
+        "ms-vscode-remote.remote-containers"
+      ]
+    }
+  },
+
+  // Port forwarding
+  "forwardPorts": [
+    3000, // React UI
+    8080, // Operator metrics
+    8081, // API server
+    9090, // Prometheus
+    3001, // Grafana
+    3100, // Loki
+    3200, // Tempo
+    5432, // PostgreSQL
+    6379, // Redis
+    8000  // Documentation
+  ],
+  
+  "portsAttributes": {
+    "3000": {
+      "label": "React UI",
+      "onAutoForward": "notify"
+    },
+    "8081": {
+      "label": "API Server",
+      "onAutoForward": "notify"
+    },
+    "9090": {
+      "label": "Prometheus",
+      "onAutoForward": "notify"
+    },
+    "3001": {
+      "label": "Grafana",
+      "onAutoForward": "notify"
+    },
+    "8000": {
+      "label": "Documentation",
+      "onAutoForward": "notify"
+    }
+  },
+
+  // Lifecycle scripts
+  "postCreateCommand": "make install-deps && make setup-dev",
+  "postStartCommand": "make dev-info",
+  
+  // Environment variables
+  "remoteEnv": {
+    "GOPRIVATE": "github.com/gunjanjp",
+    "EDITOR": "code --wait"
+  },
+  
+  // Run as non-root user
+  "remoteUser": "developer",
+  
+  // Mount points
+  "mounts": [
+    "source=${localEnv:HOME}/.ssh,target=/home/developer/.ssh,type=bind,consistency=cached,readonly",
+    "source=${localEnv:HOME}/.gitconfig,target=/home/developer/.gitconfig,type=bind,consistency=cached,readonly"
+  ]
+}

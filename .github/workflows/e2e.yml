@@ -1,0 +1,462 @@
+# End-to-End Testing Pipeline
+# Runs comprehensive E2E tests on multiple Kubernetes versions
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'config/**'
+      - 'test/e2e/**'
+      - '.github/workflows/e2e.yml'
+  schedule:
+    # Run nightly at 1 AM UTC
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      k8s-version:
+        description: 'Kubernetes version to test'
+        required: false
+        type: choice
+        options:
+          - '1.26'
+          - '1.27'
+          - '1.28'
+          - '1.29'
+          - 'all'
+        default: 'all'
+
+env:
+  GO_VERSION: '1.21'
+  KIND_VERSION: 'v0.20.0'
+  CERT_MANAGER_VERSION: 'v1.13.0'
+  TIMEOUT: '30m'
+
+jobs:
+  # Build test images
+  build-test-images:
+    name: Build Test Images
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.tag.outputs.tag }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Generate image tag
+      id: tag
+      run: |
+        TAG="e2e-${GITHUB_SHA::8}"
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build operator image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile
+        push: false
+        tags: gunj-operator:${{ steps.tag.outputs.tag }}
+        outputs: type=docker,dest=/tmp/operator.tar
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build API image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile.api
+        push: false
+        tags: gunj-api:${{ steps.tag.outputs.tag }}
+        outputs: type=docker,dest=/tmp/api.tar
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build UI image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile.ui
+        push: false
+        tags: gunj-ui:${{ steps.tag.outputs.tag }}
+        outputs: type=docker,dest=/tmp/ui.tar
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Upload images
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-images
+        path: /tmp/*.tar
+        retention-days: 1
+
+  # Run E2E tests on different K8s versions
+  e2e-test:
+    name: E2E Test (K8s ${{ matrix.k8s-version }})
+    runs-on: ubuntu-latest
+    needs: build-test-images
+    strategy:
+      fail-fast: false
+      matrix:
+        k8s-version: ['1.26', '1.27', '1.28', '1.29']
+        test-suite: ['basic', 'advanced', 'chaos']
+        exclude:
+          # Skip chaos tests on older versions
+          - k8s-version: '1.26'
+            test-suite: 'chaos'
+          - k8s-version: '1.27'
+            test-suite: 'chaos'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Download test images
+      uses: actions/download-artifact@v4
+      with:
+        name: test-images
+        path: /tmp
+
+    - name: Create kind cluster
+      run: |
+        # Install kind
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
+        
+        # Create cluster config
+        cat > kind-config.yaml << EOF
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        nodes:
+        - role: control-plane
+          kubeadmConfigPatches:
+          - |
+            kind: InitConfiguration
+            nodeRegistration:
+              kubeletExtraArgs:
+                node-labels: "ingress-ready=true"
+          extraPortMappings:
+          - containerPort: 80
+            hostPort: 80
+            protocol: TCP
+          - containerPort: 443
+            hostPort: 443
+            protocol: TCP
+        - role: worker
+        - role: worker
+        EOF
+        
+        # Create cluster
+        kind create cluster --name e2e-test --config kind-config.yaml --image kindest/node:v${{ matrix.k8s-version }}
+        
+        # Wait for cluster to be ready
+        kubectl wait --for=condition=ready nodes --all --timeout=300s
+
+    - name: Load test images
+      run: |
+        for image in /tmp/*.tar; do
+          docker load -i "$image"
+        done
+        
+        # Tag images
+        docker tag gunj-operator:${{ needs.build-test-images.outputs.image-tag }} gunj-operator:latest
+        docker tag gunj-api:${{ needs.build-test-images.outputs.image-tag }} gunj-api:latest
+        docker tag gunj-ui:${{ needs.build-test-images.outputs.image-tag }} gunj-ui:latest
+        
+        # Load into kind
+        kind load docker-image gunj-operator:latest --name e2e-test
+        kind load docker-image gunj-api:latest --name e2e-test
+        kind load docker-image gunj-ui:latest --name e2e-test
+
+    - name: Install prerequisites
+      run: |
+        # Install cert-manager
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/instance=cert-manager -n cert-manager --timeout=300s
+        
+        # Install NGINX ingress
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+        kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=controller -n ingress-nginx --timeout=300s
+
+    - name: Install CRDs
+      run: |
+        make install
+
+    - name: Deploy operator
+      run: |
+        # Create namespace
+        kubectl create namespace gunj-system
+        
+        # Deploy operator with test image
+        make deploy IMG=gunj-operator:latest
+        
+        # Wait for deployment
+        kubectl wait --for=condition=available deployment/gunj-operator-controller-manager -n gunj-system --timeout=300s
+
+    - name: Run ${{ matrix.test-suite }} E2E tests
+      run: |
+        case "${{ matrix.test-suite }}" in
+          basic)
+            make test-e2e-basic
+            ;;
+          advanced)
+            make test-e2e-advanced
+            ;;
+          chaos)
+            make test-e2e-chaos
+            ;;
+        esac
+      env:
+        E2E_TIMEOUT: ${{ env.TIMEOUT }}
+        E2E_PARALLEL: 3
+
+    - name: Collect logs
+      if: failure()
+      run: |
+        mkdir -p /tmp/logs
+        
+        # Collect operator logs
+        kubectl logs -n gunj-system -l control-plane=controller-manager --tail=-1 > /tmp/logs/operator.log || true
+        
+        # Collect all pod logs
+        for ns in $(kubectl get ns -o name | cut -d/ -f2); do
+          for pod in $(kubectl get pods -n $ns -o name | cut -d/ -f2); do
+            kubectl logs -n $ns $pod --all-containers --tail=-1 > /tmp/logs/${ns}-${pod}.log || true
+          done
+        done
+        
+        # Collect events
+        kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/logs/events.log || true
+        
+        # Collect resource states
+        kubectl get all --all-namespaces -o yaml > /tmp/logs/resources.yaml || true
+
+    - name: Upload logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-logs-${{ matrix.k8s-version }}-${{ matrix.test-suite }}
+        path: /tmp/logs
+        retention-days: 7
+
+    - name: Cleanup
+      if: always()
+      run: |
+        kind delete cluster --name e2e-test || true
+
+  # Performance E2E tests
+  performance-e2e:
+    name: Performance E2E Tests
+    runs-on: ubuntu-latest-16-cores
+    needs: build-test-images
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Download test images
+      uses: actions/download-artifact@v4
+      with:
+        name: test-images
+        path: /tmp
+
+    - name: Create performance test cluster
+      run: |
+        # Create larger cluster for performance testing
+        cat > kind-config-perf.yaml << EOF
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        nodes:
+        - role: control-plane
+        - role: worker
+        - role: worker
+        - role: worker
+        - role: worker
+        EOF
+        
+        kind create cluster --name perf-test --config kind-config-perf.yaml
+
+    - name: Load images and deploy
+      run: |
+        # Load images
+        for image in /tmp/*.tar; do
+          docker load -i "$image"
+          kind load docker-image --name perf-test $(docker images --format "{{.Repository}}:{{.Tag}}" | head -1)
+        done
+        
+        # Install prerequisites
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml
+        
+        # Deploy operator
+        make install
+        make deploy IMG=gunj-operator:${{ needs.build-test-images.outputs.image-tag }}
+
+    - name: Run performance tests
+      run: |
+        make test-e2e-performance
+      env:
+        E2E_PERF_DURATION: 1h
+        E2E_PERF_PLATFORMS: 50
+        E2E_PERF_CONCURRENT_OPS: 10
+
+    - name: Generate performance report
+      run: |
+        # Process performance metrics
+        go run test/e2e/performance/analyze.go \
+          --metrics-dir test/e2e/performance/results \
+          --output-format markdown \
+          --output-file performance-report.md
+
+    - name: Upload performance report
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-report
+        path: performance-report.md
+        retention-days: 30
+
+    - name: Comment performance results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('performance-report.md', 'utf8');
+          
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## Performance Test Results\n\n${report}`
+          });
+
+  # Upgrade E2E tests
+  upgrade-e2e:
+    name: Upgrade E2E Tests
+    runs-on: ubuntu-latest
+    needs: build-test-images
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up test environment
+      run: |
+        # Create cluster
+        kind create cluster --name upgrade-test
+        
+        # Install cert-manager
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml
+
+    - name: Install previous version
+      run: |
+        # Install the last released version
+        kubectl apply -f https://github.com/gunjanjp/gunj-operator/releases/latest/download/gunj-operator.yaml
+        
+        # Create test platform
+        kubectl apply -f test/e2e/upgrade/test-platform.yaml
+        
+        # Wait for platform to be ready
+        kubectl wait --for=condition=ready observabilityplatform/test-platform --timeout=600s
+
+    - name: Upgrade to current version
+      run: |
+        # Load new images
+        for image in /tmp/*.tar; do
+          docker load -i "$image"
+          kind load docker-image --name upgrade-test $(docker images --format "{{.Repository}}:{{.Tag}}" | head -1)
+        done
+        
+        # Apply new version
+        make deploy IMG=gunj-operator:${{ needs.build-test-images.outputs.image-tag }}
+
+    - name: Verify upgrade
+      run: |
+        # Run upgrade verification tests
+        make test-e2e-upgrade
+
+  # Multi-cluster E2E tests
+  multi-cluster-e2e:
+    name: Multi-Cluster E2E Tests
+    runs-on: ubuntu-latest
+    needs: build-test-images
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Create multiple clusters
+      run: |
+        # Create management cluster
+        kind create cluster --name management
+        
+        # Create workload clusters
+        kind create cluster --name workload-1
+        kind create cluster --name workload-2
+
+    - name: Deploy operator on all clusters
+      run: |
+        for cluster in management workload-1 workload-2; do
+          kubectl config use-context kind-${cluster}
+          
+          # Install cert-manager
+          kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml
+          
+          # Deploy operator
+          make install
+          make deploy IMG=gunj-operator:${{ needs.build-test-images.outputs.image-tag }}
+        done
+
+    - name: Run multi-cluster tests
+      run: |
+        make test-e2e-multi-cluster
+
+  # E2E test summary
+  e2e-summary:
+    name: E2E Test Summary
+    runs-on: ubuntu-latest
+    needs: [e2e-test, performance-e2e, upgrade-e2e, multi-cluster-e2e]
+    if: always()
+    steps:
+    - name: Create test summary
+      run: |
+        cat > e2e-summary.md << EOF
+        # E2E Test Summary
+        
+        Date: $(date -u +%Y-%m-%d)
+        Commit: ${{ github.sha }}
+        
+        ## Test Results
+        
+        | Test Suite | Status |
+        |------------|--------|
+        | Basic E2E | ${{ needs.e2e-test.result }} |
+        | Performance E2E | ${{ needs.performance-e2e.result }} |
+        | Upgrade E2E | ${{ needs.upgrade-e2e.result }} |
+        | Multi-Cluster E2E | ${{ needs.multi-cluster-e2e.result }} |
+        
+        ## Next Steps
+        
+        1. Review any failed test suites
+        2. Check uploaded logs for failures
+        3. Re-run failed tests if needed
+        EOF
+
+    - name: Upload summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: e2e-summary
+        path: e2e-summary.md
+        retention-days: 30

@@ -1,0 +1,240 @@
+version: '3.8'
+
+services:
+  # Operator service
+  operator:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      args:
+        VERSION: dev
+        GIT_COMMIT: ${GIT_COMMIT:-dev}
+        BUILD_DATE: ${BUILD_DATE:-now}
+    image: gunj-operator:dev
+    container_name: gunj-operator
+    restart: unless-stopped
+    volumes:
+      - ./:/workspace:cached
+      - ${HOME}/.kube:/home/nonroot/.kube:ro
+      - go-cache:/go/pkg/mod
+      - build-cache:/root/.cache/go-build
+    environment:
+      - KUBECONFIG=/home/nonroot/.kube/config
+      - GO_ENV=development
+      - LOG_LEVEL=debug
+      - METRICS_ADDR=:8080
+      - HEALTH_ADDR=:8081
+      - WEBHOOK_PORT=9443
+      - ENABLE_LEADER_ELECTION=false
+    ports:
+      - "8080:8080"  # Metrics
+      - "8081:8081"  # Health
+      - "9443:9443"  # Webhooks
+    networks:
+      - gunj-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API Server
+  api-server:
+    build:
+      context: .
+      dockerfile: build/docker/api/Dockerfile.dev
+      args:
+        VERSION: dev
+    image: gunj-operator-api:dev
+    container_name: gunj-api-server
+    restart: unless-stopped
+    volumes:
+      - ./:/workspace:cached
+      - go-cache:/go/pkg/mod
+      - build-cache:/root/.cache/go-build
+    environment:
+      - GO_ENV=development
+      - LOG_LEVEL=debug
+      - PORT=8090
+      - METRICS_PORT=8091
+      - GRAPHQL_PLAYGROUND=true
+      - CORS_ENABLED=true
+      - CORS_ORIGINS=http://localhost:3000
+      - JWT_SECRET=dev-secret-change-in-production
+      - REDIS_URL=redis://redis:6379/0
+      - NATS_URL=nats://nats:4222
+    ports:
+      - "8090:8090"  # REST API
+      - "8091:8091"  # Metrics
+      - "8092:8092"  # GraphQL Playground
+    depends_on:
+      - redis
+      - nats
+    networks:
+      - gunj-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # UI Development Server
+  ui:
+    build:
+      context: .
+      dockerfile: build/docker/ui/Dockerfile.dev
+      args:
+        NODE_ENV: development
+    image: gunj-operator-ui:dev
+    container_name: gunj-ui
+    restart: unless-stopped
+    volumes:
+      - ./ui:/app:cached
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - REACT_APP_API_URL=http://localhost:8090
+      - REACT_APP_WS_URL=ws://localhost:8090/ws
+      - REACT_APP_GRAPHQL_URL=http://localhost:8090/graphql
+      - REACT_APP_AUTH_ENABLED=false
+      - CHOKIDAR_USEPOLLING=true
+      - WATCHPACK_POLLING=true
+    ports:
+      - "3000:3000"  # Dev server
+    depends_on:
+      - api-server
+    networks:
+      - gunj-network
+    command: npm start
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: gunj-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - gunj-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # NATS for event streaming
+  nats:
+    image: nats:2.10-alpine
+    container_name: gunj-nats
+    restart: unless-stopped
+    ports:
+      - "4222:4222"  # Client connections
+      - "8222:8222"  # HTTP monitoring
+      - "6222:6222"  # Cluster
+    networks:
+      - gunj-network
+    command: ["-js", "-m", "8222"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "4222"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL for persistent storage
+  postgres:
+    image: postgres:16-alpine
+    container_name: gunj-postgres
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=gunj_operator
+      - POSTGRES_USER=gunj
+      - POSTGRES_PASSWORD=dev-password
+    ports:
+      - "5432:5432"
+    networks:
+      - gunj-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gunj"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus for development metrics
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: gunj-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./hack/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    networks:
+      - gunj-network
+    depends_on:
+      - operator
+      - api-server
+
+  # Grafana for development dashboards
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: gunj-grafana
+    restart: unless-stopped
+    volumes:
+      - ./hack/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+    ports:
+      - "3001:3000"
+    networks:
+      - gunj-network
+    depends_on:
+      - prometheus
+
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.51
+    container_name: gunj-jaeger
+    restart: unless-stopped
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "5775:5775/udp"   # Zipkin/thrift
+      - "6831:6831/udp"   # Jaeger thrift
+      - "6832:6832/udp"   # Jaeger thrift
+      - "5778:5778"       # Config
+      - "16686:16686"     # UI
+      - "14268:14268"     # Jaeger ingest
+      - "14250:14250"     # gRPC
+      - "9411:9411"       # Zipkin
+      - "4317:4317"       # OTLP gRPC
+      - "4318:4318"       # OTLP HTTP
+    networks:
+      - gunj-network
+
+networks:
+  gunj-network:
+    driver: bridge
+
+volumes:
+  go-cache:
+  build-cache:
+  redis-data:
+  postgres-data:
+  prometheus-data:
+  grafana-data:

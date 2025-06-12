@@ -1,0 +1,155 @@
+# SpectaQL Configuration for GraphQL Documentation
+
+spectaql:
+  # Target directory for the generated documentation
+  targetDir: ./generated/graphql-docs
+  
+  # GraphQL endpoint information
+  servers:
+    - url: https://api.gunj-operator.yourdomain.com/graphql
+      description: Production API
+    - url: http://localhost:8080/graphql
+      description: Local Development
+      
+  # Introspection options
+  introspection:
+    schemaFile: ../api/schema.graphql
+    
+    # Headers to send with introspection query
+    headers:
+      Authorization: Bearer YOUR_TOKEN
+      
+    # Introspection query options
+    removeSubscriptionsPostIntrospection: false
+    
+  # Information about the API
+  info:
+    title: Gunj Operator GraphQL API
+    description: |
+      The Gunj Operator GraphQL API provides a powerful interface for managing
+      observability platforms in Kubernetes. This API supports real-time updates
+      through subscriptions and efficient data fetching with GraphQL queries.
+    
+    termsOfService: https://gunjanjp.github.io/gunj-operator/terms
+    
+    contact:
+      name: Gunj Operator Team
+      email: gunjanjp@gmail.com
+      url: https://github.com/gunjanjp/gunj-operator
+      
+    license:
+      name: MIT License
+      url: https://opensource.org/licenses/MIT
+      
+  # Theme options
+  themeDir: ./spectaql-theme
+  
+  # Display options
+  displayAllServers: true
+  
+  # Navigation options
+  sideNavStyle: group-by-tag
+  
+  # Syntax highlighting theme
+  highlightTheme: monokai
+  
+  # Custom CSS
+  customCss:
+    - ./custom.css
+    
+  # Custom JavaScript
+  customJs:
+    - ./custom.js
+    
+  # Examples configuration
+  examples:
+    defaultFormat: curl
+    formats:
+      - curl
+      - javascript
+      - python
+      
+  # Tags for grouping operations
+  tags:
+    - name: Platform
+      description: Platform management operations
+    - name: Component
+      description: Component management operations
+    - name: Monitoring
+      description: Monitoring and metrics operations
+    - name: Operations
+      description: Operational tasks like backup and restore
+      
+  # Query/Mutation/Subscription metadata
+  metadata:
+    # Platform queries
+    platform:
+      description: |
+        Retrieve a single platform by ID. This query returns detailed information
+        about the platform including all components and their current status.
+      examples:
+        - title: Get platform with components
+          query: |
+            query GetPlatform($id: ID!) {
+              platform(id: $id) {
+                id
+                name
+                namespace
+                status
+                components {
+                  name
+                  type
+                  version
+                  status
+                }
+              }
+            }
+          variables:
+            id: "platform-123"
+            
+    # Platform mutations
+    createPlatform:
+      description: |
+        Create a new observability platform with the specified configuration.
+        This will deploy all enabled components to the target namespace.
+      examples:
+        - title: Create platform with Prometheus and Grafana
+          query: |
+            mutation CreatePlatform($input: CreatePlatformInput!) {
+              createPlatform(input: $input) {
+                id
+                name
+                namespace
+                status
+              }
+            }
+          variables:
+            input:
+              name: "production-monitoring"
+              namespace: "monitoring"
+              components:
+                prometheus:
+                  enabled: true
+                  version: "v2.48.0"
+                grafana:
+                  enabled: true
+                  version: "10.2.0"
+                  
+    # Platform subscriptions
+    platformStatusChanged:
+      description: |
+        Subscribe to real-time platform status updates. This subscription will
+        emit events whenever a platform's status changes.
+      examples:
+        - title: Subscribe to platform status changes
+          query: |
+            subscription PlatformStatus($id: ID!) {
+              platformStatusChanged(id: $id) {
+                id
+                status
+                message
+                timestamp
+              }
+            }
+          variables:
+            id: "platform-123"

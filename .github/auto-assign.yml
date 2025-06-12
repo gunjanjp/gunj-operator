@@ -1,0 +1,39 @@
+# Auto-assign configuration
+addReviewers: true
+addAssignees: author
+
+reviewers:
+  - gunjanjp
+  # Add more reviewers as the team grows
+
+skipKeywords:
+  - wip
+  - draft
+
+numberOfReviewers: 2
+
+# Different reviewers for different file patterns
+reviewerGroups:
+  operator:
+    - gunjanjp
+    # Add operator team members
+  api:
+    - gunjanjp
+    # Add API team members
+  ui:
+    - gunjanjp
+    # Add UI team members
+
+fileGroups:
+  operator:
+    - '**/*.go'
+    - '!ui/**'
+    - '!internal/api/**'
+  api:
+    - 'internal/api/**'
+    - 'cmd/api-server/**'
+  ui:
+    - 'ui/**'
+    - '**/*.ts'
+    - '**/*.tsx'
+    - '**/*.jsx'

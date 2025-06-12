@@ -1,0 +1,454 @@
+# Release Pipeline for Gunj Operator
+# This workflow creates releases and publishes artifacts
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v2.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Is this a pre-release?'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: docker.io
+  REGISTRY_USER: gunjanjp
+  GO_VERSION: '1.21'
+  NODE_VERSION: '20'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  # Validate release version
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Determine version
+      id: version
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          VERSION="${{ github.event.inputs.version }}"
+          IS_PRERELEASE="${{ github.event.inputs.prerelease }}"
+        else
+          VERSION="${GITHUB_REF#refs/tags/}"
+          # Check if it's a pre-release based on version format
+          if [[ "$VERSION" =~ -(alpha|beta|rc) ]]; then
+            IS_PRERELEASE="true"
+          else
+            IS_PRERELEASE="false"
+          fi
+        fi
+        
+        # Validate version format
+        if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+          echo "Invalid version format: $VERSION"
+          exit 1
+        fi
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+        echo "Releasing version: $VERSION (Pre-release: $IS_PRERELEASE)"
+
+  # Build release artifacts
+  build-artifacts:
+    name: Build Release Artifacts
+    runs-on: ubuntu-latest
+    needs: validate
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Build binaries
+      env:
+        GOOS: ${{ matrix.os }}
+        GOARCH: ${{ matrix.arch }}
+        VERSION: ${{ needs.validate.outputs.version }}
+      run: |
+        # Build all components
+        for component in operator api-server cli; do
+          echo "Building ${component} for ${GOOS}/${GOARCH}"
+          
+          OUTPUT_NAME="gunj-${component}"
+          if [[ "$GOOS" == "windows" ]]; then
+            OUTPUT_NAME="${OUTPUT_NAME}.exe"
+          fi
+          
+          CGO_ENABLED=0 go build \
+            -ldflags="-w -s -X main.version=${VERSION} -X main.commit=${GITHUB_SHA} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o "dist/${component}/${GOOS}-${GOARCH}/${OUTPUT_NAME}" \
+            "./cmd/${component}"
+        done
+
+    - name: Create archives
+      run: |
+        cd dist
+        for component in operator api-server cli; do
+          cd ${component}
+          for platform in */; do
+            platform_name="${platform%/}"
+            archive_name="gunj-${component}-${{ needs.validate.outputs.version }}-${platform_name}"
+            
+            if [[ "${{ matrix.os }}" == "windows" ]]; then
+              zip -r "../${archive_name}.zip" "${platform_name}"
+            else
+              tar czf "../${archive_name}.tar.gz" "${platform_name}"
+            fi
+          done
+          cd ..
+        done
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: binaries-${{ matrix.os }}-${{ matrix.arch }}
+        path: dist/*.*
+        retention-days: 1
+
+  # Build and push container images
+  build-images:
+    name: Build Container Images
+    runs-on: ubuntu-latest
+    needs: validate
+    strategy:
+      matrix:
+        component: [operator, api, ui]
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ env.REGISTRY_USER }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Log in to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Generate metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/gunj-${{ matrix.component }}
+          ghcr.io/${{ github.repository_owner }}/gunj-${{ matrix.component }}
+        tags: |
+          type=semver,pattern={{version}},value=${{ needs.validate.outputs.version }}
+          type=semver,pattern={{major}}.{{minor}},value=${{ needs.validate.outputs.version }}
+          type=semver,pattern={{major}},value=${{ needs.validate.outputs.version }}
+          type=raw,value=latest,enable=${{ needs.validate.outputs.is_prerelease == 'false' }}
+
+    - name: Build and push image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: Dockerfile.${{ matrix.component == 'operator' && '' || matrix.component }}
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          VERSION=${{ needs.validate.outputs.version }}
+          COMMIT=${{ github.sha }}
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+    - name: Generate SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/gunj-${{ matrix.component }}:${{ needs.validate.outputs.version }}
+        format: spdx-json
+        output-file: sbom-${{ matrix.component }}.spdx.json
+
+    - name: Sign image
+      env:
+        COSIGN_EXPERIMENTAL: 1
+      run: |
+        cosign sign --yes \
+          ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/gunj-${{ matrix.component }}:${{ needs.validate.outputs.version }}
+
+    - name: Upload SBOM
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-${{ matrix.component }}
+        path: sbom-${{ matrix.component }}.spdx.json
+        retention-days: 30
+
+  # Build Helm chart
+  build-chart:
+    name: Build Helm Chart
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'v3.14.0'
+
+    - name: Update chart version
+      run: |
+        # Update Chart.yaml with release version
+        sed -i "s/^version:.*/version: ${{ needs.validate.outputs.version }}/" charts/gunj-operator/Chart.yaml
+        sed -i "s/^appVersion:.*/appVersion: ${{ needs.validate.outputs.version }}/" charts/gunj-operator/Chart.yaml
+
+    - name: Package chart
+      run: |
+        helm package charts/gunj-operator -d dist/
+
+    - name: Create chart archive signature
+      run: |
+        # TODO: Implement GPG signing for charts
+        echo "Chart signing not yet implemented"
+
+    - name: Upload chart
+      uses: actions/upload-artifact@v4
+      with:
+        name: helm-chart
+        path: dist/*.tgz
+        retention-days: 30
+
+  # Generate release notes
+  release-notes:
+    name: Generate Release Notes
+    runs-on: ubuntu-latest
+    needs: validate
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate changelog
+      id: changelog
+      uses: mikepenz/release-changelog-builder-action@v4
+      with:
+        configuration: .github/changelog-config.json
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create release notes file
+      run: |
+        cat > RELEASE_NOTES.md << EOF
+        # Release ${{ needs.validate.outputs.version }}
+        
+        Released on $(date -u +%Y-%m-%d)
+        
+        ## What's Changed
+        
+        ${{ steps.changelog.outputs.changelog }}
+        
+        ## Container Images
+        
+        - \`docker.io/gunjanjp/gunj-operator:${{ needs.validate.outputs.version }}\`
+        - \`docker.io/gunjanjp/gunj-api:${{ needs.validate.outputs.version }}\`
+        - \`docker.io/gunjanjp/gunj-ui:${{ needs.validate.outputs.version }}\`
+        
+        ## Installation
+        
+        ### Using Helm
+        
+        \`\`\`bash
+        helm repo add gunj-operator https://gunjanjp.github.io/gunj-operator
+        helm repo update
+        helm install gunj-operator gunj-operator/gunj-operator --version ${{ needs.validate.outputs.version }}
+        \`\`\`
+        
+        ### Using kubectl
+        
+        \`\`\`bash
+        kubectl apply -f https://github.com/gunjanjp/gunj-operator/releases/download/${{ needs.validate.outputs.version }}/gunj-operator.yaml
+        \`\`\`
+        
+        ## Checksums
+        
+        See \`checksums.txt\` in the release assets.
+        EOF
+
+    - name: Upload release notes
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-notes
+        path: RELEASE_NOTES.md
+        retention-days: 1
+
+  # Create GitHub release
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [validate, build-artifacts, build-images, build-chart, release-notes]
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: release-artifacts/
+
+    - name: Generate checksums
+      run: |
+        cd release-artifacts
+        find . -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.tgz" \) -exec sha256sum {} \; > checksums.txt
+
+    - name: Create release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: ${{ needs.validate.outputs.version }}
+        tag_name: ${{ needs.validate.outputs.version }}
+        body_path: release-artifacts/release-notes/RELEASE_NOTES.md
+        draft: false
+        prerelease: ${{ needs.validate.outputs.is_prerelease }}
+        files: |
+          release-artifacts/binaries-*/*
+          release-artifacts/helm-chart/*.tgz
+          release-artifacts/checksums.txt
+          release-artifacts/sbom-*/*.json
+
+  # Update Helm repository
+  update-helm-repo:
+    name: Update Helm Repository
+    runs-on: ubuntu-latest
+    needs: [validate, create-release]
+    if: needs.validate.outputs.is_prerelease == 'false'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: gh-pages
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Download chart
+      run: |
+        gh release download ${{ needs.validate.outputs.version }} \
+          --pattern "*.tgz" \
+          --dir charts/
+
+    - name: Update Helm index
+      run: |
+        helm repo index charts/ --url https://gunjanjp.github.io/gunj-operator/charts
+
+    - name: Commit and push
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git add charts/
+        git commit -m "Add Helm chart for ${{ needs.validate.outputs.version }}"
+        git push
+
+  # Publish to Operator Hub
+  publish-operatorhub:
+    name: Publish to OperatorHub
+    runs-on: ubuntu-latest
+    needs: [validate, create-release]
+    if: needs.validate.outputs.is_prerelease == 'false'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install operator-sdk
+      run: |
+        export ARCH=$(case $(uname -m) in x86_64) echo -n amd64 ;; aarch64) echo -n arm64 ;; *) echo -n $(uname -m) ;; esac)
+        export OS=$(uname | awk '{print tolower($0)}')
+        export OPERATOR_SDK_DL_URL=https://github.com/operator-framework/operator-sdk/releases/download/v1.33.0
+        curl -LO ${OPERATOR_SDK_DL_URL}/operator-sdk_${OS}_${ARCH}
+        chmod +x operator-sdk_${OS}_${ARCH}
+        sudo mv operator-sdk_${OS}_${ARCH} /usr/local/bin/operator-sdk
+
+    - name: Build bundle
+      run: |
+        make bundle VERSION=${{ needs.validate.outputs.version }}
+        make bundle-build BUNDLE_IMG=${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/gunj-operator-bundle:${{ needs.validate.outputs.version }}
+
+    - name: Push bundle
+      run: |
+        docker push ${{ env.REGISTRY }}/${{ env.REGISTRY_USER }}/gunj-operator-bundle:${{ needs.validate.outputs.version }}
+
+    - name: Create OperatorHub PR
+      run: |
+        # TODO: Implement automated PR creation to community-operators repo
+        echo "OperatorHub submission not yet automated"
+
+  # Post-release notifications
+  notifications:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [validate, create-release]
+    if: always()
+    steps:
+    - name: Send Slack notification
+      if: success()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        custom_payload: |
+          {
+            text: "🎉 Gunj Operator ${{ needs.validate.outputs.version }} has been released!",
+            attachments: [{
+              color: 'good',
+              text: 'View the release at https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate.outputs.version }}'
+            }]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+    - name: Send failure notification
+      if: failure()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        custom_payload: |
+          {
+            text: "❌ Gunj Operator ${{ needs.validate.outputs.version }} release failed!",
+            attachments: [{
+              color: 'danger',
+              text: 'Check the workflow at ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+            }]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}

@@ -1,0 +1,111 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Development
+.devcontainer
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage.out
+coverage.html
+*.test
+test-results/
+e2e-results/
+
+# Build artifacts
+bin/
+dist/
+tmp/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+vendor/
+go.work
+go.work.sum
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn
+
+# Logs
+*.log
+logs/
+
+# Documentation build
+docs/_build/
+site/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.cache
+
+# Local environment
+.env
+.env.local
+.env.*.local
+
+# Kubernetes
+*.kubeconfig
+kubeconfig
+
+# Certificates
+*.pem
+*.key
+*.crt
+*.csr
+
+# Editor directories
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+ENV/
+
+# macOS
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent

@@ -1,0 +1,353 @@
+/* Custom styles for Gunj Operator documentation */
+
+/* Root variables for theming */
+:root {
+  --md-primary-fg-color: #1976d2;
+  --md-primary-fg-color--light: #42a5f5;
+  --md-primary-fg-color--dark: #0d47a1;
+  --md-accent-fg-color: #ff6f00;
+  --md-accent-fg-color--transparent: #ff6f0020;
+}
+
+/* Dark mode adjustments */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #90caf9;
+  --md-primary-fg-color--light: #bbdefb;
+  --md-primary-fg-color--dark: #42a5f5;
+  --md-accent-fg-color: #ffab40;
+}
+
+/* Header styling */
+.md-header {
+  background-color: var(--md-primary-fg-color--dark);
+}
+
+.md-header__title {
+  font-weight: 600;
+  font-size: 1.2rem;
+}
+
+/* Navigation styling */
+.md-nav__title {
+  font-weight: 600;
+  color: var(--md-primary-fg-color);
+}
+
+.md-nav__item--active > .md-nav__link {
+  color: var(--md-accent-fg-color);
+  font-weight: 600;
+}
+
+/* Content styling */
+.md-content h1 {
+  color: var(--md-primary-fg-color--dark);
+  border-bottom: 2px solid var(--md-primary-fg-color--light);
+  padding-bottom: 0.3rem;
+}
+
+.md-content h2 {
+  color: var(--md-primary-fg-color);
+  margin-top: 2rem;
+}
+
+/* Code block enhancements */
+.highlight {
+  background-color: #f5f5f5;
+  border-radius: 0.4rem;
+  margin: 1rem 0;
+}
+
+[data-md-color-scheme="slate"] .highlight {
+  background-color: #1e1e1e;
+}
+
+.highlight pre {
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+/* Custom admonition styles */
+.admonition {
+  border-radius: 0.4rem;
+  box-shadow: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.1);
+}
+
+.admonition.note {
+  border-left-color: var(--md-primary-fg-color);
+}
+
+.admonition.tip {
+  border-left-color: #4caf50;
+}
+
+.admonition.warning {
+  border-left-color: #ff9800;
+}
+
+.admonition.danger {
+  border-left-color: #f44336;
+}
+
+/* Grid cards styling */
+.grid.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.grid.cards > div {
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.5rem;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+[data-md-color-scheme="slate"] .grid.cards > div {
+  background: #2e2e2e;
+  border-color: #424242;
+}
+
+.grid.cards > div:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  border-color: var(--md-primary-fg-color);
+}
+
+/* Feature cards */
+.feature-card {
+  text-align: center;
+  padding: 2rem;
+}
+
+.feature-card .icon {
+  font-size: 3rem;
+  color: var(--md-primary-fg-color);
+  margin-bottom: 1rem;
+}
+
+.feature-card h3 {
+  color: var(--md-primary-fg-color--dark);
+  margin: 1rem 0;
+}
+
+/* API documentation styling */
+.api-endpoint {
+  background: #f0f7ff;
+  border-left: 4px solid var(--md-primary-fg-color);
+  padding: 1rem;
+  margin: 1rem 0;
+  border-radius: 0.2rem;
+  font-family: 'Roboto Mono', monospace;
+}
+
+[data-md-color-scheme="slate"] .api-endpoint {
+  background: #1a237e20;
+}
+
+.api-method {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.2rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-right: 0.5rem;
+}
+
+.api-method.get {
+  background: #4caf50;
+  color: white;
+}
+
+.api-method.post {
+  background: #2196f3;
+  color: white;
+}
+
+.api-method.put {
+  background: #ff9800;
+  color: white;
+}
+
+.api-method.delete {
+  background: #f44336;
+  color: white;
+}
+
+/* Version selector styling */
+.md-version__current {
+  color: var(--md-accent-fg-color);
+  font-weight: 600;
+}
+
+/* Search styling */
+.md-search__input {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.md-search__input::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Footer styling */
+.md-footer {
+  background-color: var(--md-primary-fg-color--dark);
+}
+
+.md-footer-meta {
+  background-color: rgba(0, 0, 0, 0.2);
+}
+
+/* Responsive adjustments */
+@media screen and (max-width: 768px) {
+  .grid.cards {
+    grid-template-columns: 1fr;
+  }
+  
+  .md-content h1 {
+    font-size: 1.8rem;
+  }
+}
+
+/* Print styles */
+@media print {
+  .md-header,
+  .md-footer,
+  .md-sidebar,
+  .md-tabs {
+    display: none;
+  }
+  
+  .md-content {
+    margin: 0;
+    padding: 1rem;
+  }
+  
+  .admonition {
+    border: 1px solid #ddd;
+    page-break-inside: avoid;
+  }
+}
+
+/* Custom button styles */
+.md-button {
+  background-color: var(--md-primary-fg-color);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 0.3rem;
+  text-decoration: none;
+  display: inline-block;
+  transition: all 0.3s ease;
+  font-weight: 500;
+}
+
+.md-button:hover {
+  background-color: var(--md-primary-fg-color--dark);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.md-button.md-button--primary {
+  background-color: var(--md-accent-fg-color);
+}
+
+.md-button.md-button--primary:hover {
+  background-color: #e65100;
+}
+
+/* Syntax highlighting improvements */
+.highlight .n { color: #333; } /* Name */
+.highlight .k { color: #0000ff; font-weight: 600; } /* Keyword */
+.highlight .s { color: #008000; } /* String */
+.highlight .c { color: #808080; font-style: italic; } /* Comment */
+
+[data-md-color-scheme="slate"] .highlight .n { color: #fff; }
+[data-md-color-scheme="slate"] .highlight .k { color: #569cd6; }
+[data-md-color-scheme="slate"] .highlight .s { color: #ce9178; }
+[data-md-color-scheme="slate"] .highlight .c { color: #6a9955; }
+
+/* Table styling */
+.md-typeset table {
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.md-typeset table th {
+  background-color: var(--md-primary-fg-color--light);
+  color: white;
+  font-weight: 600;
+  padding: 0.8rem;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table th {
+  background-color: var(--md-primary-fg-color--dark);
+}
+
+.md-typeset table td {
+  padding: 0.6rem;
+  border: 1px solid #e0e0e0;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table td {
+  border-color: #424242;
+}
+
+.md-typeset table tr:nth-child(even) {
+  background-color: #f5f5f5;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table tr:nth-child(even) {
+  background-color: #2e2e2e;
+}
+
+/* Animation for page transitions */
+.md-content__inner {
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Custom classes for special content */
+.architecture-diagram {
+  max-width: 100%;
+  margin: 2rem auto;
+  text-align: center;
+}
+
+.architecture-diagram img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Gunj Operator branding */
+.gunj-logo {
+  width: 40px;
+  height: 40px;
+  margin-right: 0.5rem;
+  vertical-align: middle;
+}
+
+.gunj-badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  background-color: var(--md-primary-fg-color);
+  color: white;
+  border-radius: 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0 0.2rem;
+}

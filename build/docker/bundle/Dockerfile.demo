@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1.4
+
+# Use the main bundle as base
+FROM gunjanjp/gunj-operator-bundle:latest AS base
+
+# Switch to root for setup
+USER root
+
+# Demo stage - adds sample data and configuration
+FROM base AS demo
+
+# Labels
+LABEL org.opencontainers.image.title="Gunj Operator Bundle - Demo"
+LABEL org.opencontainers.image.description="Gunj Operator with demo data and configuration"
+
+# Copy demo configuration
+COPY build/docker/bundle/demo/ /demo/
+
+# Setup demo environment
+RUN mkdir -p /demo/data && \
+    chown -R nonroot:nonroot /demo
+
+# Install additional demo dependencies
+RUN apk add --no-cache postgresql-client redis
+
+# Copy demo scripts
+COPY build/docker/bundle/demo-init.sh /usr/local/bin/demo-init.sh
+RUN chmod +x /usr/local/bin/demo-init.sh
+
+# Environment variables for demo mode
+ENV DEMO_MODE=true
+ENV DEMO_DATA_PATH=/demo/data
+ENV AUTH_ENABLED=false
+ENV LOG_LEVEL=debug
+ENV DEMO_ADMIN_PASSWORD=demo123
+ENV ENABLE_SAMPLE_DATA=true
+ENV ENABLE_MOCK_METRICS=true
+
+# Volume for demo data persistence
+VOLUME ["/demo/data"]
+
+# Switch back to non-root user
+USER 65532:65532
+
+# Override entrypoint for demo initialization
+ENTRYPOINT ["/usr/local/bin/demo-init.sh"]

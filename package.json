@@ -1,0 +1,53 @@
+{
+  "name": "gunj-operator",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Gunj Operator - Enterprise Observability Platform",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gunjanjp/gunj-operator.git"
+  },
+  "license": "MIT",
+  "workspaces": [
+    "ui"
+  ],
+  "scripts": {
+    "build": "npm run build:operator && npm run build:ui",
+    "build:operator": "make build",
+    "build:ui": "npm run build --workspace=ui",
+    "test": "npm run test:operator && npm run test:ui",
+    "test:operator": "make test",
+    "test:ui": "npm run test --workspace=ui",
+    "lint": "npm run lint:go && npm run lint:ui",
+    "lint:go": "golangci-lint run",
+    "lint:ui": "npm run lint --workspace=ui",
+    "dev": "concurrently \"npm run dev:operator\" \"npm run dev:ui\"",
+    "dev:operator": "make run",
+    "dev:ui": "npm run dev --workspace=ui",
+    "clean": "make clean && npm run clean --workspace=ui",
+    "docker:build": "make docker-build-all",
+    "prepare": "husky install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "husky": "^9.0.11",
+    "lint-staged": "^15.2.0"
+  },
+  "lint-staged": {
+    "*.go": [
+      "gofmt -w",
+      "goimports -w"
+    ],
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yaml,yml}": [
+      "prettier --write"
+    ]
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

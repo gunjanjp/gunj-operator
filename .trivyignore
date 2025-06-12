@@ -1,0 +1,12 @@
+# Trivy ignore file
+# https://aquasecurity.github.io/trivy/latest/docs/vulnerability/examples/filter/
+
+# Format:
+# CVE-YYYY-NNNN comment about why we're ignoring
+# CVE-YYYY-NNNN exp:2025-01-01 # ignore until expiry date
+
+# Example (remove these in production):
+# CVE-2023-12345 # False positive, not applicable to our use case
+# CVE-2023-67890 exp:2025-07-01 # Waiting for upstream fix
+
+# Actual ignores (if any) go below:

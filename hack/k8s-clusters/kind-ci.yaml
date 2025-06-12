@@ -1,0 +1,59 @@
+# Kind Cluster Configuration for CI/CD
+# Minimal single-node cluster for fast CI/CD testing
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: gunj-operator-ci
+nodes:
+- role: control-plane
+  image: kindest/node:v1.29.0
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        # Reduce resource reservations for CI
+        system-reserved: "cpu=100m,memory=100Mi"
+        kube-reserved: "cpu=100m,memory=100Mi"
+        eviction-hard: "memory.available<100Mi,nodefs.available<5%"
+        # Speed up image pulls
+        serialize-image-pulls: "false"
+        # Increase QPS for faster operations
+        qps: "50"
+        burst: "100"
+  - |
+    kind: ClusterConfiguration
+    apiServer:
+      extraArgs:
+        # Increase rate limits for CI
+        max-requests-inflight: "1000"
+        max-mutating-requests-inflight: "500"
+        # Disable audit logging for speed
+        audit-log-maxage: "0"
+        audit-log-maxbackup: "0"
+        audit-log-maxsize: "0"
+    controllerManager:
+      extraArgs:
+        # Speed up garbage collection
+        concurrent-deployment-syncs: "10"
+        concurrent-replicaset-syncs: "10"
+        # Reduce sync periods
+        min-resync-period: "30s"
+    scheduler:
+      extraArgs:
+        # Increase scheduling throughput
+        qps: "50"
+        burst: "100"
+# Minimal networking
+networking:
+  disableDefaultCNI: false
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"
+# Disable unnecessary features for CI
+featureGates:
+  "EphemeralContainers": false
+  "TTLAfterFinished": true
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri"]
+    # Speed up image pulls
+    max_concurrent_downloads = 10

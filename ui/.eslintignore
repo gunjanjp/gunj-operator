@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Testing
+coverage/
+.nyc_output/
+
+# Production
+build/
+dist/
+
+# Misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.log
+
+# Generated files
+*.generated.ts
+*.generated.tsx
+
+# Storybook
+storybook-static/
+.storybook/
+
+# Type definitions
+*.d.ts
+
+# Config files
+vite.config.ts
+jest.config.js
+cypress.config.ts
+
+# Public assets
+public/
+
+# External libraries
+src/lib/vendor/

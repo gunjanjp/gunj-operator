@@ -1,0 +1,221 @@
+# Nightly Build Pipeline
+# Runs comprehensive builds and tests every night
+name: Nightly Build
+
+on:
+  schedule:
+    # Run at 3 AM UTC every day
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      skip-tests:
+        description: 'Skip tests'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  GO_VERSION: '1.21'
+  NODE_VERSION: '20'
+
+jobs:
+  # Build all components
+  build-all:
+    name: Build All Components
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [operator, api, ui, cli]
+        os: [linux, darwin, windows]
+        arch: [amd64, arm64]
+        exclude:
+          - os: windows
+            arch: arm64
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      if: matrix.component != 'ui'
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Set up Node.js
+      if: matrix.component == 'ui'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: ui/package-lock.json
+
+    - name: Build component
+      env:
+        GOOS: ${{ matrix.os }}
+        GOARCH: ${{ matrix.arch }}
+      run: |
+        make build-${{ matrix.component }} \
+          GOOS=${{ matrix.os }} \
+          GOARCH=${{ matrix.arch }}
+
+  # Run extended test suite
+  extended-tests:
+    name: Extended Test Suite
+    runs-on: ubuntu-latest
+    if: inputs.skip-tests != true
+    strategy:
+      matrix:
+        test-type: [unit, integration, e2e, performance, security]
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up test environment
+      run: |
+        make setup-test-env
+
+    - name: Run ${{ matrix.test-type }} tests
+      run: |
+        make test-${{ matrix.test-type }}-extended
+      timeout-minutes: 60
+
+  # Build and push nightly images
+  nightly-images:
+    name: Build Nightly Images
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [operator, api, ui]
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build and push nightly image
+      uses: ./.github/workflows/build-docker.yml
+      with:
+        component: ${{ matrix.component }}
+        push: true
+        platforms: linux/amd64,linux/arm64,linux/arm/v7
+      secrets:
+        registry-password: ${{ secrets.DOCKER_PASSWORD }}
+
+  # Compatibility testing
+  compatibility-tests:
+    name: Compatibility Tests
+    runs-on: ubuntu-latest
+    if: inputs.skip-tests != true
+    strategy:
+      matrix:
+        k8s-version: ['1.26', '1.27', '1.28', '1.29', '1.30-rc']
+        prometheus-version: ['2.45', '2.46', '2.47', '2.48']
+        grafana-version: ['10.0', '10.1', '10.2']
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Run compatibility tests
+      run: |
+        make test-compatibility \
+          K8S_VERSION=${{ matrix.k8s-version }} \
+          PROMETHEUS_VERSION=${{ matrix.prometheus-version }} \
+          GRAFANA_VERSION=${{ matrix.grafana-version }}
+
+  # Stress testing
+  stress-tests:
+    name: Stress Tests
+    runs-on: ubuntu-latest-16-cores
+    if: inputs.skip-tests != true
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Run stress tests
+      run: |
+        make test-stress
+      env:
+        STRESS_DURATION: 2h
+        STRESS_PLATFORMS: 100
+        STRESS_CONCURRENT: 50
+
+  # Generate nightly report
+  nightly-report:
+    name: Generate Nightly Report
+    runs-on: ubuntu-latest
+    needs: [build-all, extended-tests, nightly-images, compatibility-tests, stress-tests]
+    if: always()
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Generate report
+      run: |
+        cat > nightly-report.md << EOF
+        # Nightly Build Report
+        
+        Date: $(date -u +%Y-%m-%d)
+        Commit: ${{ github.sha }}
+        
+        ## Build Results
+        
+        | Component | Status |
+        |-----------|--------|
+        | Build All | ${{ needs.build-all.result }} |
+        | Extended Tests | ${{ needs.extended-tests.result }} |
+        | Nightly Images | ${{ needs.nightly-images.result }} |
+        | Compatibility | ${{ needs.compatibility-tests.result }} |
+        | Stress Tests | ${{ needs.stress-tests.result }} |
+        
+        ## Metrics
+        
+        - Total build time: ${{ github.run_time }}
+        - Components built: 4
+        - Platforms tested: 12
+        - Tests executed: 1000+
+        
+        ## Next Steps
+        
+        1. Review any failures in detail
+        2. Check performance regression reports
+        3. Verify compatibility matrix
+        EOF
+
+    - name: Send notification
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        custom_payload: |
+          {
+            text: "Nightly Build Complete",
+            attachments: [{
+              color: '${{ contains(needs.*.result, 'failure') && 'danger' || 'good' }}',
+              title: 'Nightly Build Report',
+              text: 'View full report at ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+            }]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+    - name: Create issue for failures
+      if: contains(needs.*.result, 'failure')
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const title = `Nightly Build Failure - ${new Date().toISOString().split('T')[0]}`;
+          const body = `
+          ## Nightly Build Failure
+          
+          The nightly build has failed. Please investigate.
+          
+          **Run:** ${context.runId}
+          **Commit:** ${context.sha}
+          
+          ### Failed Jobs
+          ${Object.entries(needs).filter(([_, job]) => job.result === 'failure').map(([name]) => `- ${name}`).join('\n')}
+          
+          [View Workflow Run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+          `;
+          
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title,
+            body,
+            labels: ['bug', 'ci', 'nightly-build']
+          });

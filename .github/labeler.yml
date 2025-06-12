@@ -1,0 +1,96 @@
+# Labeler configuration for automatic PR labeling
+
+# Component labels
+component/operator:
+  - api/**/*
+  - controllers/**/*
+  - internal/managers/**/*
+  - internal/webhooks/**/*
+  - config/**/*
+
+component/api:
+  - internal/api/**/*
+  - cmd/api-server/**/*
+
+component/ui:
+  - ui/**/*
+
+component/cli:
+  - cmd/cli/**/*
+
+component/helm:
+  - charts/**/*
+
+# Type labels
+type/docs:
+  - docs/**/*
+  - '**/*.md'
+
+type/test:
+  - test/**/*
+  - '**/*_test.go'
+  - '**/testdata/**/*'
+
+type/ci:
+  - .github/**/*
+  - .gitlab-ci.yml
+  - .circleci/**/*
+
+type/build:
+  - Dockerfile*
+  - Makefile
+  - go.mod
+  - go.sum
+  - package.json
+  - package-lock.json
+
+type/config:
+  - config/**/*
+  - '**/*.yaml'
+  - '**/*.yml'
+  - '**/*.json'
+  - '**/*.toml'
+
+# Language labels
+lang/go:
+  - '**/*.go'
+  - go.mod
+  - go.sum
+
+lang/typescript:
+  - '**/*.ts'
+  - '**/*.tsx'
+
+lang/javascript:
+  - '**/*.js'
+  - '**/*.jsx'
+
+lang/yaml:
+  - '**/*.yaml'
+  - '**/*.yml'
+
+# Area labels
+area/security:
+  - SECURITY.md
+  - internal/api/middleware/auth.go
+  - internal/api/middleware/rbac.go
+
+area/performance:
+  - '**/*_bench_test.go'
+  - test/performance/**/*
+
+area/observability:
+  - internal/metrics/**/*
+  - config/prometheus/**/*
+
+# Priority labels (manual)
+# priority/critical
+# priority/high
+# priority/medium
+# priority/low
+
+# Status labels (manual)
+# status/blocked
+# status/in-progress
+# status/needs-review
+# status/ready-to-merge

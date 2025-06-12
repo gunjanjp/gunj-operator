@@ -1,0 +1,149 @@
+# Trivy configuration file
+# https://aquasecurity.github.io/trivy/latest/docs/references/configuration/config-file/
+
+# Global options
+timeout: 10m
+cache-dir: /tmp/trivy-cache
+debug: false
+
+# Scanning options
+scan:
+  # Security scanning
+  security-checks:
+    - vuln        # Vulnerability scanning
+    - config      # Misconfiguration scanning
+    - secret      # Secret scanning
+    - license     # License scanning
+  
+  # Skip directories
+  skip-dirs:
+    - vendor
+    - node_modules
+    - .git
+    - hack/tools
+    - test/e2e/testdata
+  
+  # Skip files
+  skip-files:
+    - "*.md"
+    - "go.sum"
+    - "package-lock.json"
+    - "yarn.lock"
+
+# Vulnerability options
+vulnerability:
+  # Severity levels to detect
+  severity:
+    - CRITICAL
+    - HIGH
+    - MEDIUM
+    - LOW
+  
+  # Ignore unfixed vulnerabilities
+  ignore-unfixed: false
+  
+  # CVE ignore list (example)
+  ignorefile: .trivyignore
+
+# Secret scanning options
+secret:
+  # Enable secret scanning
+  enabled: true
+  
+  # Additional secret config
+  config: hack/trivy-secret.yaml
+
+# License scanning options
+license:
+  # License scanning severity
+  severity:
+    - CRITICAL
+    - HIGH
+  
+  # Allowed licenses
+  allowed:
+    - MIT
+    - Apache-2.0
+    - BSD-3-Clause
+    - BSD-2-Clause
+    - ISC
+    - MPL-2.0
+  
+  # Forbidden licenses
+  forbidden:
+    - GPL-2.0
+    - GPL-3.0
+    - AGPL-3.0
+    - CC-BY-NC-1.0
+
+# Misconfiguration options
+misconfiguration:
+  # Policy paths
+  policy-paths:
+    - hack/trivy-policies
+  
+  # Namespaces
+  policy-namespaces:
+    - user
+    - builtin.*
+  
+  # Include non-failures
+  include-non-failures: true
+
+# Report options
+report:
+  # Output format
+  format: table
+  
+  # Exit code
+  exit-code: 1
+  
+  # Exit on EOL
+  exit-on-eol: 2
+
+# Kubernetes specific
+kubernetes:
+  # Cluster context
+  context: ""
+  
+  # Namespaces to scan
+  namespaces: []
+  
+  # Include all namespaces
+  all-namespaces: false
+
+# SBOM options
+sbom:
+  # SBOM format
+  format: cyclonedx
+  
+  # SBOM version
+  version: 1.4
+
+# Database options
+db:
+  # Skip DB update
+  skip-update: false
+  
+  # Only download db
+  download-only: false
+  
+  # DB repository
+  repository: ghcr.io/aquasecurity/trivy-db
+
+# Cache options
+cache:
+  # Clear cache
+  clear: false
+  
+  # Cache TTL
+  ttl: 24h
+
+# Registry options
+registry:
+  # Insecure registries
+  insecure: false
+  
+  # Registry credentials (use environment variables)
+  # username: ""
+  # password: ""

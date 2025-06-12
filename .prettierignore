@@ -1,0 +1,71 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build outputs
+dist/
+build/
+bin/
+*.out
+coverage/
+.coverage/
+
+# Generated files
+*.generated.go
+zz_generated.*.go
+*.pb.go
+*.deepcopy.go
+api/*/zz_generated.*
+
+# Configuration
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+*.test
+*.cover
+*.html
+test-results/
+
+# Documentation build
+docs/_build/
+site/
+
+# Helm charts dependencies
+charts/*/charts/
+charts/*/requirements.lock
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Third party code
+third_party/
+vendor/
+
+# Large data files
+*.tar
+*.tar.gz
+*.zip
+
+# Specific file types we don't want to format
+*.md
+*.yaml
+*.yml
+*.json
+*.lock
+go.sum

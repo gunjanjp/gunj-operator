@@ -1,0 +1,99 @@
+# Development Dockerfile for Gunj Operator
+# This provides a complete development environment with all necessary tools
+
+FROM golang:1.21-bullseye AS dev-base
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    curl \
+    wget \
+    vim \
+    jq \
+    postgresql-client \
+    redis-tools \
+    netcat \
+    dnsutils \
+    iputils-ping \
+    htop \
+    tmux \
+    make \
+    gcc \
+    g++ \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/v1.29.0/bin/linux/amd64/kubectl" && \
+    chmod +x kubectl && \
+    mv kubectl /usr/local/bin/
+
+# Install Helm
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Install kind for local Kubernetes
+RUN curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64 && \
+    chmod +x ./kind && \
+    mv ./kind /usr/local/bin/kind
+
+# Install kustomize
+RUN curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash && \
+    mv kustomize /usr/local/bin/
+
+# Install kubebuilder
+RUN curl -L -o kubebuilder https://go.kubebuilder.io/dl/latest/$(go env GOOS)/$(go env GOARCH) && \
+    chmod +x kubebuilder && \
+    mv kubebuilder /usr/local/bin/
+
+# Install controller-gen
+RUN go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.13.0
+
+# Install kube-linter
+RUN curl -L https://github.com/stackrox/kube-linter/releases/download/0.6.7/kube-linter-linux.tar.gz | \
+    tar xz -C /usr/local/bin
+
+# Install golangci-lint
+RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | \
+    sh -s -- -b /usr/local/bin v1.55.2
+
+# Install go tools
+RUN go install github.com/go-delve/delve/cmd/dlv@latest && \
+    go install golang.org/x/tools/gopls@latest && \
+    go install github.com/ramya-rao-a/go-outline@latest && \
+    go install github.com/uudashr/gopkgs/v2/cmd/gopkgs@latest && \
+    go install github.com/rogpeppe/godef@latest && \
+    go install github.com/sqs/goreturns@latest && \
+    go install github.com/cweill/gotests/gotests@latest && \
+    go install github.com/fatih/gomodifytags@latest && \
+    go install github.com/josharian/impl@latest && \
+    go install github.com/haya14busa/goplay/cmd/goplay@latest && \
+    go install github.com/go-delve/delve/cmd/dlv@latest && \
+    go install honnef.co/go/tools/cmd/staticcheck@latest && \
+    go install github.com/cosmtrek/air@latest && \
+    go install github.com/go-swagger/go-swagger/cmd/swagger@latest
+
+# Install Node.js and npm for UI development
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs
+
+# Set up workspace
+WORKDIR /workspace
+
+# Create non-root user for development
+RUN useradd -m -s /bin/bash developer && \
+    chown -R developer:developer /workspace
+
+# Switch to non-root user
+USER developer
+
+# Set Go environment
+ENV GO111MODULE=on
+ENV GOPATH=/home/developer/go
+ENV PATH=$PATH:/home/developer/go/bin
+
+# Expose common ports
+EXPOSE 8080 8081 3000 9090 3100 9411 4317 4318
+
+# Default command
+CMD ["/bin/bash"]

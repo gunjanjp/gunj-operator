@@ -1,0 +1,595 @@
+# Artifact Publishing Workflow
+# Publishes build artifacts to various package managers and registries
+# Version: 2.0
+
+name: Publish Artifacts
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish'
+        required: true
+      channels:
+        description: 'Publishing channels (comma-separated: dockerhub,ghcr,homebrew,npm)'
+        required: false
+        default: 'all'
+      dry_run:
+        description: 'Dry run (no actual publishing)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  VERSION: ${{ github.event.release.tag_name || github.event.inputs.version }}
+  DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+
+jobs:
+  # Download release artifacts
+  prepare-artifacts:
+    name: Prepare Artifacts
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_matrix: ${{ steps.prepare.outputs.matrix }}
+      version: ${{ steps.prepare.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download release artifacts
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: build-matrix.yml
+          workflow_conclusion: success
+          branch: ${{ github.event.release.target_commitish || 'main' }}
+          name: release-artifacts-${{ env.VERSION }}
+          path: ./artifacts
+
+      - name: Prepare publishing matrix
+        id: prepare
+        run: |
+          # Clean version (remove 'v' prefix if present)
+          VERSION="${{ env.VERSION }}"
+          CLEAN_VERSION="${VERSION#v}"
+          echo "version=$CLEAN_VERSION" >> $GITHUB_OUTPUT
+          
+          # Create artifact matrix
+          CHANNELS="${{ github.event.inputs.channels || 'all' }}"
+          if [[ "$CHANNELS" == "all" ]]; then
+            MATRIX='["dockerhub","ghcr","homebrew","npm","apt","yum","choco"]'
+          else
+            IFS=',' read -ra CHANNEL_ARRAY <<< "$CHANNELS"
+            MATRIX=$(printf '"%s",' "${CHANNEL_ARRAY[@]}" | sed 's/,$//')
+            MATRIX="[$MATRIX]"
+          fi
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  # Publish container images to registries
+  publish-containers:
+    name: Publish to ${{ matrix.registry }}
+    needs: prepare-artifacts
+    runs-on: ubuntu-latest
+    if: contains(fromJson(needs.prepare-artifacts.outputs.artifact_matrix), 'dockerhub') || contains(fromJson(needs.prepare-artifacts.outputs.artifact_matrix), 'ghcr')
+    strategy:
+      matrix:
+        registry: [dockerhub, ghcr]
+        component: [operator, api, ui, cli]
+      fail-fast: false
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        if: matrix.registry == 'dockerhub'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Login to GitHub Container Registry
+        if: matrix.registry == 'ghcr'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download container artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ matrix.component }}-container-*
+          path: ./containers
+
+      - name: Load and tag images
+        run: |
+          # Load images
+          for tarfile in containers/${{ matrix.component }}-container-*/*.tar; do
+            docker load -i $tarfile
+          done
+          
+          # Determine registry prefix
+          case "${{ matrix.registry }}" in
+            dockerhub)
+              REGISTRY_PREFIX="gunjanjp"
+              ;;
+            ghcr)
+              REGISTRY_PREFIX="ghcr.io/${{ github.repository_owner }}"
+              ;;
+          esac
+          
+          # Tag images for registry
+          docker images --format "{{.Repository}}:{{.Tag}}" | grep "gunj-${{ matrix.component }}" | while read image; do
+            # Extract architecture from tag
+            ARCH=$(echo $image | grep -oE "(amd64|arm64|arm)" || echo "amd64")
+            
+            # Create registry tags
+            docker tag $image $REGISTRY_PREFIX/gunj-${{ matrix.component }}:${{ needs.prepare-artifacts.outputs.version }}-$ARCH
+            docker tag $image $REGISTRY_PREFIX/gunj-${{ matrix.component }}:latest-$ARCH
+          done
+
+      - name: Create and push manifest
+        if: env.DRY_RUN == 'false'
+        run: |
+          # Determine registry prefix
+          case "${{ matrix.registry }}" in
+            dockerhub)
+              REGISTRY_PREFIX="gunjanjp"
+              ;;
+            ghcr)
+              REGISTRY_PREFIX="ghcr.io/${{ github.repository_owner }}"
+              ;;
+          esac
+          
+          # Create multi-arch manifest
+          docker manifest create \
+            $REGISTRY_PREFIX/gunj-${{ matrix.component }}:${{ needs.prepare-artifacts.outputs.version }} \
+            $REGISTRY_PREFIX/gunj-${{ matrix.component }}:${{ needs.prepare-artifacts.outputs.version }}-amd64 \
+            $REGISTRY_PREFIX/gunj-${{ matrix.component }}:${{ needs.prepare-artifacts.outputs.version }}-arm64 \
+            $REGISTRY_PREFIX/gunj-${{ matrix.component }}:${{ needs.prepare-artifacts.outputs.version }}-arm
+          
+          # Push manifest
+          docker manifest push $REGISTRY_PREFIX/gunj-${{ matrix.component }}:${{ needs.prepare-artifacts.outputs.version }}
+          
+          # Update latest tag
+          docker manifest create \
+            $REGISTRY_PREFIX/gunj-${{ matrix.component }}:latest \
+            $REGISTRY_PREFIX/gunj-${{ matrix.component }}:latest-amd64 \
+            $REGISTRY_PREFIX/gunj-${{ matrix.component }}:latest-arm64 \
+            $REGISTRY_PREFIX/gunj-${{ matrix.component }}:latest-arm
+          
+          docker manifest push $REGISTRY_PREFIX/gunj-${{ matrix.component }}:latest
+
+  # Publish to Homebrew
+  publish-homebrew:
+    name: Publish to Homebrew
+    needs: prepare-artifacts
+    runs-on: ubuntu-latest
+    if: contains(fromJson(needs.prepare-artifacts.outputs.artifact_matrix), 'homebrew')
+    steps:
+      - name: Checkout homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: gunjanjp/homebrew-gunj
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-${{ env.VERSION }}
+          path: ./artifacts
+
+      - name: Calculate checksums
+        id: checksums
+        run: |
+          # Calculate SHA256 for Darwin builds
+          AMD64_SHA=$(sha256sum artifacts/gunj-operator-${{ env.VERSION }}-darwin-amd64.tar.gz | cut -d' ' -f1)
+          ARM64_SHA=$(sha256sum artifacts/gunj-operator-${{ env.VERSION }}-darwin-arm64.tar.gz | cut -d' ' -f1)
+          
+          echo "amd64_sha=$AMD64_SHA" >> $GITHUB_OUTPUT
+          echo "arm64_sha=$ARM64_SHA" >> $GITHUB_OUTPUT
+
+      - name: Update Homebrew formula
+        run: |
+          cd homebrew-tap
+          
+          # Create formula
+          cat > Formula/gunj-operator.rb << EOF
+          class GunjOperator < Formula
+            desc "Enterprise Observability Platform Kubernetes Operator"
+            homepage "https://github.com/gunjanjp/gunj-operator"
+            version "${{ needs.prepare-artifacts.outputs.version }}"
+            license "MIT"
+          
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/gunjanjp/gunj-operator/releases/download/v${{ needs.prepare-artifacts.outputs.version }}/gunj-operator-v${{ needs.prepare-artifacts.outputs.version }}-darwin-arm64.tar.gz"
+                sha256 "${{ steps.checksums.outputs.arm64_sha }}"
+              else
+                url "https://github.com/gunjanjp/gunj-operator/releases/download/v${{ needs.prepare-artifacts.outputs.version }}/gunj-operator-v${{ needs.prepare-artifacts.outputs.version }}-darwin-amd64.tar.gz"
+                sha256 "${{ steps.checksums.outputs.amd64_sha }}"
+              end
+            end
+          
+            def install
+              bin.install "gunj-cli"
+            end
+          
+            test do
+              system "#{bin}/gunj-cli", "version"
+            end
+          end
+          EOF
+
+      - name: Commit and push
+        if: env.DRY_RUN == 'false'
+        run: |
+          cd homebrew-tap
+          git config user.name "Gunj Operator Bot"
+          git config user.email "gunjanjp@gmail.com"
+          git add Formula/gunj-operator.rb
+          git commit -m "Update gunj-operator to ${{ needs.prepare-artifacts.outputs.version }}"
+          git push
+
+  # Publish NPM package for UI
+  publish-npm:
+    name: Publish to NPM
+    needs: prepare-artifacts
+    runs-on: ubuntu-latest
+    if: contains(fromJson(needs.prepare-artifacts.outputs.artifact_matrix), 'npm')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update package version
+        run: |
+          cd ui
+          npm version ${{ needs.prepare-artifacts.outputs.version }} --no-git-tag-version
+
+      - name: Build package
+        run: |
+          cd ui
+          npm ci
+          npm run build
+
+      - name: Publish to NPM
+        if: env.DRY_RUN == 'false'
+        run: |
+          cd ui
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Publish to APT repository (Debian/Ubuntu)
+  publish-apt:
+    name: Publish to APT
+    needs: prepare-artifacts
+    runs-on: ubuntu-latest
+    if: contains(fromJson(needs.prepare-artifacts.outputs.artifact_matrix), 'apt')
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils gnupg
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-${{ env.VERSION }}
+          path: ./artifacts
+
+      - name: Create DEB packages
+        run: |
+          # Create package structure
+          for component in operator api cli; do
+            mkdir -p "gunj-$component/DEBIAN"
+            mkdir -p "gunj-$component/usr/bin"
+            mkdir -p "gunj-$component/etc/gunj-operator"
+            mkdir -p "gunj-$component/usr/share/doc/gunj-$component"
+            
+            # Extract binary
+            tar -xzf artifacts/gunj-operator-${{ env.VERSION }}-linux-amd64.tar.gz -C gunj-$component/usr/bin/ --strip-components=2 $component/gunj-$component
+            
+            # Create control file
+            cat > "gunj-$component/DEBIAN/control" << EOF
+          Package: gunj-$component
+          Version: ${{ needs.prepare-artifacts.outputs.version }}
+          Section: admin
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Gunjan <gunjanjp@gmail.com>
+          Description: Enterprise Observability Platform - $component
+           The Gunj Operator provides a Kubernetes-native way to deploy
+           and manage a complete observability stack.
+          EOF
+            
+            # Build DEB package
+            dpkg-deb --build gunj-$component
+          done
+
+      - name: Sign packages
+        if: env.DRY_RUN == 'false'
+        run: |
+          # Import GPG key
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --import
+          
+          # Sign packages
+          for deb in *.deb; do
+            dpkg-sig --sign builder $deb
+          done
+
+      - name: Upload to APT repository
+        if: env.DRY_RUN == 'false'
+        run: |
+          # This would typically upload to a service like PackageCloud or Artifactory
+          echo "Would upload DEB packages to APT repository"
+
+  # Publish to YUM repository (RHEL/CentOS)
+  publish-yum:
+    name: Publish to YUM
+    needs: prepare-artifacts
+    runs-on: ubuntu-latest
+    if: contains(fromJson(needs.prepare-artifacts.outputs.artifact_matrix), 'yum')
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm rpmsign createrepo
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-${{ env.VERSION }}
+          path: ./artifacts
+
+      - name: Create RPM packages
+        run: |
+          # Create RPM build structure
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          
+          # Copy artifacts
+          cp artifacts/gunj-operator-${{ env.VERSION }}-linux-amd64.tar.gz ~/rpmbuild/SOURCES/
+          
+          # Create spec file
+          cat > ~/rpmbuild/SPECS/gunj-operator.spec << EOF
+          Name:           gunj-operator
+          Version:        ${{ needs.prepare-artifacts.outputs.version }}
+          Release:        1%{?dist}
+          Summary:        Enterprise Observability Platform Kubernetes Operator
+          License:        MIT
+          URL:            https://github.com/gunjanjp/gunj-operator
+          Source0:        gunj-operator-%{version}-linux-amd64.tar.gz
+          
+          %description
+          The Gunj Operator provides a Kubernetes-native way to deploy
+          and manage a complete observability stack.
+          
+          %prep
+          %setup -q -n gunj-operator-%{version}
+          
+          %install
+          mkdir -p %{buildroot}%{_bindir}
+          install -m 755 gunj-operator %{buildroot}%{_bindir}/
+          install -m 755 gunj-cli %{buildroot}%{_bindir}/
+          
+          %files
+          %{_bindir}/gunj-operator
+          %{_bindir}/gunj-cli
+          
+          %changelog
+          * $(date +"%a %b %d %Y") Gunjan <gunjanjp@gmail.com> - %{version}-1
+          - Release %{version}
+          EOF
+          
+          # Build RPM
+          rpmbuild -ba ~/rpmbuild/SPECS/gunj-operator.spec
+
+      - name: Sign RPMs
+        if: env.DRY_RUN == 'false'
+        run: |
+          # Sign RPM packages
+          echo "${{ secrets.GPG_PASSPHRASE }}" | rpmsign --addsign ~/rpmbuild/RPMS/*/*.rpm
+
+      - name: Create YUM repository
+        if: env.DRY_RUN == 'false'
+        run: |
+          # Create repository structure
+          mkdir -p yum-repo/x86_64
+          cp ~/rpmbuild/RPMS/*/*.rpm yum-repo/x86_64/
+          createrepo yum-repo/
+
+  # Publish to Chocolatey (Windows)
+  publish-choco:
+    name: Publish to Chocolatey
+    needs: prepare-artifacts
+    runs-on: windows-latest
+    if: contains(fromJson(needs.prepare-artifacts.outputs.artifact_matrix), 'choco')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-${{ env.VERSION }}
+          path: ./artifacts
+
+      - name: Create Chocolatey package
+        shell: pwsh
+        run: |
+          # Create package structure
+          New-Item -ItemType Directory -Path gunj-operator/tools -Force
+          
+          # Create nuspec file
+          @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+            <metadata>
+              <id>gunj-operator</id>
+              <version>${{ needs.prepare-artifacts.outputs.version }}</version>
+              <title>Gunj Operator</title>
+              <authors>Gunjan</authors>
+              <projectUrl>https://github.com/gunjanjp/gunj-operator</projectUrl>
+              <licenseUrl>https://github.com/gunjanjp/gunj-operator/blob/main/LICENSE</licenseUrl>
+              <requireLicenseAcceptance>false</requireLicenseAcceptance>
+              <description>Enterprise Observability Platform Kubernetes Operator CLI</description>
+              <tags>kubernetes operator observability cli</tags>
+            </metadata>
+            <files>
+              <file src="tools\**" target="tools" />
+            </files>
+          </package>
+          "@ | Out-File -FilePath gunj-operator/gunj-operator.nuspec -Encoding UTF8
+          
+          # Extract CLI binary
+          Expand-Archive -Path artifacts/gunj-operator-${{ env.VERSION }}-windows-amd64.zip -DestinationPath gunj-operator/tools/
+          
+          # Create install script
+          @"
+          `$ErrorActionPreference = 'Stop'
+          `$toolsDir = Split-Path -parent `$MyInvocation.MyCommand.Definition
+          `$exePath = Join-Path `$toolsDir 'gunj-cli.exe'
+          
+          Install-BinFile -Name 'gunj-cli' -Path `$exePath
+          "@ | Out-File -FilePath gunj-operator/tools/chocolateyInstall.ps1 -Encoding UTF8
+
+      - name: Pack Chocolatey package
+        shell: pwsh
+        run: |
+          choco pack gunj-operator/gunj-operator.nuspec
+
+      - name: Push to Chocolatey
+        if: env.DRY_RUN == 'false'
+        shell: pwsh
+        run: |
+          choco push gunj-operator.${{ needs.prepare-artifacts.outputs.version }}.nupkg --source https://push.chocolatey.org/ --api-key ${{ secrets.CHOCO_API_KEY }}
+
+  # Create GitHub release assets
+  attach-release-assets:
+    name: Attach Release Assets
+    needs: [prepare-artifacts, publish-containers]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Prepare release assets
+        run: |
+          # Create release directory
+          mkdir -p release-assets
+          
+          # Copy and rename artifacts
+          find artifacts -name "*.tar.gz" -o -name "*.zip" | while read file; do
+            cp $file release-assets/
+          done
+          
+          # Generate installation script
+          cat > release-assets/install.sh << 'EOF'
+          #!/bin/bash
+          # Gunj Operator Installation Script
+          
+          set -e
+          
+          VERSION="${{ env.VERSION }}"
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+          
+          case $ARCH in
+            x86_64) ARCH="amd64" ;;
+            aarch64) ARCH="arm64" ;;
+            armv7l) ARCH="arm" ;;
+          esac
+          
+          echo "Installing Gunj Operator CLI ${VERSION} for ${OS}/${ARCH}..."
+          
+          # Download binary
+          curl -L -o gunj-cli.tar.gz \
+            "https://github.com/gunjanjp/gunj-operator/releases/download/${VERSION}/gunj-operator-${VERSION}-${OS}-${ARCH}.tar.gz"
+          
+          # Extract and install
+          tar -xzf gunj-cli.tar.gz
+          sudo mv gunj-cli /usr/local/bin/
+          
+          echo "Installation complete!"
+          gunj-cli version
+          EOF
+          
+          chmod +x release-assets/install.sh
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release-assets/*
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Summary
+  publish-summary:
+    name: Publishing Summary
+    needs: [publish-containers, publish-homebrew, publish-npm, publish-apt, publish-yum, publish-choco]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # Artifact Publishing Summary
+          
+          **Version**: ${{ env.VERSION }}  
+          **Dry Run**: ${{ env.DRY_RUN }}
+          
+          ## Publishing Status
+          
+          | Channel | Status |
+          |---------|--------|
+          | Docker Hub | ${{ needs.publish-containers.result }} |
+          | GitHub Container Registry | ${{ needs.publish-containers.result }} |
+          | Homebrew | ${{ needs.publish-homebrew.result }} |
+          | NPM | ${{ needs.publish-npm.result }} |
+          | APT | ${{ needs.publish-apt.result }} |
+          | YUM | ${{ needs.publish-yum.result }} |
+          | Chocolatey | ${{ needs.publish-choco.result }} |
+          
+          ## Container Images
+          
+          - \`gunjanjp/gunj-operator:${{ env.VERSION }}\`
+          - \`gunjanjp/gunj-api:${{ env.VERSION }}\`
+          - \`gunjanjp/gunj-ui:${{ env.VERSION }}\`
+          - \`gunjanjp/gunj-cli:${{ env.VERSION }}\`
+          
+          ## Installation Methods
+          
+          \`\`\`bash
+          # Homebrew (macOS)
+          brew install gunjanjp/gunj/gunj-operator
+          
+          # Docker
+          docker pull gunjanjp/gunj-operator:${{ env.VERSION }}
+          
+          # Direct download
+          curl -L https://github.com/gunjanjp/gunj-operator/releases/download/${{ env.VERSION }}/install.sh | bash
+          \`\`\`
+          EOF
+
+      - name: Send notification
+        if: env.DRY_RUN == 'false'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            Gunj Operator ${{ env.VERSION }} published!
+            View release: https://github.com/gunjanjp/gunj-operator/releases/tag/${{ env.VERSION }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,198 @@
+# Codecov configuration
+# https://docs.codecov.io/docs/codecov-yaml
+
+codecov:
+  # Don't wait for all CI builds
+  require_ci_to_pass: false
+  
+  # Notify settings
+  notify:
+    # Wait for all builds before sending notification
+    wait_for_ci: true
+
+# Coverage configuration
+coverage:
+  # Coverage precision
+  precision: 2
+  round: down
+  range: "70...100"
+  
+  # Status checks
+  status:
+    # Project coverage
+    project:
+      default:
+        # Coverage must be at least 80%
+        target: 80%
+        threshold: 1%
+        base: auto
+        if_not_found: success
+        if_ci_failed: error
+        only_pulls: false
+      
+      # Operator specific
+      operator:
+        target: 85%
+        paths:
+          - "controllers/"
+          - "internal/managers/"
+      
+      # API specific
+      api:
+        target: 80%
+        paths:
+          - "internal/api/"
+      
+      # UI specific
+      ui:
+        target: 75%
+        paths:
+          - "ui/src/"
+    
+    # Patch coverage (new code)
+    patch:
+      default:
+        target: 90%
+        threshold: 1%
+        base: auto
+        if_not_found: success
+        if_ci_failed: error
+        only_pulls: true
+    
+    # Don't post status on these
+    changes: false
+
+# Comments configuration
+comment:
+  # Comment layout
+  layout: "reach,diff,flags,tree,files"
+  behavior: default
+  require_changes: false
+  require_base: false
+  require_head: true
+  
+  # Show coverage trends
+  show_carryforward_flags: true
+  show_critical_paths: true
+
+# Flags for different components
+flags:
+  # Operator tests
+  operator:
+    paths:
+      - "api/"
+      - "controllers/"
+      - "internal/managers/"
+      - "internal/webhooks/"
+    carryforward: true
+  
+  # API tests
+  api:
+    paths:
+      - "internal/api/"
+      - "pkg/client/"
+    carryforward: true
+  
+  # Unit tests
+  unit:
+    carryforward: true
+  
+  # Integration tests
+  integration:
+    carryforward: true
+  
+  # E2E tests
+  e2e:
+    carryforward: false
+
+# Ignore paths
+ignore:
+  # Generated files
+  - "**/*_generated.go"
+  - "**/*.generated.go"
+  - "**/*.pb.go"
+  - "**/zz_generated.*"
+  
+  # Test files
+  - "**/*_test.go"
+  - "**/test/**"
+  - "**/tests/**"
+  - "**/testing/**"
+  - "**/e2e/**"
+  
+  # Vendor and dependencies
+  - "vendor/**/*"
+  - "node_modules/**/*"
+  
+  # Build and tools
+  - "hack/**/*"
+  - "build/**/*"
+  - ".github/**/*"
+  
+  # Documentation
+  - "docs/**/*"
+  - "**/*.md"
+  
+  # Configuration files
+  - "**/*.yaml"
+  - "**/*.yml"
+  - "**/*.json"
+  - "**/*.toml"
+  
+  # Examples
+  - "examples/**/*"
+  
+  # UI build files
+  - "ui/dist/**/*"
+  - "ui/build/**/*"
+  - "ui/public/**/*"
+  - "**/*.css"
+  - "**/*.scss"
+
+# Parsers configuration
+parsers:
+  gcov:
+    branch_detection:
+      conditional: true
+      loop: true
+      method: true
+      macro: false
+
+# GitHub integration
+github_checks:
+  annotations: true
+
+# Upload configuration
+uploads:
+  - name: operator
+    flags:
+      - operator
+      - unit
+    paths:
+      - "coverage-operator.out"
+  
+  - name: api
+    flags:
+      - api
+      - unit
+    paths:
+      - "coverage-api.out"
+  
+  - name: integration
+    flags:
+      - integration
+    paths:
+      - "coverage-integration.out"
+  
+  - name: e2e
+    flags:
+      - e2e
+    paths:
+      - "coverage-e2e.out"
+  
+  - name: ui
+    flags:
+      - ui
+      - unit
+    paths:
+      - "ui/coverage/lcov.info"

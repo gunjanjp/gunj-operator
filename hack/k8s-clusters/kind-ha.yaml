@@ -1,0 +1,75 @@
+# Kind Cluster Configuration for HA Testing
+# Multi-node cluster with 3 control-plane nodes and 3 worker nodes
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: gunj-operator-ha
+nodes:
+# Control plane nodes
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "node-role=control-plane"
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: JoinConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "node-role=control-plane"
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: JoinConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "node-role=control-plane"
+# Worker nodes
+- role: worker
+  kubeadmConfigPatches:
+  - |
+    kind: JoinConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "node-role=worker,ingress-ready=true"
+  extraPortMappings:
+  - containerPort: 80
+    hostPort: 80
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 443
+    protocol: TCP
+- role: worker
+  kubeadmConfigPatches:
+  - |
+    kind: JoinConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "node-role=worker,workload=observability"
+- role: worker
+  kubeadmConfigPatches:
+  - |
+    kind: JoinConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "node-role=worker,workload=observability"
+# Networking
+networking:
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"
+  kubeProxyMode: "ipvs"
+# Feature gates for testing
+kubeadmConfigPatches:
+- |
+  kind: ClusterConfiguration
+  apiServer:
+    extraArgs:
+      "feature-gates": "TTLAfterFinished=true,ExpandCSIVolumes=true,CSIStorageCapacity=true"
+  controllerManager:
+    extraArgs:
+      "feature-gates": "TTLAfterFinished=true,ExpandCSIVolumes=true,CSIStorageCapacity=true"
+  scheduler:
+    extraArgs:
+      "feature-gates": "TTLAfterFinished=true,CSIStorageCapacity=true"

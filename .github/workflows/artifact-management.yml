@@ -1,0 +1,494 @@
+# Artifact Storage Configuration
+# Manages build artifacts, test results, and release packages
+# Version: 2.0
+
+name: Artifact Management
+
+on:
+  workflow_call:
+    inputs:
+      artifact_type:
+        required: true
+        type: string
+        description: 'Type of artifact (binary, container, test-results, coverage)'
+      retention_days:
+        required: false
+        type: number
+        default: 30
+        description: 'Number of days to retain artifacts'
+      
+env:
+  # S3-compatible storage configuration
+  S3_BUCKET: gunj-operator-artifacts
+  S3_REGION: us-east-1
+  
+  # Artifact naming conventions
+  ARTIFACT_PREFIX: gunj-operator
+  
+  # Compression settings
+  COMPRESSION_LEVEL: 9
+  
+  # Retention policies
+  DEFAULT_RETENTION_DAYS: 30
+  RELEASE_RETENTION_DAYS: 365
+  TEST_RETENTION_DAYS: 7
+  
+jobs:
+  prepare-storage:
+    name: Prepare Artifact Storage
+    runs-on: ubuntu-latest
+    outputs:
+      storage_path: ${{ steps.prepare.outputs.storage_path }}
+      artifact_id: ${{ steps.prepare.outputs.artifact_id }}
+      manifest: ${{ steps.prepare.outputs.manifest }}
+    steps:
+      - name: Generate artifact metadata
+        id: prepare
+        run: |
+          # Generate unique artifact ID
+          ARTIFACT_ID="${{ env.ARTIFACT_PREFIX }}-${{ github.sha }}-$(date +%s)"
+          echo "artifact_id=${ARTIFACT_ID}" >> $GITHUB_OUTPUT
+          
+          # Determine storage path based on artifact type
+          case "${{ inputs.artifact_type }}" in
+            "binary")
+              STORAGE_PATH="binaries/${GITHUB_REF_NAME}/${GITHUB_SHA}"
+              ;;
+            "container")
+              STORAGE_PATH="containers/${GITHUB_REF_NAME}/${GITHUB_SHA}"
+              ;;
+            "test-results")
+              STORAGE_PATH="test-results/${GITHUB_REF_NAME}/${GITHUB_RUN_NUMBER}"
+              ;;
+            "coverage")
+              STORAGE_PATH="coverage/${GITHUB_REF_NAME}/${GITHUB_RUN_NUMBER}"
+              ;;
+            "release")
+              STORAGE_PATH="releases/${GITHUB_REF_NAME}"
+              ;;
+            *)
+              STORAGE_PATH="misc/${GITHUB_REF_NAME}/${GITHUB_SHA}"
+              ;;
+          esac
+          echo "storage_path=${STORAGE_PATH}" >> $GITHUB_OUTPUT
+          
+          # Create artifact manifest
+          cat > artifact-manifest.json << EOF
+          {
+            "artifact_id": "${ARTIFACT_ID}",
+            "type": "${{ inputs.artifact_type }}",
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "git_sha": "${GITHUB_SHA}",
+            "git_ref": "${GITHUB_REF}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_number": "${GITHUB_RUN_NUMBER}",
+            "retention_days": ${{ inputs.retention_days }},
+            "metadata": {
+              "triggered_by": "${GITHUB_ACTOR}",
+              "event_name": "${GITHUB_EVENT_NAME}",
+              "repository": "${GITHUB_REPOSITORY}"
+            }
+          }
+          EOF
+          
+          echo "manifest=$(cat artifact-manifest.json | jq -c .)" >> $GITHUB_OUTPUT
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-manifest-${{ steps.prepare.outputs.artifact_id }}
+          path: artifact-manifest.json
+          retention-days: ${{ inputs.retention_days }}
+
+  store-github-artifacts:
+    name: Store in GitHub Artifacts
+    runs-on: ubuntu-latest
+    needs: prepare-storage
+    strategy:
+      matrix:
+        artifact_group:
+          - binaries
+          - test-results
+          - coverage-reports
+    steps:
+      - name: Download workflow artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ${{ matrix.artifact_group }}-*
+          path: artifacts/
+
+      - name: Organize artifacts
+        run: |
+          # Create organized structure
+          mkdir -p organized/{binaries,test-results,coverage}
+          
+          # Move artifacts to organized structure
+          case "${{ matrix.artifact_group }}" in
+            "binaries")
+              find artifacts -name "*.tar.gz" -o -name "*.zip" | while read file; do
+                component=$(basename $file | cut -d'-' -f1)
+                arch=$(basename $file | cut -d'-' -f2)
+                mkdir -p organized/binaries/$component/$arch
+                cp $file organized/binaries/$component/$arch/
+              done
+              ;;
+            "test-results")
+              find artifacts -name "*.xml" -o -name "*.json" | while read file; do
+                cp $file organized/test-results/
+              done
+              ;;
+            "coverage-reports")
+              find artifacts -name "*.out" -o -name "*.html" | while read file; do
+                cp $file organized/coverage/
+              done
+              ;;
+          esac
+
+      - name: Create artifact bundle
+        run: |
+          cd organized
+          tar -czf ../${{ matrix.artifact_group }}-${{ needs.prepare-storage.outputs.artifact_id }}.tar.gz .
+          cd ..
+          
+          # Generate checksum
+          sha256sum ${{ matrix.artifact_group }}-${{ needs.prepare-storage.outputs.artifact_id }}.tar.gz > \
+            ${{ matrix.artifact_group }}-${{ needs.prepare-storage.outputs.artifact_id }}.sha256
+
+      - name: Upload bundled artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_group }}-bundle-${{ github.sha }}
+          path: |
+            ${{ matrix.artifact_group }}-*.tar.gz
+            ${{ matrix.artifact_group }}-*.sha256
+          retention-days: ${{ inputs.retention_days }}
+
+  store-s3-artifacts:
+    name: Store in S3
+    runs-on: ubuntu-latest
+    needs: [prepare-storage, store-github-artifacts]
+    if: github.event_name == 'push' || github.event_name == 'release'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.S3_REGION }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-bundle-*'
+          path: s3-artifacts/
+
+      - name: Upload to S3
+        run: |
+          # Upload artifacts to S3 with metadata
+          find s3-artifacts -name "*.tar.gz" | while read file; do
+            artifact_name=$(basename $file)
+            
+            aws s3 cp $file \
+              s3://${{ env.S3_BUCKET }}/${{ needs.prepare-storage.outputs.storage_path }}/$artifact_name \
+              --metadata artifact-id=${{ needs.prepare-storage.outputs.artifact_id }},\
+                        git-sha=${GITHUB_SHA},\
+                        build-number=${GITHUB_RUN_NUMBER},\
+                        retention-days=${{ inputs.retention_days }}
+          done
+          
+          # Upload manifest
+          echo '${{ needs.prepare-storage.outputs.manifest }}' | \
+            aws s3 cp - \
+            s3://${{ env.S3_BUCKET }}/${{ needs.prepare-storage.outputs.storage_path }}/manifest.json \
+            --content-type application/json
+
+      - name: Create S3 lifecycle policy
+        if: github.event_name == 'release'
+        run: |
+          # Create lifecycle policy for automatic cleanup
+          cat > lifecycle-policy.json << EOF
+          {
+            "Rules": [
+              {
+                "Id": "DeleteOldArtifacts",
+                "Status": "Enabled",
+                "Filter": {
+                  "Prefix": "${{ needs.prepare-storage.outputs.storage_path }}/"
+                },
+                "Expiration": {
+                  "Days": ${{ inputs.retention_days }}
+                }
+              }
+            ]
+          }
+          EOF
+          
+          aws s3api put-bucket-lifecycle-configuration \
+            --bucket ${{ env.S3_BUCKET }} \
+            --lifecycle-configuration file://lifecycle-policy.json
+
+  store-container-registry:
+    name: Store Container Images
+    runs-on: ubuntu-latest
+    needs: prepare-storage
+    if: inputs.artifact_type == 'container'
+    strategy:
+      matrix:
+        registry:
+          - docker.io
+          - ghcr.io
+          - public.ecr.aws
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to registries
+        run: |
+          # Docker Hub
+          if [[ "${{ matrix.registry }}" == "docker.io" ]]; then
+            echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+          fi
+          
+          # GitHub Container Registry
+          if [[ "${{ matrix.registry }}" == "ghcr.io" ]]; then
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          fi
+          
+          # AWS ECR Public
+          if [[ "${{ matrix.registry }}" == "public.ecr.aws" ]]; then
+            aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+          fi
+
+      - name: Download container artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-container-*'
+          path: containers/
+
+      - name: Load and push images
+        run: |
+          # Load container images
+          find containers -name "*.tar" | while read tarfile; do
+            docker load -i $tarfile
+          done
+          
+          # Tag and push to registry
+          docker images --format "{{.Repository}}:{{.Tag}}" | grep gunj | while read image; do
+            # Extract component and architecture
+            component=$(echo $image | cut -d'/' -f2 | cut -d':' -f1)
+            tag=$(echo $image | cut -d':' -f2)
+            
+            # Create registry-specific tag
+            case "${{ matrix.registry }}" in
+              "docker.io")
+                new_tag="gunjanjp/$component:$tag"
+                ;;
+              "ghcr.io")
+                new_tag="ghcr.io/${{ github.repository_owner }}/$component:$tag"
+                ;;
+              "public.ecr.aws")
+                new_tag="public.ecr.aws/gunj-operator/$component:$tag"
+                ;;
+            esac
+            
+            # Tag and push
+            docker tag $image $new_tag
+            docker push $new_tag
+          done
+
+  create-release-artifacts:
+    name: Create Release Artifacts
+    runs-on: ubuntu-latest
+    needs: [prepare-storage, store-github-artifacts]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts/
+
+      - name: Create release bundles
+        run: |
+          # Create release directory structure
+          mkdir -p release/{binaries,charts,manifests,docs}
+          
+          # Organize binaries by platform
+          find release-artifacts -name "*-binary-*" -type f | while read file; do
+            platform=$(basename $file | grep -oE "(linux|darwin|windows)-(amd64|arm64|arm)")
+            component=$(basename $file | cut -d'-' -f1)
+            mkdir -p release/binaries/$platform
+            cp $file release/binaries/$platform/${component}-${platform}
+          done
+          
+          # Copy Helm charts
+          cp -r charts/* release/charts/ || true
+          
+          # Copy Kubernetes manifests
+          cp -r config/samples/* release/manifests/ || true
+          
+          # Create platform-specific archives
+          cd release/binaries
+          for platform in */; do
+            platform_name=${platform%/}
+            tar -czf ../../gunj-operator-${GITHUB_REF_NAME}-${platform_name}.tar.gz $platform
+            (cd $platform && sha256sum * > ../../gunj-operator-${GITHUB_REF_NAME}-${platform_name}.sha256)
+          done
+          cd ../..
+          
+          # Create source archive
+          git archive --format=tar.gz --prefix=gunj-operator-${GITHUB_REF_NAME}/ \
+            -o gunj-operator-${GITHUB_REF_NAME}-source.tar.gz ${GITHUB_REF_NAME}
+
+      - name: Create release manifest
+        run: |
+          # Generate comprehensive release manifest
+          cat > release-manifest.json << EOF
+          {
+            "version": "${GITHUB_REF_NAME}",
+            "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "git_sha": "${GITHUB_SHA}",
+            "artifacts": {
+              "binaries": {
+                "linux-amd64": "gunj-operator-${GITHUB_REF_NAME}-linux-amd64.tar.gz",
+                "linux-arm64": "gunj-operator-${GITHUB_REF_NAME}-linux-arm64.tar.gz",
+                "linux-arm": "gunj-operator-${GITHUB_REF_NAME}-linux-arm.tar.gz",
+                "darwin-amd64": "gunj-operator-${GITHUB_REF_NAME}-darwin-amd64.tar.gz",
+                "darwin-arm64": "gunj-operator-${GITHUB_REF_NAME}-darwin-arm64.tar.gz",
+                "windows-amd64": "gunj-operator-${GITHUB_REF_NAME}-windows-amd64.tar.gz"
+              },
+              "containers": {
+                "operator": "gunjanjp/gunj-operator:${GITHUB_REF_NAME}",
+                "api": "gunjanjp/gunj-api:${GITHUB_REF_NAME}",
+                "ui": "gunjanjp/gunj-ui:${GITHUB_REF_NAME}",
+                "cli": "gunjanjp/gunj-cli:${GITHUB_REF_NAME}"
+              },
+              "charts": {
+                "helm": "gunj-operator-${GITHUB_REF_NAME}.tgz"
+              },
+              "source": "gunj-operator-${GITHUB_REF_NAME}-source.tar.gz"
+            },
+            "checksums": {
+              "sha256": "checksums.sha256",
+              "sha512": "checksums.sha512"
+            }
+          }
+          EOF
+
+      - name: Generate checksums
+        run: |
+          # SHA256 checksums
+          sha256sum gunj-operator-*.tar.gz > checksums.sha256
+          
+          # SHA512 checksums  
+          sha512sum gunj-operator-*.tar.gz > checksums.sha512
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ github.ref_name }}
+          path: |
+            gunj-operator-*.tar.gz
+            checksums.*
+            release-manifest.json
+          retention-days: ${{ env.RELEASE_RETENTION_DAYS }}
+
+  cleanup-old-artifacts:
+    name: Cleanup Old Artifacts
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Cleanup GitHub artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const artifacts = await github.rest.actions.listArtifactsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - 30);
+            
+            for (const artifact of artifacts.data.artifacts) {
+              if (new Date(artifact.created_at) < cutoffDate) {
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id
+                });
+                console.log(`Deleted artifact: ${artifact.name}`);
+              }
+            }
+
+      - name: Cleanup S3 artifacts
+        if: env.S3_BUCKET != ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ env.S3_REGION }}
+        run: |
+          # List and remove expired artifacts
+          aws s3api list-objects-v2 \
+            --bucket ${{ env.S3_BUCKET }} \
+            --prefix artifacts/ \
+            --query "Contents[?LastModified<'$(date -d '30 days ago' --iso-8601)'].Key" \
+            --output text | \
+          xargs -n1 -I{} aws s3 rm s3://${{ env.S3_BUCKET }}/{}
+
+  generate-artifact-report:
+    name: Generate Artifact Report
+    runs-on: ubuntu-latest
+    needs: [store-github-artifacts, store-s3-artifacts, store-container-registry]
+    if: always()
+    steps:
+      - name: Generate storage report
+        run: |
+          cat > artifact-storage-report.md << EOF
+          # Artifact Storage Report
+          
+          **Build**: #${{ github.run_number }}  
+          **Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)  
+          **Commit**: ${{ github.sha }}  
+          
+          ## Storage Locations
+          
+          ### GitHub Artifacts
+          - Build artifacts: [View](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          - Retention: ${{ inputs.retention_days }} days
+          
+          ### S3 Storage
+          - Bucket: ${{ env.S3_BUCKET }}
+          - Path: ${{ needs.prepare-storage.outputs.storage_path }}
+          
+          ### Container Registries
+          - Docker Hub: gunjanjp/gunj-*
+          - GitHub Packages: ghcr.io/${{ github.repository_owner }}/gunj-*
+          - AWS ECR: public.ecr.aws/gunj-operator/gunj-*
+          
+          ## Artifact Summary
+          
+          | Type | Count | Total Size | Storage Location |
+          |------|-------|------------|------------------|
+          | Binaries | - | - | GitHub + S3 |
+          | Containers | - | - | Registries |
+          | Test Results | - | - | GitHub |
+          | Coverage | - | - | GitHub |
+          
+          ## Cleanup Policy
+          
+          - Development builds: 7 days
+          - Branch builds: 30 days
+          - Tagged releases: 365 days
+          - Container images: Keep last 10 per tag
+          EOF
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifact-storage-report
+          path: artifact-storage-report.md
+          retention-days: 90

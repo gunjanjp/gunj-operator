@@ -1,0 +1,356 @@
+# Pull Request Checks
+# Runs automated checks on pull requests
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+env:
+  GO_VERSION: '1.21'
+  NODE_VERSION: '20'
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  # Check PR metadata
+  pr-metadata:
+    name: PR Metadata Check
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+    - name: Check PR title
+      uses: amannn/action-semantic-pull-request@v5
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        types: |
+          feat
+          fix
+          docs
+          style
+          refactor
+          perf
+          test
+          build
+          ci
+          chore
+          revert
+        requireScope: false
+        subjectPattern: ^(?![A-Z]).+$
+        subjectPatternError: |
+          The subject "{subject}" found in the pull request title "{title}"
+          didn't match the configured pattern. Please ensure that the subject
+          doesn't start with an uppercase character.
+
+    - name: Check PR size
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const pr = context.payload.pull_request;
+          const { additions, deletions, changed_files } = pr;
+          
+          const totalChanges = additions + deletions;
+          const labels = [];
+          
+          // Categorize PR size
+          if (totalChanges < 10) {
+            labels.push('size/XS');
+          } else if (totalChanges < 100) {
+            labels.push('size/S');
+          } else if (totalChanges < 500) {
+            labels.push('size/M');
+          } else if (totalChanges < 1000) {
+            labels.push('size/L');
+          } else {
+            labels.push('size/XL');
+            
+            // Warn about large PRs
+            await github.rest.issues.createComment({
+              issue_number: pr.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `⚠️ This PR contains ${totalChanges} changes across ${changed_files} files. Consider breaking it down into smaller, more focused PRs for easier review.`
+            });
+          }
+          
+          // Add labels
+          await github.rest.issues.addLabels({
+            issue_number: pr.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            labels: labels
+          });
+
+  # Check for required files
+  required-files:
+    name: Required Files Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Check for required files
+      run: |
+        required_files=(
+          "LICENSE"
+          "README.md"
+          "CONTRIBUTING.md"
+          "CODE_OF_CONDUCT.md"
+          "SECURITY.md"
+          ".gitignore"
+          "Makefile"
+          "go.mod"
+          "go.sum"
+        )
+        
+        missing_files=()
+        for file in "${required_files[@]}"; do
+          if [[ ! -f "$file" ]]; then
+            missing_files+=("$file")
+          fi
+        done
+        
+        if [[ ${#missing_files[@]} -gt 0 ]]; then
+          echo "❌ Missing required files:"
+          printf '%s\n' "${missing_files[@]}"
+          exit 1
+        fi
+        
+        echo "✅ All required files present"
+
+  # Documentation checks
+  docs-check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Check markdown files
+      uses: DavidAnson/markdownlint-cli2-action@v14
+      with:
+        globs: |
+          **/*.md
+          !**/node_modules/**
+          !**/vendor/**
+
+    - name: Check for broken links
+      uses: lycheeverse/lychee-action@v1
+      with:
+        args: >-
+          --exclude-mail
+          --exclude-loopback
+          --exclude '(localhost|127\.0\.0\.1)'
+          --accept 200,204,206,301,302,304
+          --max-concurrency 5
+          --no-progress
+          './**/*.md'
+
+    - name: Check API documentation
+      run: |
+        # Check if API changes require documentation updates
+        if git diff --name-only origin/main..HEAD | grep -E "(api/|internal/api/)" > /dev/null; then
+          if ! git diff --name-only origin/main..HEAD | grep -E "docs/api/" > /dev/null; then
+            echo "⚠️ API changes detected but no API documentation updates found"
+            echo "Please update the API documentation in docs/api/"
+            exit 1
+          fi
+        fi
+
+  # Dependency review
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Dependency Review
+      uses: actions/dependency-review-action@v4
+      with:
+        fail-on-severity: moderate
+        deny-licenses: GPL-3.0, LGPL-3.0, AGPL-3.0
+        
+  # DCO check
+  dco-check:
+    name: DCO Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: DCO Check
+      uses: dco-check/dco-check@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Check commit messages
+  commit-check:
+    name: Commit Message Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check commit messages
+      uses: wagoid/commitlint-github-action@v5
+      with:
+        configFile: .commitlintrc.json
+
+  # Code coverage delta
+  coverage-check:
+    name: Coverage Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Run tests with coverage
+      run: |
+        make test-coverage
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.out
+        fail_ci_if_error: true
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+    - name: Coverage report comment
+      uses: 5monkeys/cobertura-action@master
+      with:
+        path: coverage.xml
+        minimum_coverage: 80
+        fail_below_threshold: true
+        show_line: true
+        show_branch: true
+        show_missing: true
+
+  # Performance impact check
+  performance-check:
+    name: Performance Impact Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Run benchmarks on base
+      run: |
+        git checkout origin/main
+        make bench > base-bench.txt
+
+    - name: Run benchmarks on PR
+      run: |
+        git checkout HEAD
+        make bench > pr-bench.txt
+
+    - name: Compare benchmarks
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'go'
+        output-file-path: pr-bench.txt
+        external-data-json-path: ./cache/benchmark-data.json
+        fail-threshold: '150%'
+        comment-on-alert: true
+        alert-comment-cc-users: '@gunjanjp'
+
+  # Auto-assign reviewers
+  auto-assign:
+    name: Auto Assign
+    runs-on: ubuntu-latest
+    steps:
+    - uses: kentaro-m/auto-assign-action@v1.2.5
+      with:
+        configuration-path: '.github/auto-assign.yml'
+
+  # Label PR based on files changed
+  label-pr:
+    name: Label PR
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/labeler@v5
+      with:
+        repo-token: "${{ secrets.GITHUB_TOKEN }}"
+        configuration-path: '.github/labeler.yml'
+
+  # Summary comment
+  pr-summary:
+    name: PR Summary
+    runs-on: ubuntu-latest
+    needs: [pr-metadata, required-files, docs-check, dependency-review, dco-check, commit-check]
+    if: always()
+    steps:
+    - name: Create summary comment
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const checks = {
+            'PR Metadata': '${{ needs.pr-metadata.result }}',
+            'Required Files': '${{ needs.required-files.result }}',
+            'Documentation': '${{ needs.docs-check.result }}',
+            'Dependencies': '${{ needs.dependency-review.result }}',
+            'DCO': '${{ needs.dco-check.result }}',
+            'Commits': '${{ needs.commit-check.result }}'
+          };
+          
+          let allPassed = true;
+          let summary = '## PR Checks Summary\n\n';
+          summary += '| Check | Status |\n|-------|--------|\n';
+          
+          for (const [check, status] of Object.entries(checks)) {
+            const icon = status === 'success' ? '✅' : status === 'failure' ? '❌' : '⏭️';
+            summary += `| ${check} | ${icon} ${status} |\n`;
+            if (status === 'failure') allPassed = false;
+          }
+          
+          summary += '\n';
+          
+          if (allPassed) {
+            summary += '### ✅ All checks passed!\n\n';
+            summary += 'This PR is ready for review.\n';
+          } else {
+            summary += '### ❌ Some checks failed\n\n';
+            summary += 'Please address the failing checks before this PR can be merged.\n';
+          }
+          
+          // Find existing comment
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number
+          });
+          
+          const botComment = comments.find(comment => 
+            comment.user.type === 'Bot' && comment.body.includes('PR Checks Summary')
+          );
+          
+          if (botComment) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: summary
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: summary
+            });
+          }

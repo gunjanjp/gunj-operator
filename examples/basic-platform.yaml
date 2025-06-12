@@ -1,0 +1,65 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: basic-platform
+  namespace: monitoring
+spec:
+  # Component Configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      storage:
+        size: 10Gi
+      retention: 7d
+      
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      adminPassword: changeme
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "100m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
+      
+    loki:
+      enabled: true
+      version: "2.9.0"
+      storage:
+        size: 20Gi
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+        
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      storage:
+        size: 10Gi
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "100m"
+        limits:
+          memory: "512Mi"
+          cpu: "250m"
+        
+  # Global Configuration
+  global:
+    externalLabels:
+      cluster: dev-cluster
+      environment: development

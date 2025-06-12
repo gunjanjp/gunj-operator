@@ -1,0 +1,147 @@
+# Component Build Configuration
+# Defines build settings for each component in the Gunj Operator project
+# Version: 2.0
+
+components:
+  operator:
+    type: go
+    main_path: ./cmd/operator
+    binary_name: gunj-operator
+    dockerfile: Dockerfile
+    build_tags:
+      - osusergo
+      - netgo
+    ldflags:
+      - -extldflags "-static"
+    dependencies:
+      - controller-runtime
+      - k8s.io/client-go
+      - prometheus/client_golang
+    test_tags:
+      - unit
+      - integration
+    supported_platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/arm/v7
+      - darwin/amd64
+      - darwin/arm64
+      - windows/amd64
+    
+  api:
+    type: go
+    main_path: ./cmd/api-server
+    binary_name: gunj-api-server
+    dockerfile: Dockerfile.api
+    build_tags:
+      - jsoniter
+    dependencies:
+      - gin-gonic/gin
+      - graphql-go/graphql
+      - gorilla/websocket
+    test_tags:
+      - unit
+      - api
+    supported_platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/arm/v7
+    
+  cli:
+    type: go
+    main_path: ./cmd/cli
+    binary_name: gunj-cli
+    dockerfile: Dockerfile.cli
+    build_tags:
+      - cli
+    dependencies:
+      - spf13/cobra
+      - spf13/viper
+    test_tags:
+      - unit
+      - cli
+    supported_platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/arm/v7
+      - darwin/amd64
+      - darwin/arm64
+      - windows/amd64
+      - windows/arm64
+    
+  ui:
+    type: node
+    root_path: ./ui
+    dockerfile: Dockerfile.ui
+    node_version: "20"
+    build_command: npm run build
+    test_command: npm test
+    dependencies:
+      - react: "^18.2.0"
+      - typescript: "^5.0.0"
+      - "@mui/material": "^5.14.0"
+      - "@tanstack/react-query": "^4.0.0"
+    supported_platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/arm/v7
+
+# Architecture-specific optimizations
+architectures:
+  amd64:
+    go_env:
+      GOAMD64: v3  # Use AVX instructions
+    compiler_flags:
+      - -march=x86-64-v3
+    docker_platform: linux/amd64
+    
+  arm64:
+    go_env:
+      GOARM64: v8.2  # ARMv8.2 features
+    compiler_flags:
+      - -march=armv8.2-a
+    docker_platform: linux/arm64
+    
+  arm/v7:
+    go_env:
+      GOARM: 7
+    compiler_flags:
+      - -march=armv7-a
+      - -mfpu=neon-vfpv4
+    docker_platform: linux/arm/v7
+
+# Build optimization settings
+optimizations:
+  release:
+    go_flags:
+      - -trimpath
+      - -buildmode=pie
+    ldflags:
+      - -s  # Strip symbol table
+      - -w  # Strip debug info
+    upx_compression: true
+    upx_level: 9
+    
+  debug:
+    go_flags:
+      - -gcflags="all=-N -l"
+    ldflags: []
+    upx_compression: false
+
+# Caching configuration
+cache:
+  go_mod_cache: ~/.cache/go-mod
+  go_build_cache: ~/.cache/go-build
+  npm_cache: ~/.npm
+  docker_layers: true
+  gha_cache: true
+  cache_key_prefix: gunj-operator-v2
+
+# Build matrix exclusions
+exclusions:
+  - component: ui
+    platform: darwin/*
+  - component: ui
+    platform: windows/*
+  - component: operator
+    platform: windows/arm64  # Not widely supported yet

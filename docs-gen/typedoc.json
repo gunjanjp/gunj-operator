@@ -1,0 +1,106 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "Gunj Operator UI",
+  "entryPoints": ["../ui/src"],
+  "entryPointStrategy": "expand",
+  "out": "./output/typescript",
+  "readme": "../ui/README.md",
+  "tsconfig": "../ui/tsconfig.json",
+  "exclude": [
+    "**/node_modules/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/stories/**"
+  ],
+  "includeVersion": true,
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "Components",
+    "Hooks",
+    "Services",
+    "Types",
+    "Utils",
+    "*"
+  ],
+  "navigationLinks": {
+    "GitHub": "https://github.com/gunjanjp/gunj-operator",
+    "Documentation": "https://gunjanjp.github.io/gunj-operator"
+  },
+  "sidebarLinks": {
+    "Main Documentation": "https://gunjanjp.github.io/gunj-operator",
+    "API Reference": "https://gunjanjp.github.io/gunj-operator/api",
+    "React Components": "https://gunjanjp.github.io/gunj-operator/storybook"
+  },
+  "plugin": [
+    "typedoc-plugin-markdown",
+    "typedoc-plugin-missing-exports"
+  ],
+  "theme": "default",
+  "lightHighlightTheme": "github-light",
+  "darkHighlightTheme": "github-dark",
+  "customCss": "./typedoc-theme.css",
+  "hideBreadcrumbs": false,
+  "hideGenerator": false,
+  "searchInComments": true,
+  "cleanOutputDir": true,
+  "skipErrorChecking": false,
+  "validation": {
+    "notExported": true,
+    "invalidLink": true,
+    "notDocumented": false
+  },
+  "requiredToBeDocumented": [
+    "Enum",
+    "EnumMember",
+    "Variable",
+    "Function",
+    "Class",
+    "Interface",
+    "Property",
+    "Method",
+    "TypeAlias"
+  ],
+  "kindSortOrder": [
+    "Function",
+    "Variable",
+    "Interface",
+    "TypeAlias",
+    "Enum",
+    "EnumMember",
+    "Class",
+    "Property",
+    "Method"
+  ],
+  "groupOrder": [
+    "Functions",
+    "Variables",
+    "Interfaces",
+    "Type Aliases",
+    "Enumerations",
+    "Classes",
+    "*"
+  ],
+  "sort": ["alphabetical"],
+  "visibilityFilters": {
+    "protected": false,
+    "private": false,
+    "inherited": true,
+    "external": false
+  },
+  "commentStyle": "all",
+  "preserveLinkText": false,
+  "disableSources": false,
+  "gitRevision": "main",
+  "gitRemote": "origin",
+  "readme": "none",
+  "includes": "./includes",
+  "media": "./media",
+  "watch": false,
+  "preserveWatchOutput": false,
+  "emit": "docs",
+  "logLevel": "Info"
+}

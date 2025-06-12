@@ -1,0 +1,66 @@
+# CRD Reference Documentation Configuration
+
+render:
+  # Render configuration
+  kubernetesVersion: "1.29"
+  
+source:
+  # Source code location  
+  locations:
+    - type: go
+      module: github.com/gunjanjp/gunj-operator
+      paths:
+        - api/v1beta1
+        
+processor:
+  # How to process the discovered types
+  ignoreTypes:
+    - "k8s.io/apimachinery/pkg/apis/meta/v1.TypeMeta"
+    
+  ignoreFields:
+    - "TypeMeta$"
+    - "ObjectMeta.ManagedFields"
+    - "ObjectMeta.SelfLink"
+    - "ObjectMeta.UID"
+    - "ObjectMeta.ResourceVersion"
+    - "ObjectMeta.Generation"
+    - "ObjectMeta.DeletionGracePeriodSeconds"
+    - "ObjectMeta.OwnerReferences"
+    - "ObjectMeta.ClusterName"
+    
+output:
+  # Output configuration
+  mode: single
+  path: crd-reference.md
+  
+  frontMatter:
+    title: "CRD API Reference"
+    description: "Custom Resource Definitions for the Gunj Operator"
+    weight: 100
+    
+  typeDisplayNamePrefixes:
+    - "observability.io"
+    
+  markdownOptions:
+    # Markdown rendering options
+    escape: false
+    headingLevel: 2
+    
+templates:
+  # Custom templates
+  type: |
+    ## {{ .DisplayName }}
+    
+    {{ if .Description -}}
+    {{ .Description }}
+    {{- end }}
+    
+    {{ if .Schema -}}
+    ### Schema
+    
+    | Field | Type | Description | Required |
+    |-------|------|-------------|----------|
+    {{- range .Schema.Properties }}
+    | `{{ .Name }}` | {{ .Type }} | {{ .Description }} | {{ if .Required }}Yes{{ else }}No{{ end }} |
+    {{- end }}
+    {{- end }}

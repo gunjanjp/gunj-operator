@@ -1,0 +1,98 @@
+# Reusable workflow for building Go binaries
+# This workflow can be called by other workflows
+name: Build Go Binary
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        description: 'Component to build (operator, api-server, cli)'
+        required: true
+        type: string
+      go-version:
+        description: 'Go version to use'
+        required: false
+        type: string
+        default: '1.21'
+      upload-artifacts:
+        description: 'Whether to upload build artifacts'
+        required: false
+        type: boolean
+        default: true
+    outputs:
+      artifact-name:
+        description: 'Name of the uploaded artifact'
+        value: ${{ jobs.build.outputs.artifact-name }}
+
+jobs:
+  build:
+    name: Build ${{ inputs.component }}
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ steps.upload.outputs.artifact-name }}
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: true
+
+    - name: Get version info
+      id: version
+      run: |
+        VERSION=$(git describe --tags --always --dirty)
+        COMMIT=$(git rev-parse --short HEAD)
+        BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "commit=$COMMIT" >> $GITHUB_OUTPUT
+        echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.os }}
+        GOARCH: ${{ matrix.arch }}
+        CGO_ENABLED: 0
+      run: |
+        OUTPUT_NAME="gunj-${{ inputs.component }}"
+        if [[ "$GOOS" == "windows" ]]; then
+          OUTPUT_NAME="${OUTPUT_NAME}.exe"
+        fi
+        
+        echo "Building ${{ inputs.component }} for ${GOOS}/${GOARCH}"
+        
+        go build \
+          -ldflags="-w -s \
+            -X main.version=${{ steps.version.outputs.version }} \
+            -X main.commit=${{ steps.version.outputs.commit }} \
+            -X main.date=${{ steps.version.outputs.build_date }}" \
+          -o "dist/${GOOS}-${GOARCH}/${OUTPUT_NAME}" \
+          "./cmd/${{ inputs.component }}"
+        
+        # Generate checksums
+        cd "dist/${GOOS}-${GOARCH}"
+        sha256sum "${OUTPUT_NAME}" > "${OUTPUT_NAME}.sha256"
+
+    - name: Upload artifacts
+      id: upload
+      if: inputs.upload-artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.component }}-${{ matrix.os }}-${{ matrix.arch }}
+        path: dist/**/*
+        retention-days: 7
