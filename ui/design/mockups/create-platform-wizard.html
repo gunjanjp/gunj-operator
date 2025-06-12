@@ -1,0 +1,1233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gunj Operator - Create Platform Wizard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        /* Import base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            /* Brand Colors */
+            --color-kubernetes: #326CE5;
+            --color-prometheus: #E6522C;
+            --color-grafana: #F46800;
+            --color-loki: #F5A623;
+            --color-tempo: #7B61FF;
+            --color-gunj: #1976D2;
+
+            /* Light Theme */
+            --color-primary: #1976D2;
+            --color-primary-light: #42A5F5;
+            --color-primary-dark: #1565C0;
+            --color-secondary: #00ACC1;
+            
+            --color-error: #D32F2F;
+            --color-warning: #F57C00;
+            --color-success: #2E7D32;
+            --color-info: #0288D1;
+
+            --color-background: #FAFAFA;
+            --color-surface: #FFFFFF;
+            
+            --color-text-primary: rgba(0, 0, 0, 0.87);
+            --color-text-secondary: rgba(0, 0, 0, 0.6);
+            --color-text-disabled: rgba(0, 0, 0, 0.38);
+            
+            --color-divider: rgba(0, 0, 0, 0.12);
+
+            /* Spacing */
+            --spacing-unit: 8px;
+            
+            /* Typography */
+            --font-family-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            --font-family-code: 'JetBrains Mono', 'Consolas', monospace;
+            
+            /* Shadows */
+            --shadow-1: 0px 2px 4px rgba(0, 0, 0, 0.08);
+            --shadow-2: 0px 4px 8px rgba(0, 0, 0, 0.12);
+            --shadow-3: 0px 8px 16px rgba(0, 0, 0, 0.16);
+            
+            /* Transitions */
+            --transition-standard: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        body {
+            font-family: var(--font-family-ui);
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--color-text-primary);
+            background-color: var(--color-background);
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Wizard Container */
+        .wizard-container {
+            width: 100%;
+            max-width: 800px;
+            margin: 24px;
+            background-color: var(--color-surface);
+            border-radius: 12px;
+            box-shadow: var(--shadow-3);
+            overflow: hidden;
+        }
+
+        /* Wizard Header */
+        .wizard-header {
+            padding: 32px;
+            border-bottom: 1px solid var(--color-divider);
+        }
+
+        .wizard-title {
+            font-size: 24px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .wizard-subtitle {
+            color: var(--color-text-secondary);
+        }
+
+        /* Progress Steps */
+        .progress-steps {
+            display: flex;
+            padding: 24px 32px;
+            background-color: var(--color-background);
+            border-bottom: 1px solid var(--color-divider);
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .step {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            min-width: 150px;
+            position: relative;
+        }
+
+        .step:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            top: 20px;
+            left: calc(50% + 20px);
+            right: calc(-50% + 20px);
+            height: 2px;
+            background-color: var(--color-divider);
+            z-index: 0;
+        }
+
+        .step.completed:not(:last-child)::after {
+            background-color: var(--color-primary);
+        }
+
+        .step-indicator {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: var(--color-background);
+            border: 2px solid var(--color-divider);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 500;
+            position: relative;
+            z-index: 1;
+            transition: var(--transition-standard);
+        }
+
+        .step.active .step-indicator {
+            background-color: var(--color-primary);
+            border-color: var(--color-primary);
+            color: white;
+            box-shadow: 0 0 0 4px rgba(25, 118, 210, 0.1);
+        }
+
+        .step.completed .step-indicator {
+            background-color: var(--color-success);
+            border-color: var(--color-success);
+            color: white;
+        }
+
+        .step-label {
+            margin-left: 12px;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--color-text-secondary);
+            white-space: nowrap;
+        }
+
+        .step.active .step-label,
+        .step.completed .step-label {
+            color: var(--color-text-primary);
+        }
+
+        /* Wizard Content */
+        .wizard-content {
+            padding: 32px;
+            min-height: 400px;
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 24px;
+        }
+
+        .form-label {
+            display: block;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--color-text-primary);
+        }
+
+        .required {
+            color: var(--color-error);
+        }
+
+        .form-input,
+        .form-select,
+        .form-textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--color-divider);
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            background-color: var(--color-surface);
+            transition: var(--transition-standard);
+        }
+
+        .form-input:focus,
+        .form-select:focus,
+        .form-textarea:focus {
+            outline: none;
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+        }
+
+        .form-textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .form-helper {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            margin-top: 4px;
+        }
+
+        .form-error {
+            font-size: 12px;
+            color: var(--color-error);
+            margin-top: 4px;
+        }
+
+        /* Component Selection */
+        .component-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .component-card {
+            border: 2px solid var(--color-divider);
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: var(--transition-standard);
+            position: relative;
+        }
+
+        .component-card:hover {
+            border-color: var(--color-primary-light);
+            background-color: rgba(25, 118, 210, 0.02);
+        }
+
+        .component-card.selected {
+            border-color: var(--color-primary);
+            background-color: rgba(25, 118, 210, 0.05);
+        }
+
+        .component-checkbox {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .component-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .component-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 600;
+            color: white;
+        }
+
+        .component-icon.prometheus { background-color: var(--color-prometheus); }
+        .component-icon.grafana { background-color: var(--color-grafana); }
+        .component-icon.loki { background-color: var(--color-loki); }
+        .component-icon.tempo { background-color: var(--color-tempo); }
+        .component-icon.alertmanager { background: linear-gradient(135deg, #FF6B6B, #C92A2A); }
+        .component-icon.opentelemetry { background: linear-gradient(135deg, #673AB7, #512DA8); }
+
+        .component-info {
+            flex: 1;
+        }
+
+        .component-name {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .component-description {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+        }
+
+        .component-version {
+            margin-top: 12px;
+        }
+
+        .version-select {
+            width: 100%;
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+
+        /* Configuration Tabs */
+        .config-tabs {
+            display: flex;
+            border-bottom: 2px solid var(--color-divider);
+            margin-bottom: 24px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .config-tab {
+            padding: 12px 24px;
+            border: none;
+            background: none;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--color-text-secondary);
+            cursor: pointer;
+            transition: var(--transition-standard);
+            border-bottom: 2px solid transparent;
+            margin-bottom: -2px;
+            white-space: nowrap;
+        }
+
+        .config-tab:hover {
+            color: var(--color-text-primary);
+        }
+
+        .config-tab.active {
+            color: var(--color-primary);
+            border-bottom-color: var(--color-primary);
+        }
+
+        /* Resource Configuration */
+        .resource-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            padding: 20px;
+            background-color: var(--color-background);
+            border-radius: 8px;
+            margin-bottom: 24px;
+        }
+
+        .resource-input {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .resource-input input {
+            flex: 1;
+        }
+
+        .resource-unit {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            min-width: 40px;
+        }
+
+        /* Presets */
+        .preset-buttons {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .preset-button {
+            padding: 8px 20px;
+            border: 1px solid var(--color-divider);
+            border-radius: 20px;
+            background-color: var(--color-surface);
+            cursor: pointer;
+            transition: var(--transition-standard);
+            font-size: 14px;
+        }
+
+        .preset-button:hover {
+            border-color: var(--color-primary);
+            background-color: rgba(25, 118, 210, 0.05);
+        }
+
+        .preset-button.active {
+            background-color: var(--color-primary);
+            border-color: var(--color-primary);
+            color: white;
+        }
+
+        /* Labels */
+        .label-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .label-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .label-input {
+            flex: 1;
+        }
+
+        .add-label-button {
+            padding: 8px 16px;
+            font-size: 12px;
+        }
+
+        /* Review Section */
+        .review-section {
+            background-color: var(--color-background);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .review-title {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 16px;
+            color: var(--color-text-primary);
+        }
+
+        .review-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--color-divider);
+        }
+
+        .review-item:last-child {
+            border-bottom: none;
+        }
+
+        .review-label {
+            color: var(--color-text-secondary);
+        }
+
+        .review-value {
+            font-weight: 500;
+        }
+
+        /* Wizard Footer */
+        .wizard-footer {
+            padding: 24px 32px;
+            border-top: 1px solid var(--color-divider);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: var(--color-background);
+        }
+
+        /* Buttons */
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: var(--transition-standard);
+            cursor: pointer;
+            gap: 8px;
+            border: none;
+            outline: none;
+        }
+
+        .button-primary {
+            background-color: var(--color-primary);
+            color: white;
+        }
+
+        .button-primary:hover {
+            background-color: var(--color-primary-dark);
+            box-shadow: var(--shadow-2);
+        }
+
+        .button-secondary {
+            background-color: transparent;
+            color: var(--color-primary);
+            border: 1px solid var(--color-divider);
+        }
+
+        .button-secondary:hover {
+            background-color: rgba(0, 0, 0, 0.04);
+            border-color: var(--color-primary);
+        }
+
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+        }
+
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 48px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--color-divider);
+            transition: var(--transition-standard);
+            border-radius: 24px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: var(--transition-standard);
+            border-radius: 50%;
+        }
+
+        input:checked + .toggle-slider {
+            background-color: var(--color-primary);
+        }
+
+        input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        /* Success State */
+        .success-message {
+            text-align: center;
+            padding: 48px;
+        }
+
+        .success-icon {
+            width: 80px;
+            height: 80px;
+            background-color: var(--color-success);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            color: white;
+        }
+
+        .success-icon .material-icons {
+            font-size: 48px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .wizard-container {
+                margin: 0;
+                border-radius: 0;
+                min-height: 100vh;
+            }
+
+            .wizard-header,
+            .wizard-content,
+            .wizard-footer {
+                padding: 24px 16px;
+            }
+
+            .progress-steps {
+                padding: 16px;
+            }
+
+            .step-label {
+                display: none;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .component-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .wizard-footer {
+                flex-direction: column-reverse;
+                gap: 16px;
+            }
+
+            .button-group {
+                width: 100%;
+            }
+
+            .button {
+                width: 100%;
+            }
+        }
+
+        /* Loading State */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--color-divider);
+            border-top-color: var(--color-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="wizard-container">
+        <!-- Wizard Header -->
+        <div class="wizard-header">
+            <h1 class="wizard-title">Create New Observability Platform</h1>
+            <p class="wizard-subtitle">Deploy a complete observability stack in minutes</p>
+        </div>
+
+        <!-- Progress Steps -->
+        <div class="progress-steps">
+            <div class="step completed" id="step1">
+                <div class="step-indicator">
+                    <span class="material-icons">check</span>
+                </div>
+                <span class="step-label">Basic Info</span>
+            </div>
+            <div class="step active" id="step2">
+                <div class="step-indicator">2</div>
+                <span class="step-label">Components</span>
+            </div>
+            <div class="step" id="step3">
+                <div class="step-indicator">3</div>
+                <span class="step-label">Configuration</span>
+            </div>
+            <div class="step" id="step4">
+                <div class="step-indicator">4</div>
+                <span class="step-label">Review</span>
+            </div>
+        </div>
+
+        <!-- Wizard Content -->
+        <div class="wizard-content">
+            <!-- Step 1: Basic Information -->
+            <div class="step-content" id="step1-content" style="display: none;">
+                <div class="form-group">
+                    <label class="form-label">
+                        Platform Name <span class="required">*</span>
+                    </label>
+                    <input type="text" class="form-input" placeholder="my-observability-platform" value="prod-monitoring">
+                    <div class="form-helper">Must be lowercase, alphanumeric, and may contain hyphens</div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">
+                            Namespace <span class="required">*</span>
+                        </label>
+                        <select class="form-select">
+                            <option>Select namespace</option>
+                            <option selected>production</option>
+                            <option>staging</option>
+                            <option>development</option>
+                            <option>testing</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Environment</label>
+                        <select class="form-select">
+                            <option>Select environment</option>
+                            <option selected>Production</option>
+                            <option>Staging</option>
+                            <option>Development</option>
+                            <option>Testing</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <textarea class="form-textarea" placeholder="Describe your platform purpose...">Production monitoring platform for all microservices</textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Labels</label>
+                    <div class="label-list">
+                        <div class="label-row">
+                            <input type="text" class="form-input label-input" placeholder="Key" value="team">
+                            <input type="text" class="form-input label-input" placeholder="Value" value="platform-team">
+                            <button class="button button-secondary">
+                                <span class="material-icons">close</span>
+                            </button>
+                        </div>
+                        <div class="label-row">
+                            <input type="text" class="form-input label-input" placeholder="Key" value="environment">
+                            <input type="text" class="form-input label-input" placeholder="Value" value="production">
+                            <button class="button button-secondary">
+                                <span class="material-icons">close</span>
+                            </button>
+                        </div>
+                    </div>
+                    <button class="button button-secondary add-label-button">
+                        <span class="material-icons">add</span>
+                        Add Label
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 2: Component Selection -->
+            <div class="step-content" id="step2-content">
+                <div class="preset-buttons">
+                    <button class="preset-button">Minimal</button>
+                    <button class="preset-button active">Standard</button>
+                    <button class="preset-button">Full Stack</button>
+                    <button class="preset-button">Custom</button>
+                </div>
+
+                <div class="component-grid">
+                    <div class="component-card selected">
+                        <input type="checkbox" class="component-checkbox" checked>
+                        <div class="component-header">
+                            <div class="component-icon prometheus">P</div>
+                            <div class="component-info">
+                                <div class="component-name">Prometheus</div>
+                                <div class="component-description">Metrics collection and storage</div>
+                            </div>
+                        </div>
+                        <div class="component-version">
+                            <select class="form-select version-select">
+                                <option>v2.48.0 (latest)</option>
+                                <option>v2.47.0</option>
+                                <option>v2.46.0</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="component-card selected">
+                        <input type="checkbox" class="component-checkbox" checked>
+                        <div class="component-header">
+                            <div class="component-icon grafana">G</div>
+                            <div class="component-info">
+                                <div class="component-name">Grafana</div>
+                                <div class="component-description">Data visualization and dashboards</div>
+                            </div>
+                        </div>
+                        <div class="component-version">
+                            <select class="form-select version-select">
+                                <option>v10.2.0 (latest)</option>
+                                <option>v10.1.0</option>
+                                <option>v10.0.0</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="component-card selected">
+                        <input type="checkbox" class="component-checkbox" checked>
+                        <div class="component-header">
+                            <div class="component-icon loki">L</div>
+                            <div class="component-info">
+                                <div class="component-name">Loki</div>
+                                <div class="component-description">Log aggregation system</div>
+                            </div>
+                        </div>
+                        <div class="component-version">
+                            <select class="form-select version-select">
+                                <option>v2.9.0 (latest)</option>
+                                <option>v2.8.0</option>
+                                <option>v2.7.0</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="component-card selected">
+                        <input type="checkbox" class="component-checkbox" checked>
+                        <div class="component-header">
+                            <div class="component-icon tempo">T</div>
+                            <div class="component-info">
+                                <div class="component-name">Tempo</div>
+                                <div class="component-description">Distributed tracing backend</div>
+                            </div>
+                        </div>
+                        <div class="component-version">
+                            <select class="form-select version-select">
+                                <option>v2.3.0 (latest)</option>
+                                <option>v2.2.0</option>
+                                <option>v2.1.0</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="component-card selected">
+                        <input type="checkbox" class="component-checkbox" checked>
+                        <div class="component-header">
+                            <div class="component-icon alertmanager">A</div>
+                            <div class="component-info">
+                                <div class="component-name">Alertmanager</div>
+                                <div class="component-description">Alert routing and management</div>
+                            </div>
+                        </div>
+                        <div class="component-version">
+                            <select class="form-select version-select">
+                                <option>v0.26.0 (latest)</option>
+                                <option>v0.25.0</option>
+                                <option>v0.24.0</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="component-card">
+                        <input type="checkbox" class="component-checkbox">
+                        <div class="component-header">
+                            <div class="component-icon opentelemetry">O</div>
+                            <div class="component-info">
+                                <div class="component-name">OpenTelemetry</div>
+                                <div class="component-description">Telemetry data collector</div>
+                            </div>
+                        </div>
+                        <div class="component-version">
+                            <select class="form-select version-select">
+                                <option>v0.96.0 (latest)</option>
+                                <option>v0.95.0</option>
+                                <option>v0.94.0</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Configuration -->
+            <div class="step-content" id="step3-content" style="display: none;">
+                <div class="config-tabs">
+                    <button class="config-tab active">Prometheus</button>
+                    <button class="config-tab">Grafana</button>
+                    <button class="config-tab">Loki</button>
+                    <button class="config-tab">Tempo</button>
+                    <button class="config-tab">Alertmanager</button>
+                </div>
+
+                <div class="tab-content">
+                    <!-- Prometheus Configuration -->
+                    <div class="tab-pane active">
+                        <h3 style="margin-bottom: 16px;">Prometheus Configuration</h3>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Resources</label>
+                            <div class="resource-grid">
+                                <div class="resource-input">
+                                    <label class="form-label" style="margin-bottom: 4px;">CPU Request</label>
+                                    <input type="text" class="form-input" value="1000">
+                                    <span class="resource-unit">m</span>
+                                </div>
+                                <div class="resource-input">
+                                    <label class="form-label" style="margin-bottom: 4px;">CPU Limit</label>
+                                    <input type="text" class="form-input" value="2000">
+                                    <span class="resource-unit">m</span>
+                                </div>
+                                <div class="resource-input">
+                                    <label class="form-label" style="margin-bottom: 4px;">Memory Request</label>
+                                    <input type="text" class="form-input" value="4">
+                                    <span class="resource-unit">Gi</span>
+                                </div>
+                                <div class="resource-input">
+                                    <label class="form-label" style="margin-bottom: 4px;">Memory Limit</label>
+                                    <input type="text" class="form-input" value="8">
+                                    <span class="resource-unit">Gi</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label">Storage Size</label>
+                                <div class="resource-input">
+                                    <input type="text" class="form-input" value="100">
+                                    <span class="resource-unit">Gi</span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Storage Class</label>
+                                <select class="form-select">
+                                    <option>fast-ssd</option>
+                                    <option>standard</option>
+                                    <option>slow-disk</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Retention</label>
+                                <div class="resource-input">
+                                    <input type="text" class="form-input" value="30">
+                                    <span class="resource-unit">days</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">High Availability</label>
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <span>Enable HA mode (3 replicas)</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <button class="button button-secondary">
+                                <span class="material-icons">settings</span>
+                                Advanced Configuration
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Review & Create -->
+            <div class="step-content" id="step4-content" style="display: none;">
+                <div class="review-section">
+                    <h3 class="review-title">Platform Details</h3>
+                    <div class="review-item">
+                        <span class="review-label">Name</span>
+                        <span class="review-value">prod-monitoring</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Namespace</span>
+                        <span class="review-value">production</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Environment</span>
+                        <span class="review-value">Production</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Description</span>
+                        <span class="review-value">Production monitoring platform for all microservices</span>
+                    </div>
+                </div>
+
+                <div class="review-section">
+                    <h3 class="review-title">Selected Components</h3>
+                    <div class="review-item">
+                        <span class="review-label">Prometheus</span>
+                        <span class="review-value">v2.48.0 - HA enabled</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Grafana</span>
+                        <span class="review-value">v10.2.0</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Loki</span>
+                        <span class="review-value">v2.9.0</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Tempo</span>
+                        <span class="review-value">v2.3.0</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Alertmanager</span>
+                        <span class="review-value">v0.26.0</span>
+                    </div>
+                </div>
+
+                <div class="review-section">
+                    <h3 class="review-title">Resource Summary</h3>
+                    <div class="review-item">
+                        <span class="review-label">Total CPU Request</span>
+                        <span class="review-value">5.5 cores</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Total Memory Request</span>
+                        <span class="review-value">20 GB</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Total Storage</span>
+                        <span class="review-value">350 GB</span>
+                    </div>
+                    <div class="review-item">
+                        <span class="review-label">Estimated Monthly Cost</span>
+                        <span class="review-value" style="color: var(--color-success);">$245 / month</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Success State -->
+            <div class="step-content" id="success-content" style="display: none;">
+                <div class="success-message">
+                    <div class="success-icon">
+                        <span class="material-icons">check</span>
+                    </div>
+                    <h2 style="margin-bottom: 16px;">Platform Created Successfully!</h2>
+                    <p style="color: var(--color-text-secondary); margin-bottom: 32px;">
+                        Your observability platform "prod-monitoring" is being deployed. This process typically takes 3-5 minutes.
+                    </p>
+                    <div class="button-group" style="justify-content: center;">
+                        <button class="button button-primary">
+                            <span class="material-icons">visibility</span>
+                            View Platform
+                        </button>
+                        <button class="button button-secondary">
+                            <span class="material-icons">add</span>
+                            Create Another
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Wizard Footer -->
+        <div class="wizard-footer">
+            <button class="button button-secondary" id="cancelBtn">Cancel</button>
+            <div class="button-group">
+                <button class="button button-secondary" id="backBtn">
+                    <span class="material-icons">arrow_back</span>
+                    Back
+                </button>
+                <button class="button button-primary" id="nextBtn">
+                    Next
+                    <span class="material-icons">arrow_forward</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Current step tracking
+        let currentStep = 2; // Starting at step 2 for demo
+        const totalSteps = 4;
+
+        // Get elements
+        const steps = document.querySelectorAll('.step');
+        const stepContents = document.querySelectorAll('.step-content');
+        const backBtn = document.getElementById('backBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
+
+        // Show current step content
+        function showStep(stepNumber) {
+            // Hide all step contents
+            stepContents.forEach(content => content.style.display = 'none');
+            
+            // Show current step content
+            const currentContent = document.getElementById(`step${stepNumber}-content`);
+            if (currentContent) {
+                currentContent.style.display = 'block';
+            }
+            
+            // Update step indicators
+            steps.forEach((step, index) => {
+                const stepNum = index + 1;
+                step.classList.remove('active', 'completed');
+                
+                if (stepNum < stepNumber) {
+                    step.classList.add('completed');
+                    step.querySelector('.step-indicator').innerHTML = '<span class="material-icons">check</span>';
+                } else if (stepNum === stepNumber) {
+                    step.classList.add('active');
+                    step.querySelector('.step-indicator').textContent = stepNum;
+                } else {
+                    step.querySelector('.step-indicator').textContent = stepNum;
+                }
+            });
+            
+            // Update buttons
+            backBtn.style.display = stepNumber === 1 ? 'none' : 'flex';
+            
+            if (stepNumber === totalSteps) {
+                nextBtn.innerHTML = 'Create Platform <span class="material-icons">check</span>';
+            } else {
+                nextBtn.innerHTML = 'Next <span class="material-icons">arrow_forward</span>';
+            }
+            
+            // Scroll to top
+            document.querySelector('.wizard-content').scrollTop = 0;
+        }
+
+        // Navigation handlers
+        nextBtn.addEventListener('click', () => {
+            if (currentStep === totalSteps) {
+                // Create platform
+                showSuccess();
+            } else {
+                currentStep++;
+                showStep(currentStep);
+            }
+        });
+
+        backBtn.addEventListener('click', () => {
+            if (currentStep > 1) {
+                currentStep--;
+                showStep(currentStep);
+            }
+        });
+
+        cancelBtn.addEventListener('click', () => {
+            if (confirm('Are you sure you want to cancel? All progress will be lost.')) {
+                window.location.href = '/platforms';
+            }
+        });
+
+        // Component selection
+        const componentCards = document.querySelectorAll('.component-card');
+        componentCards.forEach(card => {
+            const checkbox = card.querySelector('.component-checkbox');
+            
+            card.addEventListener('click', (e) => {
+                if (!e.target.matches('select, option')) {
+                    checkbox.checked = !checkbox.checked;
+                    card.classList.toggle('selected', checkbox.checked);
+                }
+            });
+            
+            checkbox.addEventListener('change', (e) => {
+                e.stopPropagation();
+                card.classList.toggle('selected', checkbox.checked);
+            });
+        });
+
+        // Preset buttons
+        const presetButtons = document.querySelectorAll('.preset-button');
+        presetButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                presetButtons.forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                
+                // Apply preset selection
+                const preset = button.textContent;
+                componentCards.forEach(card => {
+                    const checkbox = card.querySelector('.component-checkbox');
+                    const name = card.querySelector('.component-name').textContent;
+                    
+                    switch(preset) {
+                        case 'Minimal':
+                            checkbox.checked = ['Prometheus', 'Grafana'].includes(name);
+                            break;
+                        case 'Standard':
+                            checkbox.checked = ['Prometheus', 'Grafana', 'Loki', 'Tempo', 'Alertmanager'].includes(name);
+                            break;
+                        case 'Full Stack':
+                            checkbox.checked = true;
+                            break;
+                        case 'Custom':
+                            // Keep current selection
+                            break;
+                    }
+                    
+                    card.classList.toggle('selected', checkbox.checked);
+                });
+            });
+        });
+
+        // Configuration tabs
+        const configTabs = document.querySelectorAll('.config-tab');
+        configTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                configTabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                // Would switch tab content here
+            });
+        });
+
+        // Show success state
+        function showSuccess() {
+            document.querySelector('.wizard-header').style.display = 'none';
+            document.querySelector('.progress-steps').style.display = 'none';
+            document.querySelector('.wizard-footer').style.display = 'none';
+            
+            stepContents.forEach(content => content.style.display = 'none');
+            document.getElementById('success-content').style.display = 'block';
+        }
+
+        // Initialize
+        showStep(currentStep);
+    </script>
+</body>
+</html>

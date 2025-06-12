@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gunj Operator - Responsive Design Showcase</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        .showcase-header {
+            background-color: #1976D2;
+            color: white;
+            padding: 48px 24px;
+            text-align: center;
+        }
+
+        .showcase-title {
+            font-size: 48px;
+            font-weight: 300;
+            margin: 0 0 16px 0;
+        }
+
+        .showcase-subtitle {
+            font-size: 20px;
+            opacity: 0.9;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 48px 24px;
+        }
+
+        .section {
+            margin-bottom: 80px;
+        }
+
+        .section-title {
+            font-size: 32px;
+            font-weight: 300;
+            margin-bottom: 16px;
+        }
+
+        .section-description {
+            font-size: 16px;
+            color: #666;
+            margin-bottom: 32px;
+            line-height: 1.6;
+        }
+
+        /* Device Frames */
+        .device-grid {
+            display: grid;
+            gap: 48px;
+            margin-bottom: 48px;
+        }
+
+        .device-container {
+            background-color: white;
+            border-radius: 16px;
+            padding: 32px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .device-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .device-name {
+            font-size: 20px;
+            font-weight: 500;
+        }
+
+        .device-specs {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .device-frame {
+            position: relative;
+            margin: 0 auto;
+            background-color: #000;
+            border-radius: 36px;
+            padding: 8px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        .device-frame.mobile {
+            width: 375px;
+            height: 812px;
+        }
+
+        .device-frame.tablet {
+            width: 768px;
+            height: 1024px;
+        }
+
+        .device-frame.desktop {
+            width: 100%;
+            max-width: 1200px;
+            height: 675px;
+            border-radius: 12px;
+            padding: 4px;
+        }
+
+        .device-screen {
+            width: 100%;
+            height: 100%;
+            background-color: white;
+            border-radius: 28px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .device-frame.desktop .device-screen {
+            border-radius: 8px;
+        }
+
+        /* UI Components for showcase */
+        .demo-header {
+            background-color: #1976D2;
+            color: white;
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .demo-nav {
+            background-color: #f5f5f5;
+            padding: 16px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .demo-content {
+            padding: 16px;
+        }
+
+        .demo-card {
+            background-color: white;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .demo-button {
+            background-color: #1976D2;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        /* Responsive grid demo */
+        .responsive-grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .responsive-grid.mobile {
+            grid-template-columns: 1fr;
+        }
+
+        .responsive-grid.tablet {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .responsive-grid.desktop {
+            grid-template-columns: repeat(4, 1fr);
+        }
+
+        /* Feature Comparison */
+        .comparison-table {
+            background-color: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .comparison-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .comparison-table th {
+            background-color: #f5f5f5;
+            padding: 16px;
+            text-align: left;
+            font-weight: 500;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .comparison-table td {
+            padding: 16px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .comparison-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .check-icon {
+            color: #4CAF50;
+        }
+
+        .times-icon {
+            color: #F44336;
+        }
+
+        /* Code Examples */
+        .code-block {
+            background-color: #282c34;
+            color: #abb2bf;
+            padding: 24px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .code-comment {
+            color: #5c6370;
+        }
+
+        .code-keyword {
+            color: #c678dd;
+        }
+
+        .code-string {
+            color: #98c379;
+        }
+
+        .code-number {
+            color: #d19a66;
+        }
+
+        /* Interactive Demo */
+        .interactive-demo {
+            background-color: white;
+            border-radius: 12px;
+            padding: 32px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .viewport-selector {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+            justify-content: center;
+        }
+
+        .viewport-button {
+            padding: 8px 24px;
+            border: 2px solid #e0e0e0;
+            background-color: white;
+            border-radius: 24px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .viewport-button.active {
+            background-color: #1976D2;
+            color: white;
+            border-color: #1976D2;
+        }
+
+        .responsive-preview {
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            padding: 24px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 400px;
+            transition: all 0.3s ease;
+        }
+
+        .preview-frame {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .preview-frame.mobile-view {
+            width: 375px;
+            height: 667px;
+        }
+
+        .preview-frame.tablet-view {
+            width: 768px;
+            height: 600px;
+        }
+
+        .preview-frame.desktop-view {
+            width: 100%;
+            max-width: 1200px;
+            height: 600px;
+        }
+
+        /* Touch Gestures */
+        .gesture-demo {
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+        }
+
+        .gesture-icon {
+            font-size: 48px;
+            color: #1976D2;
+            margin-bottom: 16px;
+        }
+
+        /* Responsive Tables */
+        @media (max-width: 768px) {
+            .comparison-table {
+                font-size: 14px;
+            }
+
+            .comparison-table th,
+            .comparison-table td {
+                padding: 12px;
+            }
+
+            .device-container {
+                padding: 16px;
+            }
+
+            .showcase-title {
+                font-size: 32px;
+            }
+        }
+
+        /* Layout Patterns */
+        .pattern-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-bottom: 48px;
+        }
+
+        .pattern-card {
+            background-color: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .pattern-title {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 12px;
+        }
+
+        .pattern-description {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .pattern-visual {
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            padding: 16px;
+            min-height: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+    <header class="showcase-header">
+        <h1 class="showcase-title">Gunj Operator UI</h1>
+        <p class="showcase-subtitle">Responsive Design System & Component Showcase</p>
+    </header>
+
+    <div class="container">
+        <!-- Responsive Breakpoints -->
+        <section class="section">
+            <h2 class="section-title">Responsive Breakpoints</h2>
+            <p class="section-description">
+                Our design system uses carefully chosen breakpoints to ensure optimal viewing experience across all devices.
+            </p>
+            
+            <div class="comparison-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Breakpoint</th>
+                            <th>Width</th>
+                            <th>Target Devices</th>
+                            <th>Layout Columns</th>
+                            <th>Key Changes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>xs (Mobile)</strong></td>
+                            <td>0 - 599px</td>
+                            <td>Phones (portrait)</td>
+                            <td>4 columns</td>
+                            <td>Stack layouts, hide secondary info, card views</td>
+                        </tr>
+                        <tr>
+                            <td><strong>sm (Small)</strong></td>
+                            <td>600 - 959px</td>
+                            <td>Tablets, phones (landscape)</td>
+                            <td>8 columns</td>
+                            <td>2-column grids, condensed navigation</td>
+                        </tr>
+                        <tr>
+                            <td><strong>md (Medium)</strong></td>
+                            <td>960 - 1279px</td>
+                            <td>Small laptops, tablets (landscape)</td>
+                            <td>12 columns</td>
+                            <td>Full navigation, multi-column layouts</td>
+                        </tr>
+                        <tr>
+                            <td><strong>lg (Large)</strong></td>
+                            <td>1280 - 1919px</td>
+                            <td>Desktops, laptops</td>
+                            <td>12 columns</td>
+                            <td>Maximum content width, side panels</td>
+                        </tr>
+                        <tr>
+                            <td><strong>xl (Extra Large)</strong></td>
+                            <td>1920px+</td>
+                            <td>Large monitors, 4K displays</td>
+                            <td>12 columns</td>
+                            <td>Enhanced spacing, multi-panel views</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Device Showcase -->
+        <section class="section">
+            <h2 class="section-title">Device-Specific Designs</h2>
+            <p class="section-description">
+                See how the Gunj Operator UI adapts seamlessly across different devices while maintaining consistency and usability.
+            </p>
+
+            <div class="device-grid">
+                <!-- Mobile View -->
+                <div class="device-container">
+                    <div class="device-info">
+                        <h3 class="device-name">Mobile View</h3>
+                        <span class="device-specs">375px × 812px (iPhone 13)</span>
+                    </div>
+                    <div class="device-frame mobile">
+                        <div class="device-screen">
+                            <div class="demo-header">
+                                <span class="material-icons">menu</span>
+                                <span style="flex: 1;">Platforms</span>
+                                <span class="material-icons">search</span>
+                            </div>
+                            <div class="demo-nav">
+                                <select style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ddd;">
+                                    <option>All Namespaces</option>
+                                    <option>production</option>
+                                    <option>staging</option>
+                                </select>
+                            </div>
+                            <div class="demo-content">
+                                <div class="demo-card">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <strong>prod-platform</strong>
+                                        <span style="background: #4CAF50; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px;">Ready</span>
+                                    </div>
+                                    <div style="color: #666; font-size: 14px;">production • v2.48.0</div>
+                                    <div style="display: flex; gap: 4px; margin: 12px 0;">
+                                        <span style="background: #E6522C; color: white; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 11px;">P</span>
+                                        <span style="background: #F46800; color: white; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 11px;">G</span>
+                                        <span style="background: #F5A623; color: white; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 11px;">L</span>
+                                    </div>
+                                    <button class="demo-button" style="width: 100%;">View Details</button>
+                                </div>
+                                <div class="demo-card">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <strong>staging-platform</strong>
+                                        <span style="background: #2196F3; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px;">Updating</span>
+                                    </div>
+                                    <div style="color: #666; font-size: 14px;">staging • v2.47.0</div>
+                                    <div style="display: flex; gap: 4px; margin: 12px 0;">
+                                        <span style="background: #E6522C; color: white; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 11px;">P</span>
+                                        <span style="background: #F46800; color: white; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 11px;">G</span>
+                                    </div>
+                                    <button class="demo-button" style="width: 100%;">View Details</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tablet View -->
+                <div class="device-container">
+                    <div class="device-info">
+                        <h3 class="device-name">Tablet View</h3>
+                        <span class="device-specs">768px × 1024px (iPad)</span>
+                    </div>
+                    <div class="device-frame tablet" style="height: 600px;">
+                        <div class="device-screen">
+                            <div class="demo-header">
+                                <span class="material-icons">menu</span>
+                                <span style="flex: 1;">Observability Platforms</span>
+                                <input type="text" placeholder="Search..." style="background: rgba(255,255,255,0.2); border: none; padding: 6px 12px; border-radius: 4px; color: white;">
+                                <span class="material-icons">notifications</span>
+                                <span class="material-icons">account_circle</span>
+                            </div>
+                            <div class="demo-content">
+                                <div class="responsive-grid tablet">
+                                    <div class="demo-card">
+                                        <h4 style="margin: 0 0 8px 0;">prod-platform</h4>
+                                        <p style="color: #666; font-size: 14px; margin: 0 0 12px 0;">production namespace</p>
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <span style="background: #4CAF50; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px;">Ready</span>
+                                            <span style="color: #666; font-size: 12px;">v2.48.0</span>
+                                        </div>
+                                    </div>
+                                    <div class="demo-card">
+                                        <h4 style="margin: 0 0 8px 0;">staging-platform</h4>
+                                        <p style="color: #666; font-size: 14px; margin: 0 0 12px 0;">staging namespace</p>
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <span style="background: #2196F3; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px;">Updating</span>
+                                            <span style="color: #666; font-size: 12px;">v2.47.0</span>
+                                        </div>
+                                    </div>
+                                    <div class="demo-card">
+                                        <h4 style="margin: 0 0 8px 0;">dev-platform</h4>
+                                        <p style="color: #666; font-size: 14px; margin: 0 0 12px 0;">development namespace</p>
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <span style="background: #4CAF50; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px;">Ready</span>
+                                            <span style="color: #666; font-size: 12px;">v2.48.0</span>
+                                        </div>
+                                    </div>
+                                    <div class="demo-card">
+                                        <h4 style="margin: 0 0 8px 0;">test-platform</h4>
+                                        <p style="color: #666; font-size: 14px; margin: 0 0 12px 0;">testing namespace</p>
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <span style="background: #F44336; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px;">Error</span>
+                                            <span style="color: #666; font-size: 12px;">v2.48.0</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Desktop View -->
+                <div class="device-container">
+                    <div class="device-info">
+                        <h3 class="device-name">Desktop View</h3>
+                        <span class="device-specs">1440px × 900px (MacBook Pro)</span>
+                    </div>
+                    <div class="device-frame desktop">
+                        <div class="device-screen">
+                            <div style="display: flex; height: 100%;">
+                                <!-- Sidebar -->
+                                <div style="width: 280px; background: #f5f5f5; border-right: 1px solid #e0e0e0; padding: 24px;">
+                                    <h3 style="margin: 0 0 24px 0; color: #1976D2;">Gunj Operator</h3>
+                                    <nav>
+                                        <div style="padding: 12px; margin-bottom: 8px; background: rgba(25, 118, 210, 0.1); color: #1976D2; border-radius: 8px; display: flex; align-items: center; gap: 12px;">
+                                            <span class="material-icons">dashboard</span>
+                                            Dashboard
+                                        </div>
+                                        <div style="padding: 12px; margin-bottom: 8px; color: #666; display: flex; align-items: center; gap: 12px;">
+                                            <span class="material-icons">view_list</span>
+                                            Platforms
+                                        </div>
+                                        <div style="padding: 12px; margin-bottom: 8px; color: #666; display: flex; align-items: center; gap: 12px;">
+                                            <span class="material-icons">monitoring</span>
+                                            Monitoring
+                                        </div>
+                                    </nav>
+                                </div>
+                                <!-- Main Content -->
+                                <div style="flex: 1; padding: 24px; overflow-y: auto;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                                        <h2 style="margin: 0;">Dashboard Overview</h2>
+                                        <button class="demo-button">Create Platform</button>
+                                    </div>
+                                    <div class="responsive-grid desktop">
+                                        <div class="demo-card">
+                                            <h3 style="margin: 0 0 8px 0; color: #666; font-size: 14px;">Total Platforms</h3>
+                                            <p style="font-size: 32px; font-weight: 300; margin: 0;">12</p>
+                                            <p style="color: #4CAF50; font-size: 14px; margin: 8px 0 0 0;">↑ 2 Active</p>
+                                        </div>
+                                        <div class="demo-card">
+                                            <h3 style="margin: 0 0 8px 0; color: #666; font-size: 14px;">Components</h3>
+                                            <p style="font-size: 32px; font-weight: 300; margin: 0;">48</p>
+                                            <p style="color: #4CAF50; font-size: 14px; margin: 8px 0 0 0;">↑ 45 Healthy</p>
+                                        </div>
+                                        <div class="demo-card">
+                                            <h3 style="margin: 0 0 8px 0; color: #666; font-size: 14px;">Active Alerts</h3>
+                                            <p style="font-size: 32px; font-weight: 300; margin: 0;">3</p>
+                                            <p style="color: #F44336; font-size: 14px; margin: 8px 0 0 0;">↓ 2 Critical</p>
+                                        </div>
+                                        <div class="demo-card">
+                                            <h3 style="margin: 0 0 8px 0; color: #666; font-size: 14px;">Resource Usage</h3>
+                                            <p style="font-size: 32px; font-weight: 300; margin: 0;">62%</p>
+                                            <p style="color: #FF9800; font-size: 14px; margin: 8px 0 0 0;">CPU: 45%</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Responsive Patterns -->
+        <section class="section">
+            <h2 class="section-title">Responsive Design Patterns</h2>
+            <p class="section-description">
+                Common patterns used throughout the application to ensure consistent responsive behavior.
+            </p>
+
+            <div class="pattern-grid">
+                <div class="pattern-card">
+                    <h3 class="pattern-title">Navigation Pattern</h3>
+                    <p class="pattern-description">
+                        Adapts from hamburger menu on mobile to collapsible sidebar on tablet and fixed sidebar on desktop.
+                    </p>
+                    <div class="pattern-visual">
+                        <div style="display: flex; gap: 16px; align-items: center;">
+                            <div style="text-align: center;">
+                                <div style="width: 40px; height: 40px; background: #1976D2; border-radius: 4px; margin: 0 auto 8px;"></div>
+                                <small>Mobile</small>
+                            </div>
+                            <span>→</span>
+                            <div style="text-align: center;">
+                                <div style="width: 60px; height: 40px; background: #1976D2; border-radius: 4px; margin: 0 auto 8px;"></div>
+                                <small>Tablet</small>
+                            </div>
+                            <span>→</span>
+                            <div style="text-align: center;">
+                                <div style="width: 80px; height: 40px; background: #1976D2; border-radius: 4px; margin: 0 auto 8px;"></div>
+                                <small>Desktop</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pattern-card">
+                    <h3 class="pattern-title">Grid System</h3>
+                    <p class="pattern-description">
+                        Flexible grid that adapts from single column on mobile to multiple columns on larger screens.
+                    </p>
+                    <div class="pattern-visual">
+                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+                            <div style="background: #1976D2; height: 30px; border-radius: 4px; grid-column: span 4;"></div>
+                            <div style="background: #42A5F5; height: 30px; border-radius: 4px; grid-column: span 2;"></div>
+                            <div style="background: #42A5F5; height: 30px; border-radius: 4px; grid-column: span 2;"></div>
+                            <div style="background: #64B5F6; height: 30px; border-radius: 4px;"></div>
+                            <div style="background: #64B5F6; height: 30px; border-radius: 4px;"></div>
+                            <div style="background: #64B5F6; height: 30px; border-radius: 4px;"></div>
+                            <div style="background: #64B5F6; height: 30px; border-radius: 4px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pattern-card">
+                    <h3 class="pattern-title">Data Display</h3>
+                    <p class="pattern-description">
+                        Tables transform to cards on mobile for better readability and touch interaction.
+                    </p>
+                    <div class="pattern-visual">
+                        <div style="display: flex; justify-content: space-around; align-items: center;">
+                            <div>
+                                <div style="width: 80px; height: 60px; background: #f5f5f5; border: 2px solid #1976D2; border-radius: 4px; display: flex; flex-direction: column; padding: 4px;">
+                                    <div style="height: 10px; background: #e0e0e0; margin-bottom: 2px;"></div>
+                                    <div style="height: 10px; background: #e0e0e0; margin-bottom: 2px;"></div>
+                                    <div style="height: 10px; background: #e0e0e0;"></div>
+                                </div>
+                                <small style="display: block; text-align: center; margin-top: 8px;">Table</small>
+                            </div>
+                            <span style="font-size: 24px;">⇄</span>
+                            <div>
+                                <div style="width: 80px; height: 60px; background: #1976D2; border-radius: 8px; padding: 8px; color: white; font-size: 10px;">
+                                    <div style="background: rgba(255,255,255,0.2); height: 20px; margin-bottom: 4px; border-radius: 4px;"></div>
+                                    <div style="background: rgba(255,255,255,0.2); height: 8px; border-radius: 4px;"></div>
+                                </div>
+                                <small style="display: block; text-align: center; margin-top: 8px;">Card</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pattern-card">
+                    <h3 class="pattern-title">Touch Targets</h3>
+                    <p class="pattern-description">
+                        Interactive elements meet minimum touch target sizes of 44x44px on mobile devices.
+                    </p>
+                    <div class="pattern-visual">
+                        <div style="display: flex; gap: 16px; align-items: center; justify-content: center;">
+                            <button style="width: 44px; height: 44px; background: #1976D2; color: white; border: none; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+                                <span class="material-icons" style="font-size: 20px;">add</span>
+                            </button>
+                            <button style="padding: 12px 24px; background: #1976D2; color: white; border: none; border-radius: 4px;">
+                                Action
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pattern-card">
+                    <h3 class="pattern-title">Typography Scaling</h3>
+                    <p class="pattern-description">
+                        Font sizes and line heights adjust based on screen size for optimal readability.
+                    </p>
+                    <div class="pattern-visual">
+                        <div style="text-align: center;">
+                            <div style="font-size: 14px; margin-bottom: 8px;">Mobile: 14px base</div>
+                            <div style="font-size: 15px; margin-bottom: 8px;">Tablet: 15px base</div>
+                            <div style="font-size: 16px;">Desktop: 16px base</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pattern-card">
+                    <h3 class="pattern-title">Progressive Disclosure</h3>
+                    <p class="pattern-description">
+                        Show essential information on mobile, progressively revealing more on larger screens.
+                    </p>
+                    <div class="pattern-visual">
+                        <div style="text-align: center;">
+                            <div style="display: inline-block; padding: 8px 16px; background: #e0e0e0; border-radius: 4px; margin: 4px;">Essential</div>
+                            <div style="display: inline-block; padding: 8px 16px; background: #42A5F5; color: white; border-radius: 4px; margin: 4px;">+ Secondary</div>
+                            <div style="display: inline-block; padding: 8px 16px; background: #1976D2; color: white; border-radius: 4px; margin: 4px;">+ Details</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Interactive Demo -->
+        <section class="section">
+            <h2 class="section-title">Interactive Responsive Preview</h2>
+            <p class="section-description">
+                Click the device buttons below to see how the platform list adapts to different screen sizes.
+            </p>
+
+            <div class="interactive-demo">
+                <div class="viewport-selector">
+                    <button class="viewport-button active" onclick="setViewport('mobile')">
+                        <span class="material-icons">smartphone</span>
+                        Mobile
+                    </button>
+                    <button class="viewport-button" onclick="setViewport('tablet')">
+                        <span class="material-icons">tablet</span>
+                        Tablet
+                    </button>
+                    <button class="viewport-button" onclick="setViewport('desktop')">
+                        <span class="material-icons">computer</span>
+                        Desktop
+                    </button>
+                </div>
+
+                <div class="responsive-preview">
+                    <div class="preview-frame mobile-view" id="previewFrame">
+                        <iframe src="platform-list-mockup.html" style="width: 100%; height: 100%; border: none;"></iframe>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Code Examples -->
+        <section class="section">
+            <h2 class="section-title">Implementation Examples</h2>
+            <p class="section-description">
+                Code snippets showing how to implement responsive behavior using our design system.
+            </p>
+
+            <h3 style="margin-bottom: 16px;">Responsive Grid with Material-UI</h3>
+            <div class="code-block">
+                <span class="code-comment">// Responsive platform grid using MUI Grid system</span><br>
+                <span class="code-keyword">import</span> { Grid, Card, useMediaQuery, useTheme } <span class="code-keyword">from</span> <span class="code-string">'@mui/material'</span>;<br><br>
+
+                <span class="code-keyword">function</span> PlatformGrid() {<br>
+                &nbsp;&nbsp;<span class="code-keyword">const</span> theme = useTheme();<br>
+                &nbsp;&nbsp;<span class="code-keyword">const</span> isMobile = useMediaQuery(theme.breakpoints.down(<span class="code-string">'sm'</span>));<br>
+                &nbsp;&nbsp;<span class="code-keyword">const</span> isTablet = useMediaQuery(theme.breakpoints.between(<span class="code-string">'sm'</span>, <span class="code-string">'md'</span>));<br><br>
+
+                &nbsp;&nbsp;<span class="code-keyword">return</span> (<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&lt;Grid container spacing={isMobile ? <span class="code-number">2</span> : <span class="code-number">3</span>}&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{platforms.map(platform =&gt; (<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;Grid item xs={<span class="code-number">12</span>} sm={<span class="code-number">6</span>} md={<span class="code-number">4</span>} lg={<span class="code-number">3</span>} key={platform.id}&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{isMobile ? (<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;PlatformCard platform={platform} /&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;) : (<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;PlatformTableRow platform={platform} /&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)}<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/Grid&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;))}<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&lt;/Grid&gt;<br>
+                &nbsp;&nbsp;);<br>
+                }
+            </div>
+
+            <h3 style="margin: 32px 0 16px 0;">Responsive Navigation Pattern</h3>
+            <div class="code-block">
+                <span class="code-comment">// Adaptive navigation component</span><br>
+                <span class="code-keyword">const</span> Navigation = () =&gt; {<br>
+                &nbsp;&nbsp;<span class="code-keyword">const</span> [mobileOpen, setMobileOpen] = useState(<span class="code-keyword">false</span>);<br>
+                &nbsp;&nbsp;<span class="code-keyword">const</span> theme = useTheme();<br>
+                &nbsp;&nbsp;<span class="code-keyword">const</span> isMobile = useMediaQuery(theme.breakpoints.down(<span class="code-string">'md'</span>));<br><br>
+
+                &nbsp;&nbsp;<span class="code-keyword">const</span> drawer = (<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&lt;Box sx={{ width: { xs: <span class="code-string">'100%'</span>, md: <span class="code-number">280</span> } }}&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;NavigationContent /&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&lt;/Box&gt;<br>
+                &nbsp;&nbsp;);<br><br>
+
+                &nbsp;&nbsp;<span class="code-keyword">return</span> (<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&lt;&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{isMobile ? (<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;Drawer<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;variant=<span class="code-string">"temporary"</span><br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;open={mobileOpen}<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;onClose={() =&gt; setMobileOpen(<span class="code-keyword">false</span>)}<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;sx={{ display: { xs: <span class="code-string">'block'</span>, md: <span class="code-string">'none'</span> } }}<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{drawer}<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/Drawer&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;) : (<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;Drawer variant=<span class="code-string">"permanent"</span> open&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{drawer}<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&lt;/Drawer&gt;<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)}<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&lt;/&gt;<br>
+                &nbsp;&nbsp;);<br>
+                };
+            </div>
+        </section>
+
+        <!-- Best Practices -->
+        <section class="section">
+            <h2 class="section-title">Responsive Design Best Practices</h2>
+            <div class="comparison-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Practice</th>
+                            <th>Mobile</th>
+                            <th>Tablet</th>
+                            <th>Desktop</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Touch Targets</strong></td>
+                            <td>Minimum 44x44px</td>
+                            <td>Minimum 44x44px</td>
+                            <td>Can be smaller (32x32px)</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Navigation</strong></td>
+                            <td>Hamburger menu</td>
+                            <td>Collapsible sidebar</td>
+                            <td>Fixed sidebar</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Data Tables</strong></td>
+                            <td>Card view</td>
+                            <td>Simplified table</td>
+                            <td>Full table with all columns</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Forms</strong></td>
+                            <td>Single column</td>
+                            <td>1-2 columns</td>
+                            <td>Multi-column</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Typography</strong></td>
+                            <td>14px base</td>
+                            <td>15px base</td>
+                            <td>16px base</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Spacing</strong></td>
+                            <td>16px padding</td>
+                            <td>24px padding</td>
+                            <td>32px padding</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Images</strong></td>
+                            <td>Optimized, lazy load</td>
+                            <td>Higher quality</td>
+                            <td>Full quality</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Interactions</strong></td>
+                            <td>Touch gestures</td>
+                            <td>Touch + hover</td>
+                            <td>Hover states, tooltips</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        function setViewport(viewport) {
+            const frame = document.getElementById('previewFrame');
+            const buttons = document.querySelectorAll('.viewport-button');
+            
+            // Update button states
+            buttons.forEach(btn => btn.classList.remove('active'));
+            event.target.closest('.viewport-button').classList.add('active');
+            
+            // Update frame class
+            frame.className = 'preview-frame ' + viewport + '-view';
+            
+            // Add transition effect
+            frame.style.opacity = '0.8';
+            setTimeout(() => {
+                frame.style.opacity = '1';
+            }, 150);
+        }
+
+        // Add smooth scroll
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth' });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

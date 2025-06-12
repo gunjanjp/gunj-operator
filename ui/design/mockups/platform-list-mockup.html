@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gunj Operator - Platform List Mockup</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        /* Import base styles from dashboard mockup */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            /* Brand Colors */
+            --color-kubernetes: #326CE5;
+            --color-prometheus: #E6522C;
+            --color-grafana: #F46800;
+            --color-loki: #F5A623;
+            --color-tempo: #7B61FF;
+            --color-gunj: #1976D2;
+
+            /* Light Theme */
+            --color-primary: #1976D2;
+            --color-primary-light: #42A5F5;
+            --color-primary-dark: #1565C0;
+            --color-secondary: #00ACC1;
+            
+            --color-error: #D32F2F;
+            --color-warning: #F57C00;
+            --color-success: #2E7D32;
+            --color-info: #0288D1;
+
+            --color-background: #FAFAFA;
+            --color-surface: #FFFFFF;
+            
+            --color-text-primary: rgba(0, 0, 0, 0.87);
+            --color-text-secondary: rgba(0, 0, 0, 0.6);
+            --color-text-disabled: rgba(0, 0, 0, 0.38);
+            
+            --color-divider: rgba(0, 0, 0, 0.12);
+
+            /* Spacing */
+            --spacing-unit: 8px;
+            
+            /* Typography */
+            --font-family-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            --font-family-code: 'JetBrains Mono', 'Consolas', monospace;
+            
+            /* Shadows */
+            --shadow-1: 0px 2px 4px rgba(0, 0, 0, 0.08);
+            --shadow-2: 0px 4px 8px rgba(0, 0, 0, 0.12);
+            --shadow-3: 0px 8px 16px rgba(0, 0, 0, 0.16);
+            
+            /* Transitions */
+            --transition-standard: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        body {
+            font-family: var(--font-family-ui);
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--color-text-primary);
+            background-color: var(--color-background);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Layout */
+        .container {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        /* Page Header */
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .page-title {
+            font-size: 34px;
+            font-weight: 300;
+            line-height: 1.2;
+            letter-spacing: -0.00833em;
+        }
+
+        /* Toolbar */
+        .toolbar {
+            background-color: var(--color-surface);
+            border-radius: 12px;
+            padding: 16px 24px;
+            box-shadow: var(--shadow-1);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .search-input {
+            flex: 1;
+            min-width: 200px;
+            padding: 10px 16px 10px 44px;
+            border: 1px solid var(--color-divider);
+            border-radius: 8px;
+            font-size: 14px;
+            background-color: var(--color-surface);
+            transition: var(--transition-standard);
+            position: relative;
+        }
+
+        .search-wrapper {
+            position: relative;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--color-text-disabled);
+        }
+
+        .filter-select {
+            padding: 10px 36px 10px 16px;
+            border: 1px solid var(--color-divider);
+            border-radius: 8px;
+            font-size: 14px;
+            background-color: var(--color-surface);
+            appearance: none;
+            cursor: pointer;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='rgba(0,0,0,0.6)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            background-size: 20px;
+        }
+
+        /* Buttons */
+        .button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: var(--transition-standard);
+            cursor: pointer;
+            gap: 8px;
+            border: none;
+            outline: none;
+        }
+
+        .button-primary {
+            background-color: var(--color-primary);
+            color: white;
+        }
+
+        .button-primary:hover {
+            background-color: var(--color-primary-dark);
+            box-shadow: var(--shadow-2);
+        }
+
+        .icon-button {
+            background: none;
+            border: none;
+            color: var(--color-text-secondary);
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 8px;
+            transition: var(--transition-standard);
+        }
+
+        .icon-button:hover {
+            background-color: rgba(0, 0, 0, 0.04);
+        }
+
+        /* View Toggle */
+        .view-toggle {
+            display: flex;
+            background-color: rgba(0, 0, 0, 0.04);
+            border-radius: 8px;
+            padding: 4px;
+        }
+
+        .view-toggle-button {
+            padding: 6px 12px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: var(--transition-standard);
+            color: var(--color-text-secondary);
+        }
+
+        .view-toggle-button.active {
+            background-color: var(--color-surface);
+            color: var(--color-text-primary);
+            box-shadow: var(--shadow-1);
+        }
+
+        /* Data Table */
+        .data-table {
+            background-color: var(--color-surface);
+            border-radius: 12px;
+            box-shadow: var(--shadow-1);
+            overflow: hidden;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            padding: 16px 24px;
+            background-color: var(--color-background);
+            font-weight: 500;
+            color: var(--color-text-secondary);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 16px 24px;
+            border-top: 1px solid var(--color-divider);
+        }
+
+        tr:hover {
+            background-color: rgba(0, 0, 0, 0.02);
+        }
+
+        .checkbox-cell {
+            width: 48px;
+            padding: 16px 12px 16px 24px;
+        }
+
+        .checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        /* Platform Status */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-badge.ready {
+            background-color: rgba(46, 125, 50, 0.1);
+            color: var(--color-success);
+        }
+
+        .status-badge.ready .status-dot {
+            background-color: var(--color-success);
+        }
+
+        .status-badge.updating {
+            background-color: rgba(2, 136, 209, 0.1);
+            color: var(--color-info);
+        }
+
+        .status-badge.updating .status-dot {
+            background-color: var(--color-info);
+            animation: pulse 2s infinite;
+        }
+
+        .status-badge.error {
+            background-color: rgba(211, 47, 47, 0.1);
+            color: var(--color-error);
+        }
+
+        .status-badge.error .status-dot {
+            background-color: var(--color-error);
+        }
+
+        /* Component Icons */
+        .component-icons {
+            display: flex;
+            gap: 4px;
+        }
+
+        .component-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: white;
+        }
+
+        .component-icon.prometheus { background-color: var(--color-prometheus); }
+        .component-icon.grafana { background-color: var(--color-grafana); }
+        .component-icon.loki { background-color: var(--color-loki); }
+        .component-icon.tempo { background-color: var(--color-tempo); }
+        .component-icon.alertmanager { background: linear-gradient(135deg, #FF6B6B, #C92A2A); }
+
+        /* Platform Cards (Mobile View) */
+        .platform-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 16px;
+        }
+
+        .platform-card {
+            background-color: var(--color-surface);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: var(--shadow-1);
+            transition: var(--transition-standard);
+            cursor: pointer;
+        }
+
+        .platform-card:hover {
+            box-shadow: var(--shadow-3);
+            transform: translateY(-2px);
+        }
+
+        .platform-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+
+        .platform-card-title {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .platform-card-subtitle {
+            color: var(--color-text-secondary);
+            font-size: 14px;
+        }
+
+        .platform-card-details {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .detail-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .detail-label {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            margin-bottom: 2px;
+        }
+
+        .detail-value {
+            font-weight: 500;
+        }
+
+        .platform-card-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--color-divider);
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 24px;
+            padding: 16px 24px;
+            background-color: var(--color-surface);
+            border-radius: 12px;
+            box-shadow: var(--shadow-1);
+        }
+
+        .pagination-info {
+            color: var(--color-text-secondary);
+        }
+
+        .pagination-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .page-button {
+            min-width: 32px;
+            height: 32px;
+            padding: 0 8px;
+            border: 1px solid var(--color-divider);
+            background-color: var(--color-surface);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: var(--transition-standard);
+            font-size: 14px;
+        }
+
+        .page-button:hover:not(:disabled) {
+            background-color: rgba(0, 0, 0, 0.04);
+        }
+
+        .page-button.active {
+            background-color: var(--color-primary);
+            color: white;
+            border-color: var(--color-primary);
+        }
+
+        .page-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                padding: 16px;
+            }
+
+            .page-title {
+                font-size: 24px;
+            }
+
+            .toolbar {
+                padding: 12px 16px;
+            }
+
+            .search-wrapper {
+                order: 3;
+                width: 100%;
+            }
+
+            .view-toggle {
+                margin-left: auto;
+            }
+
+            .data-table {
+                display: none;
+            }
+
+            .platform-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .platform-card {
+                padding: 16px;
+            }
+
+            th, td {
+                padding: 12px 16px;
+            }
+
+            .pagination {
+                flex-direction: column;
+                gap: 16px;
+                align-items: stretch;
+                text-align: center;
+            }
+        }
+
+        @media (min-width: 769px) {
+            .platform-grid {
+                display: none;
+            }
+        }
+
+        /* Loading State */
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+        }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.8; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* Bulk Actions Bar */
+        .bulk-actions {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: var(--color-surface);
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: var(--shadow-3);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            opacity: 0;
+            visibility: hidden;
+            transition: var(--transition-standard);
+        }
+
+        .bulk-actions.active {
+            opacity: 1;
+            visibility: visible;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Page Header -->
+        <div class="page-header">
+            <h1 class="page-title">Observability Platforms</h1>
+            <button class="button button-primary">
+                <span class="material-icons">add</span>
+                Create Platform
+            </button>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <div class="search-wrapper">
+                <span class="material-icons search-icon">search</span>
+                <input type="text" class="search-input" placeholder="Search platforms...">
+            </div>
+            
+            <select class="filter-select">
+                <option>All Namespaces</option>
+                <option>production</option>
+                <option>staging</option>
+                <option>development</option>
+                <option>testing</option>
+            </select>
+            
+            <select class="filter-select">
+                <option>All Status</option>
+                <option>Ready</option>
+                <option>Updating</option>
+                <option>Error</option>
+                <option>Installing</option>
+            </select>
+            
+            <button class="icon-button" title="Refresh">
+                <span class="material-icons">refresh</span>
+            </button>
+            
+            <div class="view-toggle">
+                <button class="view-toggle-button active" id="tableView">
+                    <span class="material-icons">view_list</span>
+                </button>
+                <button class="view-toggle-button" id="cardView">
+                    <span class="material-icons">grid_view</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Data Table (Desktop) -->
+        <div class="data-table" id="dataTable">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="checkbox-cell">
+                                <input type="checkbox" class="checkbox" id="selectAll">
+                            </th>
+                            <th>Name</th>
+                            <th>Namespace</th>
+                            <th>Status</th>
+                            <th>Version</th>
+                            <th>Components</th>
+                            <th>Created</th>
+                            <th>Updated</th>
+                            <th style="width: 48px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="checkbox-cell">
+                                <input type="checkbox" class="checkbox">
+                            </td>
+                            <td><strong>prod-platform</strong></td>
+                            <td>production</td>
+                            <td>
+                                <span class="status-badge ready">
+                                    <span class="status-dot"></span>
+                                    Ready
+                                </span>
+                            </td>
+                            <td>v2.48.0</td>
+                            <td>
+                                <div class="component-icons">
+                                    <div class="component-icon prometheus" title="Prometheus">P</div>
+                                    <div class="component-icon grafana" title="Grafana">G</div>
+                                    <div class="component-icon loki" title="Loki">L</div>
+                                    <div class="component-icon tempo" title="Tempo">T</div>
+                                    <div class="component-icon alertmanager" title="Alertmanager">A</div>
+                                </div>
+                            </td>
+                            <td>2 days ago</td>
+                            <td>1 hour ago</td>
+                            <td>
+                                <button class="icon-button">
+                                    <span class="material-icons">more_vert</span>
+                                </button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="checkbox-cell">
+                                <input type="checkbox" class="checkbox">
+                            </td>
+                            <td><strong>staging-platform</strong></td>
+                            <td>staging</td>
+                            <td>
+                                <span class="status-badge ready">
+                                    <span class="status-dot"></span>
+                                    Ready
+                                </span>
+                            </td>
+                            <td>v2.48.0</td>
+                            <td>
+                                <div class="component-icons">
+                                    <div class="component-icon prometheus" title="Prometheus">P</div>
+                                    <div class="component-icon grafana" title="Grafana">G</div>
+                                    <div class="component-icon loki" title="Loki">L</div>
+                                    <div class="component-icon tempo" title="Tempo">T</div>
+                                </div>
+                            </td>
+                            <td>5 days ago</td>
+                            <td>3 hours ago</td>
+                            <td>
+                                <button class="icon-button">
+                                    <span class="material-icons">more_vert</span>
+                                </button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="checkbox-cell">
+                                <input type="checkbox" class="checkbox">
+                            </td>
+                            <td><strong>dev-platform</strong></td>
+                            <td>development</td>
+                            <td>
+                                <span class="status-badge updating">
+                                    <span class="status-dot"></span>
+                                    Updating
+                                </span>
+                            </td>
+                            <td>v2.47.0</td>
+                            <td>
+                                <div class="component-icons">
+                                    <div class="component-icon prometheus" title="Prometheus">P</div>
+                                    <div class="component-icon grafana" title="Grafana">G</div>
+                                </div>
+                            </td>
+                            <td>1 week ago</td>
+                            <td>5 minutes ago</td>
+                            <td>
+                                <button class="icon-button">
+                                    <span class="material-icons">more_vert</span>
+                                </button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="checkbox-cell">
+                                <input type="checkbox" class="checkbox">
+                            </td>
+                            <td><strong>test-platform</strong></td>
+                            <td>testing</td>
+                            <td>
+                                <span class="status-badge error">
+                                    <span class="status-dot"></span>
+                                    Error
+                                </span>
+                            </td>
+                            <td>v2.48.0</td>
+                            <td>
+                                <div class="component-icons">
+                                    <div class="component-icon prometheus" title="Prometheus">P</div>
+                                    <div class="component-icon grafana" title="Grafana">G</div>
+                                    <div class="component-icon loki" title="Loki">L</div>
+                                    <div class="component-icon tempo" title="Tempo">T</div>
+                                    <div class="component-icon alertmanager" title="Alertmanager">A</div>
+                                </div>
+                            </td>
+                            <td>3 days ago</td>
+                            <td>30 minutes ago</td>
+                            <td>
+                                <button class="icon-button">
+                                    <span class="material-icons">more_vert</span>
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Platform Cards (Mobile) -->
+        <div class="platform-grid" id="platformGrid">
+            <div class="platform-card">
+                <div class="platform-card-header">
+                    <div>
+                        <div class="platform-card-title">prod-platform</div>
+                        <div class="platform-card-subtitle">production</div>
+                    </div>
+                    <span class="status-badge ready">
+                        <span class="status-dot"></span>
+                        Ready
+                    </span>
+                </div>
+                <div class="platform-card-details">
+                    <div class="detail-item">
+                        <span class="detail-label">Version</span>
+                        <span class="detail-value">v2.48.0</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Updated</span>
+                        <span class="detail-value">1 hour ago</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Components</span>
+                        <div class="component-icons">
+                            <div class="component-icon prometheus" title="Prometheus">P</div>
+                            <div class="component-icon grafana" title="Grafana">G</div>
+                            <div class="component-icon loki" title="Loki">L</div>
+                            <div class="component-icon tempo" title="Tempo">T</div>
+                            <div class="component-icon alertmanager" title="Alertmanager">A</div>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Health</span>
+                        <span class="detail-value">100%</span>
+                    </div>
+                </div>
+                <div class="platform-card-actions">
+                    <button class="button button-primary" style="flex: 1;">View</button>
+                    <button class="icon-button">
+                        <span class="material-icons">more_vert</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="platform-card">
+                <div class="platform-card-header">
+                    <div>
+                        <div class="platform-card-title">staging-platform</div>
+                        <div class="platform-card-subtitle">staging</div>
+                    </div>
+                    <span class="status-badge ready">
+                        <span class="status-dot"></span>
+                        Ready
+                    </span>
+                </div>
+                <div class="platform-card-details">
+                    <div class="detail-item">
+                        <span class="detail-label">Version</span>
+                        <span class="detail-value">v2.48.0</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Updated</span>
+                        <span class="detail-value">3 hours ago</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Components</span>
+                        <div class="component-icons">
+                            <div class="component-icon prometheus" title="Prometheus">P</div>
+                            <div class="component-icon grafana" title="Grafana">G</div>
+                            <div class="component-icon loki" title="Loki">L</div>
+                            <div class="component-icon tempo" title="Tempo">T</div>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Health</span>
+                        <span class="detail-value">98%</span>
+                    </div>
+                </div>
+                <div class="platform-card-actions">
+                    <button class="button button-primary" style="flex: 1;">View</button>
+                    <button class="icon-button">
+                        <span class="material-icons">more_vert</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="platform-card">
+                <div class="platform-card-header">
+                    <div>
+                        <div class="platform-card-title">dev-platform</div>
+                        <div class="platform-card-subtitle">development</div>
+                    </div>
+                    <span class="status-badge updating">
+                        <span class="status-dot"></span>
+                        Updating
+                    </span>
+                </div>
+                <div class="platform-card-details">
+                    <div class="detail-item">
+                        <span class="detail-label">Version</span>
+                        <span class="detail-value">v2.47.0</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Updated</span>
+                        <span class="detail-value">5 minutes ago</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Components</span>
+                        <div class="component-icons">
+                            <div class="component-icon prometheus" title="Prometheus">P</div>
+                            <div class="component-icon grafana" title="Grafana">G</div>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Progress</span>
+                        <span class="detail-value">45%</span>
+                    </div>
+                </div>
+                <div class="platform-card-actions">
+                    <button class="button button-primary" style="flex: 1;">View</button>
+                    <button class="icon-button">
+                        <span class="material-icons">more_vert</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="platform-card">
+                <div class="platform-card-header">
+                    <div>
+                        <div class="platform-card-title">test-platform</div>
+                        <div class="platform-card-subtitle">testing</div>
+                    </div>
+                    <span class="status-badge error">
+                        <span class="status-dot"></span>
+                        Error
+                    </span>
+                </div>
+                <div class="platform-card-details">
+                    <div class="detail-item">
+                        <span class="detail-label">Version</span>
+                        <span class="detail-value">v2.48.0</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Updated</span>
+                        <span class="detail-value">30 minutes ago</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Components</span>
+                        <div class="component-icons">
+                            <div class="component-icon prometheus" title="Prometheus">P</div>
+                            <div class="component-icon grafana" title="Grafana">G</div>
+                            <div class="component-icon loki" title="Loki">L</div>
+                            <div class="component-icon tempo" title="Tempo">T</div>
+                            <div class="component-icon alertmanager" title="Alertmanager">A</div>
+                        </div>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Issue</span>
+                        <span class="detail-value" style="color: var(--color-error);">Connection failed</span>
+                    </div>
+                </div>
+                <div class="platform-card-actions">
+                    <button class="button button-primary" style="flex: 1;">View</button>
+                    <button class="icon-button">
+                        <span class="material-icons">more_vert</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pagination -->
+        <div class="pagination">
+            <div class="pagination-info">
+                Showing 1-10 of 42 platforms
+            </div>
+            <div class="pagination-controls">
+                <button class="page-button" disabled>
+                    <span class="material-icons">chevron_left</span>
+                </button>
+                <button class="page-button active">1</button>
+                <button class="page-button">2</button>
+                <button class="page-button">3</button>
+                <button class="page-button">...</button>
+                <button class="page-button">5</button>
+                <button class="page-button">
+                    <span class="material-icons">chevron_right</span>
+                </button>
+                <select class="filter-select" style="margin-left: 16px;">
+                    <option>10 rows</option>
+                    <option>25 rows</option>
+                    <option>50 rows</option>
+                    <option>100 rows</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Bulk Actions Bar -->
+        <div class="bulk-actions" id="bulkActions">
+            <span style="font-weight: 500;">2 items selected</span>
+            <button class="button button-primary">
+                <span class="material-icons">delete</span>
+                Delete
+            </button>
+            <button class="button button-primary">
+                <span class="material-icons">file_download</span>
+                Export
+            </button>
+            <button class="button button-primary">
+                <span class="material-icons">update</span>
+                Update
+            </button>
+            <button class="icon-button" id="cancelSelection">
+                <span class="material-icons">close</span>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // View Toggle
+        const tableView = document.getElementById('tableView');
+        const cardView = document.getElementById('cardView');
+        const dataTable = document.getElementById('dataTable');
+        const platformGrid = document.getElementById('platformGrid');
+
+        function setView(view) {
+            if (view === 'table') {
+                tableView.classList.add('active');
+                cardView.classList.remove('active');
+                dataTable.style.display = 'block';
+                platformGrid.style.display = 'none';
+            } else {
+                cardView.classList.add('active');
+                tableView.classList.remove('active');
+                dataTable.style.display = 'none';
+                platformGrid.style.display = 'grid';
+            }
+        }
+
+        // Manually control view based on screen size
+        tableView.addEventListener('click', () => setView('table'));
+        cardView.addEventListener('click', () => setView('card'));
+
+        // Auto switch on mobile
+        function checkScreenSize() {
+            if (window.innerWidth <= 768) {
+                setView('card');
+                document.querySelector('.view-toggle').style.display = 'none';
+            } else {
+                document.querySelector('.view-toggle').style.display = 'flex';
+                if (cardView.classList.contains('active')) {
+                    setView('table');
+                }
+            }
+        }
+
+        checkScreenSize();
+        window.addEventListener('resize', checkScreenSize);
+
+        // Checkbox Selection
+        const selectAll = document.getElementById('selectAll');
+        const checkboxes = document.querySelectorAll('tbody .checkbox');
+        const bulkActions = document.getElementById('bulkActions');
+        let selectedCount = 0;
+
+        selectAll.addEventListener('change', (e) => {
+            checkboxes.forEach(cb => {
+                cb.checked = e.target.checked;
+            });
+            updateBulkActions();
+        });
+
+        checkboxes.forEach(cb => {
+            cb.addEventListener('change', updateBulkActions);
+        });
+
+        function updateBulkActions() {
+            selectedCount = document.querySelectorAll('tbody .checkbox:checked').length;
+            if (selectedCount > 0) {
+                bulkActions.classList.add('active');
+                bulkActions.querySelector('span').textContent = `${selectedCount} items selected`;
+            } else {
+                bulkActions.classList.remove('active');
+            }
+        }
+
+        document.getElementById('cancelSelection').addEventListener('click', () => {
+            selectAll.checked = false;
+            checkboxes.forEach(cb => cb.checked = false);
+            updateBulkActions();
+        });
+
+        // Simulate real-time updates
+        setInterval(() => {
+            const statuses = document.querySelectorAll('.status-badge');
+            const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
+            
+            if (randomStatus.classList.contains('updating')) {
+                // Simulate update completion
+                randomStatus.className = 'status-badge ready';
+                randomStatus.innerHTML = '<span class="status-dot"></span>Ready';
+            }
+        }, 8000);
+
+        // Row click handler
+        document.querySelectorAll('tbody tr').forEach(row => {
+            row.addEventListener('click', (e) => {
+                if (!e.target.matches('.checkbox, .icon-button, .material-icons')) {
+                    console.log('Navigate to platform details');
+                }
+            });
+        });
+
+        // Card click handler
+        document.querySelectorAll('.platform-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                if (!e.target.matches('.button, .icon-button, .material-icons')) {
+                    console.log('Navigate to platform details');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
