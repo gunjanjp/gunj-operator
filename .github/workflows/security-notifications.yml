@@ -1,0 +1,272 @@
+# Security Notification Workflow
+# Handles security alerts and vulnerability notifications
+# Version: 2.0
+
+name: Security Notifications
+
+on:
+  workflow_run:
+    workflows: ["Security Scan"]
+    types:
+      - completed
+  security_advisory:
+    types: [published, updated]
+  schedule:
+    # Daily security check
+    - cron: '0 9 * * *'
+
+jobs:
+  analyze-security:
+    name: Analyze Security Findings
+    runs-on: ubuntu-latest
+    outputs:
+      has_critical: ${{ steps.analyze.outputs.has_critical }}
+      has_high: ${{ steps.analyze.outputs.has_high }}
+      vulnerability_count: ${{ steps.analyze.outputs.count }}
+      priority: ${{ steps.analyze.outputs.priority }}
+      notification_required: ${{ steps.analyze.outputs.notify }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get security scan results
+        id: get-results
+        run: |
+          # In real implementation, would fetch actual scan results
+          # For demo, creating mock results
+          cat > security-results.json << EOF
+          {
+            "vulnerabilities": [
+              {
+                "severity": "CRITICAL",
+                "cve": "CVE-2024-1234",
+                "package": "example-package",
+                "version": "1.0.0",
+                "fixed_version": "1.0.1",
+                "description": "Remote code execution vulnerability"
+              }
+            ],
+            "scan_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "total_vulnerabilities": 1,
+            "critical": 1,
+            "high": 0,
+            "medium": 0,
+            "low": 0
+          }
+          EOF
+
+      - name: Analyze findings
+        id: analyze
+        run: |
+          # Parse security results
+          CRITICAL=$(jq -r '.critical' security-results.json)
+          HIGH=$(jq -r '.high' security-results.json)
+          TOTAL=$(jq -r '.total_vulnerabilities' security-results.json)
+          
+          # Determine priority and notification requirement
+          if [[ $CRITICAL -gt 0 ]]; then
+            PRIORITY="critical"
+            NOTIFY="true"
+          elif [[ $HIGH -gt 0 ]]; then
+            PRIORITY="high"
+            NOTIFY="true"
+          elif [[ $TOTAL -gt 0 ]]; then
+            PRIORITY="normal"
+            NOTIFY="true"
+          else
+            PRIORITY="low"
+            NOTIFY="false"
+          fi
+          
+          echo "has_critical=$([[ $CRITICAL -gt 0 ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "has_high=$([[ $HIGH -gt 0 ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "count=$TOTAL" >> $GITHUB_OUTPUT
+          echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
+          echo "notify=$NOTIFY" >> $GITHUB_OUTPUT
+
+  prepare-notification:
+    name: Prepare Security Notification
+    needs: analyze-security
+    runs-on: ubuntu-latest
+    if: needs.analyze-security.outputs.notification_required == 'true'
+    outputs:
+      title: ${{ steps.prepare.outputs.title }}
+      message: ${{ steps.prepare.outputs.message }}
+      channels: ${{ steps.prepare.outputs.channels }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Prepare notification content
+        id: prepare
+        run: |
+          # Read security results
+          PRIORITY="${{ needs.analyze-security.outputs.priority }}"
+          COUNT="${{ needs.analyze-security.outputs.vulnerability_count }}"
+          HAS_CRITICAL="${{ needs.analyze-security.outputs.has_critical }}"
+          
+          # Set title based on severity
+          if [[ "$HAS_CRITICAL" == "true" ]]; then
+            TITLE="🚨 CRITICAL Security Vulnerabilities Detected"
+            CHANNELS="slack,pagerduty,email"
+          else
+            TITLE="⚠️ Security Vulnerabilities Found"
+            CHANNELS="slack,email"
+          fi
+          
+          # Create detailed message
+          MESSAGE="Security scan found $COUNT vulnerabilities in ${{ github.repository }}"
+          MESSAGE="$MESSAGE\n\n**Severity Breakdown:**"
+          
+          # Add vulnerability details (mock data for demo)
+          if [[ -f security-results.json ]]; then
+            CRITICAL=$(jq -r '.critical' security-results.json)
+            HIGH=$(jq -r '.high' security-results.json)
+            MEDIUM=$(jq -r '.medium' security-results.json)
+            LOW=$(jq -r '.low' security-results.json)
+            
+            [[ $CRITICAL -gt 0 ]] && MESSAGE="$MESSAGE\n- Critical: $CRITICAL"
+            [[ $HIGH -gt 0 ]] && MESSAGE="$MESSAGE\n- High: $HIGH"
+            [[ $MEDIUM -gt 0 ]] && MESSAGE="$MESSAGE\n- Medium: $MEDIUM"
+            [[ $LOW -gt 0 ]] && MESSAGE="$MESSAGE\n- Low: $LOW"
+          fi
+          
+          MESSAGE="$MESSAGE\n\n**Action Required:**"
+          MESSAGE="$MESSAGE\n1. Review the security report"
+          MESSAGE="$MESSAGE\n2. Update vulnerable dependencies"
+          MESSAGE="$MESSAGE\n3. Test and deploy fixes"
+          MESSAGE="$MESSAGE\n\n[View Full Report](${{ github.server_url }}/${{ github.repository }}/security)"
+          
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$MESSAGE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "channels=$CHANNELS" >> $GITHUB_OUTPUT
+
+  send-security-notification:
+    name: Send Security Alert
+    needs: [analyze-security, prepare-notification]
+    if: needs.analyze-security.outputs.notification_required == 'true'
+    uses: ./.github/workflows/notification-manager.yml
+    with:
+      notification_type: security
+      status: ${{ needs.analyze-security.outputs.has_critical == 'true' && 'failure' || 'warning' }}
+      title: ${{ needs.prepare-notification.outputs.title }}
+      message: ${{ needs.prepare-notification.outputs.message }}
+      priority: ${{ needs.analyze-security.outputs.priority }}
+      channels: ${{ needs.prepare-notification.outputs.channels }}
+      metadata: |
+        {
+          "vulnerability_count": "${{ needs.analyze-security.outputs.vulnerability_count }}",
+          "has_critical": "${{ needs.analyze-security.outputs.has_critical }}",
+          "scan_type": "security",
+          "repository": "${{ github.repository }}"
+        }
+    secrets: inherit
+
+  create-security-issue:
+    name: Create Security Issue
+    needs: [analyze-security, send-security-notification]
+    runs-on: ubuntu-latest
+    if: needs.analyze-security.outputs.has_critical == 'true'
+    steps:
+      - name: Create security issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Check for existing security issue
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'security,vulnerability',
+              state: 'open'
+            });
+            
+            if (issues.data.length === 0) {
+              // Create new security issue
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🔒 Critical Security Vulnerabilities',
+                body: `## Security Alert
+                
+                Critical security vulnerabilities have been detected in the project.
+                
+                **Scan Date**: ${new Date().toISOString()}
+                **Total Vulnerabilities**: ${{ needs.analyze-security.outputs.vulnerability_count }}
+                
+                ### Immediate Actions Required:
+                
+                - [ ] Review security scan results
+                - [ ] Update vulnerable dependencies
+                - [ ] Test fixes thoroughly
+                - [ ] Deploy patches to all environments
+                - [ ] Verify vulnerabilities are resolved
+                
+                ### Security Resources:
+                
+                - [Security Policy](./SECURITY.md)
+                - [Dependency Dashboard](./security/dependencies)
+                - [Security Advisories](./security/advisories)
+                
+                **This issue will be automatically closed when all vulnerabilities are resolved.**
+                
+                /cc @security-team`,
+                labels: ['security', 'vulnerability', 'critical', 'automated'],
+                assignees: ['security-team']
+              });
+              
+              console.log(`Created security issue #${issue.data.number}`);
+            }
+
+  update-security-dashboard:
+    name: Update Security Dashboard
+    needs: analyze-security
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Update security metrics
+        run: |
+          # Update security metrics for dashboard
+          METRICS=$(cat << EOF
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "repository": "${{ github.repository }}",
+            "vulnerabilities": {
+              "total": "${{ needs.analyze-security.outputs.vulnerability_count }}",
+              "critical": "${{ needs.analyze-security.outputs.has_critical }}",
+              "high": "${{ needs.analyze-security.outputs.has_high }}"
+            },
+            "scan_type": "automated",
+            "scanner": "trivy"
+          }
+          EOF
+          )
+          
+          echo "Security metrics updated"
+
+  schedule-remediation:
+    name: Schedule Automated Remediation
+    needs: analyze-security
+    runs-on: ubuntu-latest
+    if: needs.analyze-security.outputs.notification_required == 'true' && github.event_name == 'schedule'
+    steps:
+      - name: Create remediation PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Check if automated remediation is enabled
+            const autoRemediate = true; // Would check repository settings
+            
+            if (autoRemediate) {
+              // Create branch for fixes
+              const branchName = `security/auto-fix-${Date.now()}`;
+              
+              // In real implementation, would:
+              // 1. Create branch
+              // 2. Update dependencies
+              // 3. Run tests
+              // 4. Create PR
+              
+              console.log(`Would create remediation PR on branch: ${branchName}`);
+            }

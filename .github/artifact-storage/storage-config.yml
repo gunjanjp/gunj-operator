@@ -1,0 +1,384 @@
+# Artifact Storage Configuration
+# Central configuration for all artifact storage locations and policies
+# Version: 2.0
+
+storage_backends:
+  # GitHub Actions Artifacts
+  github_artifacts:
+    enabled: true
+    retention_policies:
+      development:
+        pattern: "*-dev-*"
+        retention_days: 7
+      feature_branches:
+        pattern: "*-feature-*"
+        retention_days: 14
+      main_branch:
+        pattern: "*-main-*"
+        retention_days: 30
+      releases:
+        pattern: "*-release-*"
+        retention_days: 365
+      test_results:
+        pattern: "*-test-*"
+        retention_days: 7
+      coverage_reports:
+        pattern: "*-coverage-*"
+        retention_days: 30
+    size_limits:
+      max_artifact_size: 2GB
+      max_total_size: 50GB
+      warning_threshold: 40GB
+
+  # S3 Compatible Storage
+  s3_storage:
+    enabled: true
+    bucket: gunj-operator-artifacts
+    region: us-east-1
+    endpoint: # Leave empty for AWS S3
+    storage_classes:
+      hot_tier:
+        age: 0
+        class: STANDARD
+      warm_tier:
+        age: 30
+        class: STANDARD_IA
+      cold_tier:
+        age: 90
+        class: GLACIER
+    lifecycle_policies:
+      binaries:
+        prefix: binaries/
+        transitions:
+          - days: 30
+            storage_class: STANDARD_IA
+          - days: 90
+            storage_class: GLACIER
+        expiration: 365
+      test_artifacts:
+        prefix: test-results/
+        expiration: 30
+      release_artifacts:
+        prefix: releases/
+        transitions:
+          - days: 180
+            storage_class: GLACIER
+        expiration: never
+
+  # Container Registries
+  container_registries:
+    docker_hub:
+      enabled: true
+      namespace: gunjanjp
+      repositories:
+        - gunj-operator
+        - gunj-api
+        - gunj-ui
+        - gunj-cli
+      tag_retention:
+        keep_tags:
+          - latest
+          - stable
+          - /^v\d+\.\d+\.\d+$/  # Semantic versions
+        max_tags_per_repo: 50
+        cleanup_policy: oldest_first
+    
+    github_packages:
+      enabled: true
+      namespace: ghcr.io/gunjanjp
+      repositories:
+        - gunj-operator
+        - gunj-api
+        - gunj-ui
+        - gunj-cli
+      visibility: public
+      retention_policy:
+        untagged_retention_days: 7
+        tag_retention_count: 100
+    
+    aws_ecr:
+      enabled: false
+      region: us-east-1
+      registry_id: # AWS Account ID
+      repositories:
+        - gunj-operator
+        - gunj-api
+        - gunj-ui
+        - gunj-cli
+      lifecycle_policy:
+        rules:
+          - rulePriority: 1
+            description: Keep last 50 images
+            selection:
+              tagStatus: any
+              countType: imageCountMoreThan
+              countNumber: 50
+            action:
+              type: expire
+
+  # Package Registries
+  package_registries:
+    npm:
+      enabled: true
+      registry: https://registry.npmjs.org
+      packages:
+        - "@gunj-operator/ui"
+        - "@gunj-operator/sdk"
+      access: public
+    
+    homebrew:
+      enabled: true
+      tap: gunjanjp/homebrew-gunj
+      formulas:
+        - gunj-operator
+        - gunj-cli
+    
+    apt:
+      enabled: true
+      repository: deb.gunj-operator.io
+      distributions:
+        - focal    # Ubuntu 20.04
+        - jammy    # Ubuntu 22.04
+        - bullseye # Debian 11
+        - bookworm # Debian 12
+      components:
+        - main
+        - stable
+    
+    yum:
+      enabled: true
+      repository: rpm.gunj-operator.io
+      distributions:
+        - el7 # RHEL/CentOS 7
+        - el8 # RHEL/Rocky/Alma 8
+        - el9 # RHEL/Rocky/Alma 9
+    
+    chocolatey:
+      enabled: true
+      source: https://push.chocolatey.org/
+      packages:
+        - gunj-operator
+        - gunj-cli
+
+# Artifact Categories
+artifact_categories:
+  binaries:
+    description: Compiled executables
+    formats:
+      - tar.gz
+      - zip
+    platforms:
+      - linux-amd64
+      - linux-arm64
+      - linux-arm
+      - darwin-amd64
+      - darwin-arm64
+      - windows-amd64
+    compression: gzip
+    
+  containers:
+    description: Container images
+    formats:
+      - docker
+      - oci
+    architectures:
+      - amd64
+      - arm64
+      - arm/v7
+    base_images:
+      - gcr.io/distroless/static:nonroot
+      - alpine:3.19
+    
+  packages:
+    description: OS-specific packages
+    formats:
+      - deb
+      - rpm
+      - msi
+      - pkg
+    signatures: required
+    
+  documentation:
+    description: Documentation artifacts
+    formats:
+      - html
+      - pdf
+      - epub
+    hosting:
+      - github-pages
+      - readthedocs
+    
+  test_results:
+    description: Test execution results
+    formats:
+      - junit-xml
+      - json
+      - html
+    aggregation: enabled
+    
+  coverage_reports:
+    description: Code coverage reports
+    formats:
+      - lcov
+      - cobertura
+      - html
+    thresholds:
+      minimum: 80
+      target: 90
+
+# Caching Configuration
+caching:
+  build_cache:
+    enabled: true
+    backends:
+      - type: github_actions
+        max_size: 10GB
+      - type: s3
+        bucket: gunj-operator-cache
+        prefix: build-cache/
+    strategies:
+      go_modules:
+        key: go-mod-${{ hashFiles('**/go.sum') }}
+        restore_keys:
+          - go-mod-
+        paths:
+          - ~/go/pkg/mod
+          - ~/.cache/go-build
+      node_modules:
+        key: node-modules-${{ hashFiles('**/package-lock.json') }}
+        restore_keys:
+          - node-modules-
+        paths:
+          - ~/.npm
+          - node_modules
+      docker_layers:
+        key: docker-${{ hashFiles('**/Dockerfile') }}
+        restore_keys:
+          - docker-
+        type: registry
+        
+  artifact_cache:
+    enabled: true
+    ttl: 7d
+    max_size: 50GB
+    eviction_policy: lru
+
+# Security Configuration
+security:
+  signing:
+    enabled: true
+    providers:
+      gpg:
+        key_id: ${GPG_KEY_ID}
+        passphrase: ${GPG_PASSPHRASE}
+      cosign:
+        key: ${COSIGN_KEY}
+        password: ${COSIGN_PASSWORD}
+    required_for:
+      - releases
+      - production_builds
+  
+  scanning:
+    enabled: true
+    scanners:
+      - trivy
+      - grype
+      - syft
+    fail_on:
+      - critical
+      - high
+    
+  access_control:
+    s3:
+      bucket_policy: least_privilege
+      encryption: AES256
+      versioning: enabled
+    registries:
+      require_signed_images: true
+      vulnerability_scanning: enabled
+
+# Monitoring and Alerting
+monitoring:
+  metrics:
+    enabled: true
+    backends:
+      - prometheus
+      - cloudwatch
+    exports:
+      - artifact_count
+      - storage_usage
+      - download_count
+      - cache_hit_rate
+  
+  alerts:
+    storage_full:
+      threshold: 90%
+      severity: critical
+    retention_violation:
+      check_interval: 1h
+      severity: warning
+    failed_uploads:
+      threshold: 5
+      window: 1h
+      severity: error
+
+# Cost Optimization
+cost_optimization:
+  enabled: true
+  strategies:
+    lifecycle_transitions:
+      enabled: true
+      review_period: monthly
+    compression:
+      level: maximum
+      exclude:
+        - "*.jpg"
+        - "*.png"
+        - "*.mp4"
+    deduplication:
+      enabled: true
+      method: content_hash
+    cleanup:
+      enabled: true
+      schedule: "0 2 * * *" # 2 AM daily
+      dry_run: false
+
+# Compliance
+compliance:
+  data_retention:
+    default: 90d
+    regulatory:
+      gdpr: 3y
+      sox: 7y
+    audit_logs: 1y
+  
+  geographic_restrictions:
+    allowed_regions:
+      - us-east-1
+      - eu-west-1
+      - ap-southeast-1
+    data_sovereignty:
+      eu_data: eu-west-1
+      us_data: us-east-1
+
+# Disaster Recovery
+disaster_recovery:
+  backup:
+    enabled: true
+    frequency: daily
+    retention: 30d
+    destinations:
+      - type: s3
+        bucket: gunj-operator-backup
+        region: us-west-2
+      - type: glacier
+        vault: gunj-operator-archive
+  
+  replication:
+    enabled: true
+    mode: cross_region
+    targets:
+      - region: us-west-2
+        priority: 1
+      - region: eu-central-1
+        priority: 2

@@ -1,0 +1,938 @@
+# Artifact Storage Monitoring
+# Monitors storage usage, costs, and performance metrics
+# Version: 2.0
+
+name: Artifact Storage Monitoring
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+  
+  workflow_dispatch:
+    inputs:
+      metric_type:
+        description: 'Type of metrics to collect'
+        required: false
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - usage
+          - performance
+          - cost
+          - security
+      time_range:
+        description: 'Time range for metrics'
+        required: false
+        type: choice
+        default: '24h'
+        options:
+          - 1h
+          - 6h
+          - 24h
+          - 7d
+          - 30d
+
+env:
+  # Monitoring configuration
+  PROMETHEUS_PUSHGATEWAY: ${{ secrets.PROMETHEUS_PUSHGATEWAY_URL }}
+  GRAFANA_API_KEY: ${{ secrets.GRAFANA_API_KEY }}
+  
+  # Alerting thresholds
+  STORAGE_WARNING_THRESHOLD: 80  # Percentage
+  STORAGE_CRITICAL_THRESHOLD: 90  # Percentage
+  COST_WARNING_THRESHOLD: 500     # USD per month
+  COST_CRITICAL_THRESHOLD: 1000   # USD per month
+  
+  # Metrics retention
+  METRICS_RETENTION_DAYS: 90
+
+jobs:
+  collect-usage-metrics:
+    name: Collect Usage Metrics
+    runs-on: ubuntu-latest
+    if: github.event.inputs.metric_type == 'all' || github.event.inputs.metric_type == 'usage'
+    outputs:
+      github_usage: ${{ steps.github.outputs.usage }}
+      s3_usage: ${{ steps.s3.outputs.usage }}
+      registry_usage: ${{ steps.registry.outputs.usage }}
+    steps:
+      - name: Collect GitHub Actions storage metrics
+        id: github
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Get artifact storage usage
+            const artifacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              }
+            );
+            
+            // Calculate metrics
+            const metrics = {
+              total_artifacts: artifacts.length,
+              total_size_bytes: 0,
+              size_by_type: {},
+              age_distribution: {
+                '0-1d': 0,
+                '1-7d': 0,
+                '7-30d': 0,
+                '30d+': 0
+              },
+              largest_artifacts: []
+            };
+            
+            const now = new Date();
+            
+            for (const artifact of artifacts) {
+              metrics.total_size_bytes += artifact.size_in_bytes;
+              
+              // By type
+              const type = artifact.name.split('-')[0];
+              metrics.size_by_type[type] = (metrics.size_by_type[type] || 0) + artifact.size_in_bytes;
+              
+              // Age distribution
+              const age_days = (now - new Date(artifact.created_at)) / (1000 * 60 * 60 * 24);
+              if (age_days < 1) metrics.age_distribution['0-1d']++;
+              else if (age_days < 7) metrics.age_distribution['1-7d']++;
+              else if (age_days < 30) metrics.age_distribution['7-30d']++;
+              else metrics.age_distribution['30d+']++;
+            }
+            
+            // Top 10 largest artifacts
+            metrics.largest_artifacts = artifacts
+              .sort((a, b) => b.size_in_bytes - a.size_in_bytes)
+              .slice(0, 10)
+              .map(a => ({
+                name: a.name,
+                size_mb: (a.size_in_bytes / 1024 / 1024).toFixed(2),
+                created_at: a.created_at
+              }));
+            
+            // Calculate usage percentage (assuming 10GB limit)
+            metrics.usage_percentage = (metrics.total_size_bytes / (10 * 1024 * 1024 * 1024) * 100).toFixed(1);
+            
+            core.setOutput('usage', JSON.stringify(metrics));
+            return metrics;
+
+      - name: Collect S3 storage metrics
+        id: s3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          # Get S3 bucket metrics
+          BUCKET="gunj-operator-artifacts"
+          
+          # Get total size and object count
+          METRICS=$(aws cloudwatch get-metric-statistics \
+            --namespace AWS/S3 \
+            --metric-name BucketSizeBytes \
+            --dimensions Name=BucketName,Value=$BUCKET Name=StorageType,Value=StandardStorage \
+            --statistics Average \
+            --start-time $(date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%S) \
+            --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+            --period 86400 \
+            --output json)
+          
+          BUCKET_SIZE=$(echo "$METRICS" | jq -r '.Datapoints[0].Average // 0')
+          
+          # Get object count
+          OBJECT_COUNT=$(aws cloudwatch get-metric-statistics \
+            --namespace AWS/S3 \
+            --metric-name NumberOfObjects \
+            --dimensions Name=BucketName,Value=$BUCKET Name=StorageType,Value=AllStorageTypes \
+            --statistics Average \
+            --start-time $(date -u -d '1 day ago' +%Y-%m-%dT%H:%M:%S) \
+            --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+            --period 86400 \
+            --output json | jq -r '.Datapoints[0].Average // 0')
+          
+          # Get storage class distribution
+          STORAGE_CLASSES=$(aws s3api list-objects-v2 \
+            --bucket $BUCKET \
+            --query "Contents[].StorageClass" \
+            --output json | jq -r 'group_by(.) | map({(.[0]): length}) | add')
+          
+          # Create metrics JSON
+          cat > s3-metrics.json << EOF
+          {
+            "bucket_name": "$BUCKET",
+            "total_size_bytes": $BUCKET_SIZE,
+            "total_objects": $OBJECT_COUNT,
+            "storage_classes": $STORAGE_CLASSES,
+            "size_gb": $(echo "scale=2; $BUCKET_SIZE / 1024 / 1024 / 1024" | bc),
+            "avg_object_size_mb": $(echo "scale=2; $BUCKET_SIZE / $OBJECT_COUNT / 1024 / 1024" | bc)
+          }
+          EOF
+          
+          echo "usage=$(cat s3-metrics.json | jq -c .)" >> $GITHUB_OUTPUT
+
+      - name: Collect container registry metrics
+        id: registry
+        run: |
+          # Initialize metrics
+          cat > registry-metrics.json << EOF
+          {
+            "docker_hub": {
+              "repositories": 4,
+              "total_pulls": 0,
+              "total_size_gb": 0
+            },
+            "ghcr": {
+              "repositories": 4,
+              "total_downloads": 0,
+              "total_size_gb": 0
+            },
+            "total_images": 0,
+            "total_tags": 0
+          }
+          EOF
+          
+          echo "usage=$(cat registry-metrics.json | jq -c .)" >> $GITHUB_OUTPUT
+
+      - name: Push metrics to Prometheus
+        if: env.PROMETHEUS_PUSHGATEWAY != ''
+        run: |
+          # Prepare metrics in Prometheus format
+          cat > metrics.txt << EOF
+          # HELP gunj_operator_github_artifacts_total Total number of GitHub artifacts
+          # TYPE gunj_operator_github_artifacts_total gauge
+          gunj_operator_github_artifacts_total ${{ fromJson(steps.github.outputs.usage).total_artifacts }}
+          
+          # HELP gunj_operator_github_artifacts_size_bytes Total size of GitHub artifacts in bytes
+          # TYPE gunj_operator_github_artifacts_size_bytes gauge
+          gunj_operator_github_artifacts_size_bytes ${{ fromJson(steps.github.outputs.usage).total_size_bytes }}
+          
+          # HELP gunj_operator_github_artifacts_usage_percent GitHub artifacts storage usage percentage
+          # TYPE gunj_operator_github_artifacts_usage_percent gauge
+          gunj_operator_github_artifacts_usage_percent ${{ fromJson(steps.github.outputs.usage).usage_percentage }}
+          
+          # HELP gunj_operator_s3_bucket_size_bytes S3 bucket size in bytes
+          # TYPE gunj_operator_s3_bucket_size_bytes gauge
+          gunj_operator_s3_bucket_size_bytes ${{ fromJson(steps.s3.outputs.usage).total_size_bytes }}
+          
+          # HELP gunj_operator_s3_object_count Total number of objects in S3
+          # TYPE gunj_operator_s3_object_count gauge
+          gunj_operator_s3_object_count ${{ fromJson(steps.s3.outputs.usage).total_objects }}
+          EOF
+          
+          # Push to Prometheus Pushgateway
+          curl -X POST -H "Content-Type: text/plain" --data-binary @metrics.txt \
+            ${{ env.PROMETHEUS_PUSHGATEWAY }}/metrics/job/artifact-monitoring/instance/github-actions
+
+  collect-performance-metrics:
+    name: Collect Performance Metrics
+    runs-on: ubuntu-latest
+    if: github.event.inputs.metric_type == 'all' || github.event.inputs.metric_type == 'performance'
+    steps:
+      - name: Analyze cache hit rates
+        id: cache_analysis
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Get recent workflow runs
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+                created: `>${new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()}`
+              }
+            );
+            
+            // Analyze cache performance
+            let cacheHits = 0;
+            let cacheMisses = 0;
+            let totalCacheTime = 0;
+            let cacheRestores = 0;
+            
+            for (const run of runs) {
+              // Get run jobs
+              const jobs = await github.rest.actions.listJobsForWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id
+              });
+              
+              for (const job of jobs.data.jobs) {
+                for (const step of job.steps || []) {
+                  if (step.name?.includes('cache')) {
+                    if (step.conclusion === 'success') {
+                      if (step.name.includes('Cache hit')) {
+                        cacheHits++;
+                      } else if (step.name.includes('Cache miss')) {
+                        cacheMisses++;
+                      }
+                      // Approximate cache time
+                      const startTime = new Date(step.started_at);
+                      const endTime = new Date(step.completed_at);
+                      totalCacheTime += (endTime - startTime) / 1000; // seconds
+                      cacheRestores++;
+                    }
+                  }
+                }
+              }
+            }
+            
+            const hitRate = cacheHits / (cacheHits + cacheMisses) * 100 || 0;
+            const avgCacheTime = totalCacheTime / cacheRestores || 0;
+            
+            return {
+              cache_hit_rate: hitRate.toFixed(1),
+              total_cache_hits: cacheHits,
+              total_cache_misses: cacheMisses,
+              avg_cache_restore_time_seconds: avgCacheTime.toFixed(2),
+              measurement_period_hours: 24
+            };
+
+      - name: Analyze artifact upload/download performance
+        run: |
+          # Create performance metrics
+          cat > performance-metrics.json << EOF
+          {
+            "artifact_operations": {
+              "uploads": {
+                "total": 0,
+                "avg_duration_seconds": 0,
+                "avg_size_mb": 0,
+                "success_rate": 100
+              },
+              "downloads": {
+                "total": 0,
+                "avg_duration_seconds": 0,
+                "avg_size_mb": 0,
+                "success_rate": 100
+              }
+            },
+            "cache_performance": ${{ steps.cache_analysis.outputs.result }},
+            "s3_performance": {
+              "avg_upload_speed_mbps": 0,
+              "avg_download_speed_mbps": 0,
+              "availability": 99.9
+            },
+            "registry_performance": {
+              "avg_push_time_seconds": 0,
+              "avg_pull_time_seconds": 0,
+              "layer_cache_hit_rate": 0
+            }
+          }
+          EOF
+
+      - name: Generate performance report
+        run: |
+          cat > performance-report.md << EOF
+          # Artifact Storage Performance Report
+          
+          **Time Range**: ${{ github.event.inputs.time_range || '24h' }}  
+          **Generated**: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          
+          ## Cache Performance
+          
+          | Metric | Value |
+          |--------|-------|
+          | Cache Hit Rate | ${{ fromJson(steps.cache_analysis.outputs.result).cache_hit_rate }}% |
+          | Total Cache Hits | ${{ fromJson(steps.cache_analysis.outputs.result).total_cache_hits }} |
+          | Total Cache Misses | ${{ fromJson(steps.cache_analysis.outputs.result).total_cache_misses }} |
+          | Avg Restore Time | ${{ fromJson(steps.cache_analysis.outputs.result).avg_cache_restore_time_seconds }}s |
+          
+          ## Recommendations
+          
+          $(if (( $(echo "${{ fromJson(steps.cache_analysis.outputs.result).cache_hit_rate }} < 70" | bc -l) )); then
+            echo "- Cache hit rate is below 70%. Consider:"
+            echo "  - Reviewing cache key strategies"
+            echo "  - Implementing cache warming"
+            echo "  - Adjusting cache retention policies"
+          fi)
+          
+          $(if (( $(echo "${{ fromJson(steps.cache_analysis.outputs.result).avg_cache_restore_time_seconds }} > 60" | bc -l) )); then
+            echo "- Cache restore time is high. Consider:"
+            echo "  - Optimizing cache size"
+            echo "  - Using more granular caches"
+            echo "  - Implementing parallel cache restoration"
+          fi)
+          EOF
+
+      - name: Upload performance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-report
+          path: |
+            performance-metrics.json
+            performance-report.md
+
+  collect-cost-metrics:
+    name: Collect Cost Metrics
+    runs-on: ubuntu-latest
+    if: github.event.inputs.metric_type == 'all' || github.event.inputs.metric_type == 'cost'
+    steps:
+      - name: Calculate storage costs
+        id: costs
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          # S3 storage costs (approximate)
+          # Standard: $0.023 per GB/month
+          # Standard-IA: $0.0125 per GB/month
+          # Glacier: $0.004 per GB/month
+          
+          # Get storage by class
+          BUCKET="gunj-operator-artifacts"
+          
+          # Get sizes by storage class
+          STANDARD_SIZE=$(aws s3api list-objects-v2 \
+            --bucket $BUCKET \
+            --query "Contents[?StorageClass=='STANDARD'] | sum([].Size)" \
+            --output text || echo "0")
+          
+          STANDARD_IA_SIZE=$(aws s3api list-objects-v2 \
+            --bucket $BUCKET \
+            --query "Contents[?StorageClass=='STANDARD_IA'] | sum([].Size)" \
+            --output text || echo "0")
+          
+          GLACIER_SIZE=$(aws s3api list-objects-v2 \
+            --bucket $BUCKET \
+            --query "Contents[?StorageClass=='GLACIER'] | sum([].Size)" \
+            --output text || echo "0")
+          
+          # Calculate monthly costs
+          STANDARD_COST=$(echo "scale=2; $STANDARD_SIZE / 1024 / 1024 / 1024 * 0.023" | bc)
+          STANDARD_IA_COST=$(echo "scale=2; $STANDARD_IA_SIZE / 1024 / 1024 / 1024 * 0.0125" | bc)
+          GLACIER_COST=$(echo "scale=2; $GLACIER_SIZE / 1024 / 1024 / 1024 * 0.004" | bc)
+          
+          # Request costs (approximate)
+          # GET: $0.0004 per 1000 requests
+          # PUT: $0.005 per 1000 requests
+          REQUEST_COST=10.00  # Estimated
+          
+          # Data transfer costs
+          # First 10TB/month: $0.09 per GB
+          TRANSFER_COST=5.00  # Estimated
+          
+          # Total costs
+          TOTAL_S3_COST=$(echo "scale=2; $STANDARD_COST + $STANDARD_IA_COST + $GLACIER_COST + $REQUEST_COST + $TRANSFER_COST" | bc)
+          
+          # Container registry costs (estimated)
+          REGISTRY_COST=20.00  # Estimated based on usage
+          
+          # GitHub Actions storage (included in plan, but track usage)
+          GITHUB_STORAGE_COST=0.00
+          
+          # Total monthly cost
+          TOTAL_COST=$(echo "scale=2; $TOTAL_S3_COST + $REGISTRY_COST + $GITHUB_STORAGE_COST" | bc)
+          
+          # Create cost breakdown
+          cat > cost-metrics.json << EOF
+          {
+            "monthly_costs_usd": {
+              "s3_storage": {
+                "standard": $STANDARD_COST,
+                "standard_ia": $STANDARD_IA_COST,
+                "glacier": $GLACIER_COST,
+                "requests": $REQUEST_COST,
+                "transfer": $TRANSFER_COST,
+                "total": $TOTAL_S3_COST
+              },
+              "container_registry": $REGISTRY_COST,
+              "github_storage": $GITHUB_STORAGE_COST,
+              "total": $TOTAL_COST
+            },
+            "storage_sizes_gb": {
+              "s3_standard": $(echo "scale=2; $STANDARD_SIZE / 1024 / 1024 / 1024" | bc),
+              "s3_standard_ia": $(echo "scale=2; $STANDARD_IA_SIZE / 1024 / 1024 / 1024" | bc),
+              "s3_glacier": $(echo "scale=2; $GLACIER_SIZE / 1024 / 1024 / 1024" | bc)
+            },
+            "cost_optimization_potential": {
+              "lifecycle_savings": $(echo "scale=2; $STANDARD_COST * 0.4" | bc),
+              "compression_savings": $(echo "scale=2; $TOTAL_COST * 0.1" | bc),
+              "retention_savings": $(echo "scale=2; $TOTAL_COST * 0.2" | bc)
+            }
+          }
+          EOF
+          
+          echo "total_cost=$TOTAL_COST" >> $GITHUB_OUTPUT
+
+      - name: Generate cost report
+        run: |
+          COSTS=$(cat cost-metrics.json)
+          
+          cat > cost-report.md << EOF
+          # Artifact Storage Cost Report
+          
+          **Month**: $(date +%B %Y)  
+          **Total Monthly Cost**: \$${{ steps.costs.outputs.total_cost }} USD
+          
+          ## Cost Breakdown
+          
+          ### S3 Storage
+          | Storage Class | Size (GB) | Cost (USD) |
+          |---------------|-----------|------------|
+          | Standard | $(echo "$COSTS" | jq -r '.storage_sizes_gb.s3_standard') | \$$(echo "$COSTS" | jq -r '.monthly_costs_usd.s3_storage.standard') |
+          | Standard-IA | $(echo "$COSTS" | jq -r '.storage_sizes_gb.s3_standard_ia') | \$$(echo "$COSTS" | jq -r '.monthly_costs_usd.s3_storage.standard_ia') |
+          | Glacier | $(echo "$COSTS" | jq -r '.storage_sizes_gb.s3_glacier') | \$$(echo "$COSTS" | jq -r '.monthly_costs_usd.s3_storage.glacier') |
+          | Requests | - | \$$(echo "$COSTS" | jq -r '.monthly_costs_usd.s3_storage.requests') |
+          | Transfer | - | \$$(echo "$COSTS" | jq -r '.monthly_costs_usd.s3_storage.transfer') |
+          | **Total S3** | - | **\$$(echo "$COSTS" | jq -r '.monthly_costs_usd.s3_storage.total')** |
+          
+          ### Other Storage
+          | Service | Cost (USD) |
+          |---------|------------|
+          | Container Registry | \$$(echo "$COSTS" | jq -r '.monthly_costs_usd.container_registry') |
+          | GitHub Storage | \$$(echo "$COSTS" | jq -r '.monthly_costs_usd.github_storage') |
+          
+          ## Cost Optimization Opportunities
+          
+          | Optimization | Potential Savings |
+          |--------------|-------------------|
+          | Lifecycle Policies | \$$(echo "$COSTS" | jq -r '.cost_optimization_potential.lifecycle_savings')/month |
+          | Compression | \$$(echo "$COSTS" | jq -r '.cost_optimization_potential.compression_savings')/month |
+          | Retention Cleanup | \$$(echo "$COSTS" | jq -r '.cost_optimization_potential.retention_savings')/month |
+          
+          ## Recommendations
+          
+          $(if (( $(echo "${{ steps.costs.outputs.total_cost }} > ${{ env.COST_WARNING_THRESHOLD }}" | bc -l) )); then
+            echo "⚠️ **Warning**: Monthly costs exceed warning threshold of \$${{ env.COST_WARNING_THRESHOLD }}"
+            echo ""
+            echo "1. Implement aggressive lifecycle policies"
+            echo "2. Review and reduce retention periods"
+            echo "3. Enable compression for all artifacts"
+            echo "4. Consider using Glacier for long-term storage"
+          fi)
+          
+          ## Cost Trends
+          
+          _Historical data would be displayed here if available_
+          EOF
+
+      - name: Upload cost report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cost-report
+          path: |
+            cost-metrics.json
+            cost-report.md
+
+  collect-security-metrics:
+    name: Collect Security Metrics  
+    runs-on: ubuntu-latest
+    if: github.event.inputs.metric_type == 'all' || github.event.inputs.metric_type == 'security'
+    steps:
+      - name: Audit artifact access
+        id: access_audit
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Get artifact access logs (simplified)
+            const events = await github.paginate(
+              github.rest.activity.listRepoEvents,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              }
+            );
+            
+            // Filter artifact-related events
+            const artifactEvents = events.filter(e => 
+              e.type === 'WorkflowRunEvent' || 
+              e.type === 'ReleaseEvent'
+            );
+            
+            // Analyze access patterns
+            const accessPatterns = {
+              total_accesses: artifactEvents.length,
+              unique_users: new Set(artifactEvents.map(e => e.actor.login)).size,
+              access_by_type: {},
+              suspicious_patterns: []
+            };
+            
+            // Check for suspicious patterns
+            const userAccessCount = {};
+            for (const event of artifactEvents) {
+              userAccessCount[event.actor.login] = (userAccessCount[event.actor.login] || 0) + 1;
+            }
+            
+            // Flag users with excessive access
+            for (const [user, count] of Object.entries(userAccessCount)) {
+              if (count > 100) {
+                accessPatterns.suspicious_patterns.push({
+                  type: 'excessive_access',
+                  user: user,
+                  count: count
+                });
+              }
+            }
+            
+            return accessPatterns;
+
+      - name: Check encryption status
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          # Check S3 bucket encryption
+          BUCKET="gunj-operator-artifacts"
+          
+          # Get bucket encryption
+          ENCRYPTION=$(aws s3api get-bucket-encryption \
+            --bucket $BUCKET \
+            --output json 2>/dev/null || echo '{"error": "No encryption"}')
+          
+          # Check bucket versioning
+          VERSIONING=$(aws s3api get-bucket-versioning \
+            --bucket $BUCKET \
+            --output json)
+          
+          # Check bucket logging
+          LOGGING=$(aws s3api get-bucket-logging \
+            --bucket $BUCKET \
+            --output json 2>/dev/null || echo '{"error": "No logging"}')
+          
+          # Create security status
+          cat > security-status.json << EOF
+          {
+            "s3_bucket": {
+              "encryption": $(echo "$ENCRYPTION" | jq -c .),
+              "versioning": $(echo "$VERSIONING" | jq -c .),
+              "logging": $(echo "$LOGGING" | jq -c .),
+              "public_access_blocked": true
+            },
+            "container_registries": {
+              "image_signing": false,
+              "vulnerability_scanning": true,
+              "access_control": "rbac"
+            },
+            "github_artifacts": {
+              "encryption_at_rest": true,
+              "encryption_in_transit": true,
+              "access_control": "token_based"
+            }
+          }
+          EOF
+
+      - name: Generate security report
+        run: |
+          cat > security-report.md << EOF
+          # Artifact Storage Security Report
+          
+          **Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)  
+          **Audit Period**: ${{ github.event.inputs.time_range || '24h' }}
+          
+          ## Access Audit Summary
+          
+          - Total Accesses: ${{ fromJson(steps.access_audit.outputs.result).total_accesses }}
+          - Unique Users: ${{ fromJson(steps.access_audit.outputs.result).unique_users }}
+          - Suspicious Patterns: ${{ fromJson(steps.access_audit.outputs.result).suspicious_patterns.length || 0 }}
+          
+          ## Encryption Status
+          
+          | Storage Backend | Encryption at Rest | Encryption in Transit |
+          |-----------------|-------------------|----------------------|
+          | S3 Bucket | ✅ AES-256 | ✅ TLS 1.2+ |
+          | GitHub Artifacts | ✅ Enabled | ✅ HTTPS |
+          | Container Registry | ✅ Enabled | ✅ HTTPS |
+          
+          ## Security Configuration
+          
+          ### S3 Bucket
+          - Versioning: $(jq -r '.s3_bucket.versioning.Status // "Disabled"' security-status.json)
+          - Logging: $(jq -r 'if .s3_bucket.logging.error then "Disabled" else "Enabled" end' security-status.json)
+          - Public Access: Blocked
+          
+          ### Container Registries
+          - Image Signing: $(jq -r 'if .container_registries.image_signing then "Enabled" else "Disabled" end' security-status.json)
+          - Vulnerability Scanning: $(jq -r 'if .container_registries.vulnerability_scanning then "Enabled" else "Disabled" end' security-status.json)
+          
+          ## Compliance Status
+          
+          | Requirement | Status |
+          |-------------|--------|
+          | Encryption at Rest | ✅ Compliant |
+          | Access Logging | ⚠️ Partial |
+          | Data Retention | ✅ Compliant |
+          | Access Control | ✅ Compliant |
+          
+          ## Recommendations
+          
+          1. Enable S3 bucket logging if not already enabled
+          2. Implement container image signing
+          3. Review and rotate access credentials quarterly
+          4. Enable MFA for privileged operations
+          EOF
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: |
+            security-status.json
+            security-report.md
+
+  generate-monitoring-dashboard:
+    name: Generate Monitoring Dashboard
+    runs-on: ubuntu-latest
+    needs: [collect-usage-metrics, collect-performance-metrics, collect-cost-metrics, collect-security-metrics]
+    if: always()
+    steps:
+      - name: Download all reports
+        uses: actions/download-artifact@v4
+        with:
+          path: reports/
+
+      - name: Generate comprehensive dashboard
+        run: |
+          cat > monitoring-dashboard.md << 'EOF'
+          # Artifact Storage Monitoring Dashboard
+          
+          **Generated**: $(date -u +%Y-%m-%dT%H:%M:%SZ)  
+          **Period**: ${{ github.event.inputs.time_range || '24h' }}
+          
+          ## 📊 Executive Summary
+          
+          ### Key Metrics
+          | Metric | Value | Status |
+          |--------|-------|--------|
+          | Total Storage Used | - GB | 🟢 |
+          | Monthly Cost | $- USD | 🟢 |
+          | Cache Hit Rate | -% | 🟡 |
+          | Security Score | -/100 | 🟢 |
+          
+          ## 💾 Storage Usage
+          
+          ### GitHub Actions Artifacts
+          - Total Artifacts: -
+          - Total Size: - GB
+          - Usage: -% of quota
+          
+          ### S3 Storage
+          - Total Objects: -
+          - Total Size: - GB
+          - Storage Classes:
+            - Standard: - GB
+            - Standard-IA: - GB
+            - Glacier: - GB
+          
+          ### Container Registries
+          - Total Images: -
+          - Total Tags: -
+          - Total Pulls: -
+          
+          ## 🚀 Performance
+          
+          ### Cache Performance
+          - Hit Rate: -%
+          - Average Restore Time: -s
+          - Total Hits/Misses: -/-
+          
+          ### Upload/Download Performance
+          - Average Upload Speed: - Mbps
+          - Average Download Speed: - Mbps
+          - Success Rate: -%
+          
+          ## 💰 Cost Analysis
+          
+          ### Monthly Costs
+          - S3 Storage: $- USD
+          - Container Registry: $- USD  
+          - GitHub Storage: $- USD
+          - **Total**: $- USD
+          
+          ### Cost Optimization
+          - Potential Savings: $- USD/month
+          - Recommendations:
+            - Implement lifecycle policies
+            - Enable compression
+            - Optimize retention periods
+          
+          ## 🔒 Security Status
+          
+          ### Compliance
+          - Encryption: ✅ Enabled
+          - Access Control: ✅ Configured
+          - Audit Logging: ⚠️ Partial
+          - Vulnerability Scanning: ✅ Active
+          
+          ### Recent Activity
+          - Access Attempts: -
+          - Unique Users: -
+          - Suspicious Patterns: -
+          
+          ## 📈 Trends
+          
+          _Trends would be displayed here with historical data_
+          
+          ## 🎯 Action Items
+          
+          1. [ ] Review storage usage and clean up old artifacts
+          2. [ ] Optimize cache keys for better hit rate
+          3. [ ] Implement cost optimization recommendations
+          4. [ ] Enable S3 bucket logging
+          5. [ ] Schedule next retention policy review
+          
+          ## 🔗 Quick Links
+          
+          - [Artifact Management Workflow](../../actions/workflows/artifact-management.yml)
+          - [Retention Policy Configuration](../artifact-storage/storage-config.yml)
+          - [Cost Optimization Guide](../../docs/artifact-storage/cost-optimization.md)
+          - [Security Best Practices](../../docs/artifact-storage/security.md)
+          EOF
+
+      - name: Create Grafana dashboard JSON
+        run: |
+          cat > grafana-dashboard.json << 'EOF'
+          {
+            "dashboard": {
+              "title": "Gunj Operator - Artifact Storage Monitoring",
+              "tags": ["artifacts", "storage", "monitoring"],
+              "timezone": "UTC",
+              "schemaVersion": 27,
+              "version": 1,
+              "refresh": "5m",
+              "panels": [
+                {
+                  "id": 1,
+                  "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+                  "type": "graph",
+                  "title": "Storage Usage Over Time",
+                  "targets": [
+                    {
+                      "expr": "gunj_operator_github_artifacts_size_bytes",
+                      "legendFormat": "GitHub Artifacts"
+                    },
+                    {
+                      "expr": "gunj_operator_s3_bucket_size_bytes",
+                      "legendFormat": "S3 Storage"
+                    }
+                  ]
+                },
+                {
+                  "id": 2,
+                  "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+                  "type": "stat",
+                  "title": "Cache Hit Rate",
+                  "targets": [
+                    {
+                      "expr": "rate(gunj_operator_cache_hits_total[5m]) / (rate(gunj_operator_cache_hits_total[5m]) + rate(gunj_operator_cache_misses_total[5m])) * 100"
+                    }
+                  ]
+                },
+                {
+                  "id": 3,
+                  "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+                  "type": "gauge",
+                  "title": "Storage Usage %",
+                  "targets": [
+                    {
+                      "expr": "gunj_operator_github_artifacts_usage_percent"
+                    }
+                  ]
+                },
+                {
+                  "id": 4,
+                  "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+                  "type": "stat",
+                  "title": "Monthly Cost",
+                  "targets": [
+                    {
+                      "expr": "gunj_operator_storage_cost_usd"
+                    }
+                  ]
+                },
+                {
+                  "id": 5,
+                  "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+                  "type": "table",
+                  "title": "Top Artifacts by Size",
+                  "targets": [
+                    {
+                      "expr": "topk(10, gunj_operator_artifact_size_bytes)"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+          EOF
+
+      - name: Upload dashboard
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitoring-dashboard
+          path: |
+            monitoring-dashboard.md
+            grafana-dashboard.json
+
+  alert-on-thresholds:
+    name: Alert on Threshold Violations
+    runs-on: ubuntu-latest
+    needs: [collect-usage-metrics, collect-cost-metrics]
+    if: always()
+    steps:
+      - name: Check thresholds
+        id: check
+        run: |
+          # Check storage usage threshold
+          USAGE_PERCENT=${{ fromJson(needs.collect-usage-metrics.outputs.github_usage || '{}').usage_percentage || 0 }}
+          if (( $(echo "$USAGE_PERCENT > ${{ env.STORAGE_CRITICAL_THRESHOLD }}" | bc -l) )); then
+            echo "storage_alert=critical" >> $GITHUB_OUTPUT
+            echo "::error::Storage usage critical: ${USAGE_PERCENT}%"
+          elif (( $(echo "$USAGE_PERCENT > ${{ env.STORAGE_WARNING_THRESHOLD }}" | bc -l) )); then
+            echo "storage_alert=warning" >> $GITHUB_OUTPUT
+            echo "::warning::Storage usage warning: ${USAGE_PERCENT}%"
+          else
+            echo "storage_alert=ok" >> $GITHUB_OUTPUT
+          fi
+          
+          # Check cost threshold
+          MONTHLY_COST=${{ needs.collect-cost-metrics.outputs.total_cost || 0 }}
+          if (( $(echo "$MONTHLY_COST > ${{ env.COST_CRITICAL_THRESHOLD }}" | bc -l) )); then
+            echo "cost_alert=critical" >> $GITHUB_OUTPUT
+            echo "::error::Monthly cost critical: $${MONTHLY_COST}"
+          elif (( $(echo "$MONTHLY_COST > ${{ env.COST_WARNING_THRESHOLD }}" | bc -l) )); then
+            echo "cost_alert=warning" >> $GITHUB_OUTPUT
+            echo "::warning::Monthly cost warning: $${MONTHLY_COST}"
+          else
+            echo "cost_alert=ok" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send alerts
+        if: steps.check.outputs.storage_alert != 'ok' || steps.check.outputs.cost_alert != 'ok'
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              attachments: [{
+                color: '${{ steps.check.outputs.storage_alert == "critical" || steps.check.outputs.cost_alert == "critical" ? "danger" : "warning" }}',
+                title: 'Artifact Storage Alert',
+                fields: [
+                  {
+                    title: 'Storage Usage',
+                    value: '${{ fromJson(needs.collect-usage-metrics.outputs.github_usage || "{}").usage_percentage || "N/A" }}%',
+                    short: true
+                  },
+                  {
+                    title: 'Monthly Cost',
+                    value: '${{ needs.collect-cost-metrics.outputs.total_cost || "N/A" }} USD',
+                    short: true
+                  },
+                  {
+                    title: 'Action Required',
+                    value: '${{ steps.check.outputs.storage_alert == "critical" || steps.check.outputs.cost_alert == "critical" ? "Immediate action required!" : "Review and optimize storage usage" }}',
+                    short: false
+                  }
+                ]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

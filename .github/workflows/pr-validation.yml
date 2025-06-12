@@ -1,0 +1,338 @@
+# Pull Request Validation Pipeline
+# Validates PRs before merging with optimized checks
+# Version: 2.0
+
+name: PR Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted]
+
+env:
+  REQUIRED_CHECKS: 4
+  MIN_REVIEWERS: 2
+
+jobs:
+  # PR metadata and validation
+  pr-check:
+    name: PR Validation
+    runs-on: ubuntu-latest
+    outputs:
+      is_valid: ${{ steps.validate.outputs.is_valid }}
+      skip_ci: ${{ steps.check.outputs.skip_ci }}
+      affected_components: ${{ steps.analyze.outputs.components }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR metadata
+        id: check
+        run: |
+          # Check for skip CI
+          SKIP_CI="false"
+          if [[ "${{ github.event.pull_request.title }}" =~ \[skip\ ci\] ]] || \
+             [[ "${{ github.event.pull_request.title }}" =~ \[ci\ skip\] ]]; then
+            SKIP_CI="true"
+          fi
+          
+          echo "skip_ci=$SKIP_CI" >> $GITHUB_OUTPUT
+          
+          # Check PR size
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | wc -l)
+          echo "Changed files: $CHANGED_FILES"
+          
+          if [[ $CHANGED_FILES -gt 100 ]]; then
+            echo "::warning::Large PR detected with $CHANGED_FILES changed files. Consider breaking it down."
+          fi
+
+      - name: Validate PR
+        id: validate
+        run: |
+          IS_VALID="true"
+          ERRORS=""
+          
+          # Check PR title follows conventional commits
+          if ! [[ "${{ github.event.pull_request.title }}" =~ ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: ]]; then
+            IS_VALID="false"
+            ERRORS="$ERRORS\n- PR title must follow conventional commit format"
+          fi
+          
+          # Check PR has description
+          if [[ -z "${{ github.event.pull_request.body }}" ]]; then
+            IS_VALID="false"
+            ERRORS="$ERRORS\n- PR must have a description"
+          fi
+          
+          # Check linked issues
+          if ! [[ "${{ github.event.pull_request.body }}" =~ (closes|fixes|resolves)\ \#[0-9]+ ]]; then
+            echo "::warning::No linked issues found in PR description"
+          fi
+          
+          echo "is_valid=$IS_VALID" >> $GITHUB_OUTPUT
+          
+          if [[ "$IS_VALID" == "false" ]]; then
+            echo "::error::PR validation failed:$ERRORS"
+          fi
+
+      - name: Analyze changes
+        id: analyze
+        run: |
+          # Determine affected components based on changed files
+          COMPONENTS=""
+          
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "^cmd/operator/\|^controllers/\|^api/"; then
+            COMPONENTS="$COMPONENTS operator"
+          fi
+          
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "^cmd/api-server/\|^internal/api/"; then
+            COMPONENTS="$COMPONENTS api"
+          fi
+          
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "^cmd/cli/"; then
+            COMPONENTS="$COMPONENTS cli"
+          fi
+          
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "^ui/"; then
+            COMPONENTS="$COMPONENTS ui"
+          fi
+          
+          # Default to all if core files changed
+          if [[ -z "$COMPONENTS" ]] || git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q "^go.mod\|^Makefile"; then
+            COMPONENTS="operator api cli ui"
+          fi
+          
+          echo "components=$COMPONENTS" >> $GITHUB_OUTPUT
+          echo "Affected components: $COMPONENTS"
+
+      - name: Label PR
+        uses: actions/labeler@v4
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+
+  # Fast checks that run in parallel
+  fast-checks:
+    name: Fast Checks
+    needs: pr-check
+    if: needs.pr-check.outputs.is_valid == 'true' && needs.pr-check.outputs.skip_ci != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [format, lint, licenses, commits]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run ${{ matrix.check }} check
+        run: |
+          case "${{ matrix.check }}" in
+            format)
+              # Check code formatting
+              make check-format
+              ;;
+            lint)
+              # Quick lint (not full golangci-lint)
+              go vet ./...
+              ;;
+            licenses)
+              # Check license headers
+              make check-licenses
+              ;;
+            commits)
+              # Validate commit messages
+              npx commitlint --from origin/${{ github.base_ref }}
+              ;;
+          esac
+
+  # Optimized test suite for PRs
+  pr-tests:
+    name: PR Tests
+    needs: [pr-check, fast-checks]
+    if: needs.pr-check.outputs.is_valid == 'true' && needs.pr-check.outputs.skip_ci != 'true'
+    uses: ./.github/workflows/ci-cd-pipeline.yml
+    with:
+      skip_security: false  # Always run security on PRs
+      deploy_environment: none
+    secrets: inherit
+
+  # Check if PR is ready to merge
+  ready-to-merge:
+    name: Ready to Merge
+    needs: [pr-check, fast-checks, pr-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check merge requirements
+        id: merge-check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            
+            // Check required status checks
+            const requiredChecks = [
+              'pr-check',
+              'fast-checks',
+              'pr-tests'
+            ];
+            
+            let allChecksPassed = true;
+            let failedChecks = [];
+            
+            // Get check runs
+            const checkRuns = await github.rest.checks.listForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: pr.head.sha
+            });
+            
+            for (const check of requiredChecks) {
+              const checkRun = checkRuns.data.check_runs.find(r => r.name.includes(check));
+              if (!checkRun || checkRun.conclusion !== 'success') {
+                allChecksPassed = false;
+                failedChecks.push(check);
+              }
+            }
+            
+            // Check reviews
+            const reviews = await github.rest.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number
+            });
+            
+            const approvals = reviews.data.filter(r => r.state === 'APPROVED').length;
+            const changesRequested = reviews.data.filter(r => r.state === 'CHANGES_REQUESTED').length;
+            
+            // Generate status
+            let status = '❌ Not Ready';
+            let details = [];
+            
+            if (!allChecksPassed) {
+              details.push(`Failed checks: ${failedChecks.join(', ')}`);
+            }
+            
+            if (approvals < ${{ env.MIN_REVIEWERS }}) {
+              details.push(`Need ${${{ env.MIN_REVIEWERS }} - approvals} more approval(s)`);
+            }
+            
+            if (changesRequested > 0) {
+              details.push(`${changesRequested} change(s) requested`);
+            }
+            
+            if (pr.mergeable_state === 'conflicting') {
+              details.push('Has merge conflicts');
+            }
+            
+            if (details.length === 0) {
+              status = '✅ Ready to Merge';
+            }
+            
+            // Update PR status
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: pr.head.sha,
+              state: details.length === 0 ? 'success' : 'pending',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/pull/${pr.number}`,
+              description: status,
+              context: 'merge-readiness'
+            });
+            
+            // Add comment with status
+            const commentBody = `## 📋 Merge Readiness Check
+            
+            **Status**: ${status}
+            
+            ${details.length > 0 ? '### Issues:\n' + details.map(d => `- ${d}`).join('\n') : ''}
+            
+            ### Checklist:
+            - ${allChecksPassed ? '✅' : '❌'} All CI checks passing
+            - ${approvals >= ${{ env.MIN_REVIEWERS }} ? '✅' : '❌'} Required approvals (${approvals}/${${{ env.MIN_REVIEWERS }}})
+            - ${changesRequested === 0 ? '✅' : '❌'} No changes requested
+            - ${pr.mergeable_state !== 'conflicting' ? '✅' : '❌'} No merge conflicts
+            
+            ---
+            *Last updated: ${new Date().toISOString()}*`;
+            
+            // Find and update existing comment or create new
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number
+            });
+            
+            const botComment = comments.data.find(c => 
+              c.user.type === 'Bot' && c.body.includes('Merge Readiness Check')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: commentBody
+              });
+            }
+
+  # Auto-merge for dependabot
+  auto-merge:
+    name: Auto-merge Dependabot
+    needs: [pr-check, fast-checks, pr-tests]
+    if: |
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      needs.pr-tests.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto-merge dependabot PRs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Only auto-merge patch and minor updates
+            const pr = context.payload.pull_request;
+            const title = pr.title.toLowerCase();
+            
+            if (title.includes('bump') && (title.includes('patch') || title.includes('minor'))) {
+              await github.rest.pulls.merge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                merge_method: 'squash'
+              });
+              
+              console.log(`Auto-merged dependabot PR #${pr.number}`);
+            }
+
+  # PR metrics collection
+  pr-metrics:
+    name: Collect PR Metrics
+    needs: [pr-check, fast-checks, pr-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Calculate PR metrics
+        run: |
+          # Calculate various metrics
+          PR_CREATED=$(date -d "${{ github.event.pull_request.created_at }}" +%s)
+          NOW=$(date +%s)
+          AGE_HOURS=$(( ($NOW - $PR_CREATED) / 3600 ))
+          
+          echo "PR Age: $AGE_HOURS hours"
+          echo "Changed files: ${{ github.event.pull_request.changed_files }}"
+          echo "Additions: ${{ github.event.pull_request.additions }}"
+          echo "Deletions: ${{ github.event.pull_request.deletions }}"
+          
+          # Store metrics (in production, would send to monitoring system)

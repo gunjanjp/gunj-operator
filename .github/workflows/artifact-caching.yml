@@ -1,0 +1,599 @@
+# Artifact Cache Management
+# Optimizes builds through intelligent caching strategies
+# Version: 2.0
+
+name: Artifact Cache Management
+
+on:
+  workflow_call:
+    inputs:
+      cache_key:
+        required: true
+        type: string
+        description: 'Primary cache key'
+      restore_keys:
+        required: false
+        type: string
+        description: 'Fallback cache keys (comma-separated)'
+      cache_paths:
+        required: true
+        type: string
+        description: 'Paths to cache (comma-separated)'
+      cache_type:
+        required: false
+        type: string
+        default: 'dependency'
+        description: 'Type of cache (dependency, build, test, artifact)'
+  
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Cache management action'
+        required: true
+        type: choice
+        options:
+          - analyze
+          - cleanup
+          - warm
+          - report
+      target:
+        description: 'Target cache type (all, dependency, build, test)'
+        required: false
+        default: 'all'
+
+env:
+  CACHE_VERSION: v2
+  MAX_CACHE_SIZE: 10GB
+  
+  # Cache paths by type
+  GO_MOD_CACHE: ~/go/pkg/mod
+  GO_BUILD_CACHE: ~/.cache/go-build
+  NODE_CACHE: ~/.npm
+  DOCKER_CACHE: /tmp/.buildx-cache
+  TEST_CACHE: ~/.cache/test-results
+  
+  # S3 cache configuration
+  S3_CACHE_BUCKET: gunj-operator-cache
+  S3_CACHE_REGION: us-east-1
+
+jobs:
+  # Analyze cache usage and efficiency
+  analyze-cache:
+    name: Analyze Cache Usage
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'analyze'
+    outputs:
+      report: ${{ steps.analyze.outputs.report }}
+      recommendations: ${{ steps.analyze.outputs.recommendations }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Analyze GitHub Actions cache
+        id: analyze
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const caches = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            // Analyze cache usage
+            let totalSize = 0;
+            let cacheByType = {};
+            let hitRate = {};
+            
+            for (const cache of caches.data.actions_caches) {
+              totalSize += cache.size_in_bytes;
+              
+              // Categorize by type
+              const type = cache.key.split('-')[0];
+              if (!cacheByType[type]) {
+                cacheByType[type] = { count: 0, size: 0 };
+              }
+              cacheByType[type].count++;
+              cacheByType[type].size += cache.size_in_bytes;
+            }
+            
+            // Generate report
+            const report = {
+              total_caches: caches.data.total_count,
+              total_size_gb: (totalSize / 1024 / 1024 / 1024).toFixed(2),
+              usage_percentage: ((totalSize / (10 * 1024 * 1024 * 1024)) * 100).toFixed(1),
+              cache_by_type: cacheByType,
+              oldest_cache: caches.data.actions_caches[caches.data.actions_caches.length - 1]?.created_at,
+              recommendations: []
+            };
+            
+            // Generate recommendations
+            if (report.usage_percentage > 80) {
+              report.recommendations.push("Cache usage is high. Consider cleaning up old caches.");
+            }
+            
+            for (const [type, stats] of Object.entries(cacheByType)) {
+              if (stats.count > 50) {
+                report.recommendations.push(`High number of ${type} caches (${stats.count}). Consider consolidation.`);
+              }
+            }
+            
+            core.setOutput('report', JSON.stringify(report));
+            core.setOutput('recommendations', report.recommendations.join('\n'));
+            
+            return report;
+
+      - name: Analyze S3 cache
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ env.S3_CACHE_REGION }}
+        run: |
+          # Get S3 cache statistics
+          aws s3 ls s3://${{ env.S3_CACHE_BUCKET }} --recursive --summarize \
+            | tail -2 \
+            | tee s3-cache-summary.txt
+          
+          # Analyze cache age
+          aws s3api list-objects-v2 \
+            --bucket ${{ env.S3_CACHE_BUCKET }} \
+            --query "Contents[?LastModified < '$(date -d '30 days ago' --iso-8601)'].Key" \
+            --output text \
+            | wc -l > old-cache-count.txt
+          
+          echo "Old caches (>30 days): $(cat old-cache-count.txt)"
+
+      - name: Generate cache report
+        run: |
+          cat > cache-analysis-report.md << EOF
+          # Cache Analysis Report
+          
+          **Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)  
+          **Triggered by**: ${{ github.actor }}
+          
+          ## GitHub Actions Cache
+          
+          \`\`\`json
+          ${{ steps.analyze.outputs.report }}
+          \`\`\`
+          
+          ## Recommendations
+          
+          ${{ steps.analyze.outputs.recommendations }}
+          
+          ## S3 Cache Statistics
+          
+          $(cat s3-cache-summary.txt)
+          
+          Old caches requiring cleanup: $(cat old-cache-count.txt)
+          EOF
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-analysis-report
+          path: cache-analysis-report.md
+
+  # Restore cache with fallback strategies
+  restore-cache:
+    name: Restore Cache
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_call'
+    outputs:
+      cache-hit: ${{ steps.cache.outputs.cache-hit }}
+      cache-key: ${{ steps.cache.outputs.cache-key }}
+    steps:
+      - name: Generate cache key with context
+        id: generate-key
+        run: |
+          # Add context to cache key
+          CONTEXT_KEY="${{ inputs.cache_key }}-${{ env.CACHE_VERSION }}"
+          
+          # Add OS and architecture
+          CONTEXT_KEY="${CONTEXT_KEY}-$(uname -s)-$(uname -m)"
+          
+          # Add date component for time-based invalidation
+          if [[ "${{ inputs.cache_type }}" == "test" ]]; then
+            CONTEXT_KEY="${CONTEXT_KEY}-$(date +%Y%m%d)"
+          fi
+          
+          echo "cache-key=${CONTEXT_KEY}" >> $GITHUB_OUTPUT
+          
+          # Generate restore keys
+          if [[ -n "${{ inputs.restore_keys }}" ]]; then
+            RESTORE_KEYS="${{ inputs.restore_keys }}"
+          else
+            # Generate default restore keys
+            RESTORE_KEYS="${{ inputs.cache_key }}-${{ env.CACHE_VERSION }}-"
+            RESTORE_KEYS="${RESTORE_KEYS},${{ inputs.cache_key }}-"
+          fi
+          
+          echo "restore-keys=${RESTORE_KEYS}" >> $GITHUB_OUTPUT
+
+      - name: Restore from GitHub Actions cache
+        id: cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ inputs.cache_paths }}
+          key: ${{ steps.generate-key.outputs.cache-key }}
+          restore-keys: ${{ steps.generate-key.outputs.restore-keys }}
+
+      - name: Restore from S3 cache (fallback)
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ env.S3_CACHE_REGION }}
+        run: |
+          # Try to restore from S3
+          CACHE_KEY="${{ steps.generate-key.outputs.cache-key }}"
+          S3_KEY="cache/${CACHE_KEY}.tar.gz"
+          
+          if aws s3 ls "s3://${{ env.S3_CACHE_BUCKET }}/${S3_KEY}" 2>/dev/null; then
+            echo "Found cache in S3, downloading..."
+            aws s3 cp "s3://${{ env.S3_CACHE_BUCKET }}/${S3_KEY}" cache.tar.gz
+            
+            # Extract cache
+            IFS=',' read -ra PATHS <<< "${{ inputs.cache_paths }}"
+            for path in "${PATHS[@]}"; do
+              mkdir -p $(dirname $path)
+            done
+            tar -xzf cache.tar.gz -C /
+            
+            echo "cache-hit=true" >> $GITHUB_OUTPUT
+            echo "Cache restored from S3"
+          else
+            echo "No cache found in S3"
+            echo "cache-hit=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Record cache metrics
+        if: always()
+        run: |
+          # Record cache hit/miss metrics
+          cat > cache-metrics.json << EOF
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "cache_type": "${{ inputs.cache_type }}",
+            "cache_key": "${{ steps.generate-key.outputs.cache-key }}",
+            "cache_hit": "${{ steps.cache.outputs.cache-hit }}",
+            "source": "${{ steps.cache.outputs.cache-hit == 'true' && 'github' || 'none' }}",
+            "workflow": "${{ github.workflow }}",
+            "job": "${{ github.job }}"
+          }
+          EOF
+          
+          # Send metrics (to monitoring system)
+          echo "Cache metrics recorded"
+
+  # Save cache with compression and deduplication
+  save-cache:
+    name: Save Cache
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_call'
+    needs: restore-cache
+    steps:
+      - name: Prepare cache for saving
+        id: prepare
+        run: |
+          # Check if cache needs updating
+          if [[ "${{ needs.restore-cache.outputs.cache-hit }}" == "true" ]]; then
+            echo "Cache hit, checking if update needed..."
+            
+            # Compare checksums to detect changes
+            IFS=',' read -ra PATHS <<< "${{ inputs.cache_paths }}"
+            CHECKSUM=""
+            for path in "${PATHS[@]}"; do
+              if [[ -d "$path" ]]; then
+                CHECKSUM="${CHECKSUM}$(find $path -type f -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1)"
+              fi
+            done
+            
+            # Store checksum for comparison
+            echo "$CHECKSUM" > new-checksum.txt
+            
+            # Check if checksum exists in cache
+            if [[ -f ~/.cache-checksum ]]; then
+              if diff ~/.cache-checksum new-checksum.txt > /dev/null; then
+                echo "Cache unchanged, skipping save"
+                echo "should-save=false" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+            fi
+          fi
+          
+          echo "should-save=true" >> $GITHUB_OUTPUT
+          cp new-checksum.txt ~/.cache-checksum || true
+
+      - name: Save to GitHub Actions cache
+        if: steps.prepare.outputs.should-save == 'true'
+        uses: actions/cache@v3
+        with:
+          path: ${{ inputs.cache_paths }}
+          key: ${{ needs.restore-cache.outputs.cache-key }}
+
+      - name: Save to S3 cache (backup)
+        if: steps.prepare.outputs.should-save == 'true' && github.ref == 'refs/heads/main'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ env.S3_CACHE_REGION }}
+        run: |
+          # Create compressed archive
+          CACHE_KEY="${{ needs.restore-cache.outputs.cache-key }}"
+          S3_KEY="cache/${CACHE_KEY}.tar.gz"
+          
+          # Create cache archive with compression
+          IFS=',' read -ra PATHS <<< "${{ inputs.cache_paths }}"
+          tar -czf cache.tar.gz --exclude='*.log' --exclude='*.tmp' "${PATHS[@]}"
+          
+          # Upload to S3 with metadata
+          aws s3 cp cache.tar.gz "s3://${{ env.S3_CACHE_BUCKET }}/${S3_KEY}" \
+            --metadata "created=$(date -u +%Y-%m-%dT%H:%M:%SZ),workflow=${{ github.workflow }},type=${{ inputs.cache_type }}"
+          
+          echo "Cache saved to S3"
+
+  # Warm caches for common scenarios
+  warm-cache:
+    name: Warm Cache
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'warm'
+    strategy:
+      matrix:
+        cache_type: [go, node, docker]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Warm Go cache
+        if: matrix.cache_type == 'go'
+        run: |
+          # Download Go modules
+          go mod download
+          
+          # Pre-build common packages
+          go build -v ./...
+          
+          # Cache test dependencies
+          go test -v -run=^$ ./...
+
+      - name: Warm Node cache
+        if: matrix.cache_type == 'node'
+        run: |
+          # Install dependencies for all workspaces
+          npm ci
+          cd ui && npm ci
+          
+          # Pre-build common assets
+          npm run build || true
+
+      - name: Warm Docker cache
+        if: matrix.cache_type == 'docker'
+        run: |
+          # Pull base images
+          docker pull gcr.io/distroless/static:nonroot
+          docker pull golang:1.21-alpine
+          docker pull node:20-alpine
+          
+          # Build cache images
+          docker buildx build \
+            --cache-to type=local,dest=/tmp/.buildx-cache \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --platform linux/amd64,linux/arm64 \
+            -f Dockerfile \
+            .
+
+      - name: Save warmed cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ env.GO_MOD_CACHE }}
+            ${{ env.GO_BUILD_CACHE }}
+            ${{ env.NODE_CACHE }}
+            ${{ env.DOCKER_CACHE }}
+          key: warmed-${{ matrix.cache_type }}-${{ env.CACHE_VERSION }}-${{ github.sha }}
+
+  # Clean up old caches
+  cleanup-cache:
+    name: Cleanup Old Caches
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'cleanup' || github.event_name == 'schedule'
+    steps:
+      - name: Cleanup GitHub Actions caches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const caches = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - 7); // 7 days retention
+            
+            let deletedCount = 0;
+            let freedSpace = 0;
+            
+            for (const cache of caches.data.actions_caches) {
+              const cacheDate = new Date(cache.created_at);
+              
+              // Delete old caches
+              if (cacheDate < cutoffDate) {
+                await github.rest.actions.deleteActionsCacheById({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  cache_id: cache.id
+                });
+                
+                deletedCount++;
+                freedSpace += cache.size_in_bytes;
+                console.log(`Deleted cache: ${cache.key} (${(cache.size_in_bytes / 1024 / 1024).toFixed(2)} MB)`);
+              }
+            }
+            
+            console.log(`Deleted ${deletedCount} caches, freed ${(freedSpace / 1024 / 1024 / 1024).toFixed(2)} GB`);
+
+      - name: Cleanup S3 caches
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ env.S3_CACHE_REGION }}
+        run: |
+          # List old objects
+          aws s3api list-objects-v2 \
+            --bucket ${{ env.S3_CACHE_BUCKET }} \
+            --prefix cache/ \
+            --query "Contents[?LastModified<'$(date -d '7 days ago' --iso-8601)'].Key" \
+            --output text | tr '\t' '\n' > old-caches.txt
+          
+          # Delete old caches
+          if [[ -s old-caches.txt ]]; then
+            while IFS= read -r key; do
+              aws s3 rm "s3://${{ env.S3_CACHE_BUCKET }}/$key"
+              echo "Deleted S3 cache: $key"
+            done < old-caches.txt
+          fi
+
+      - name: Generate cleanup report
+        run: |
+          cat > cleanup-report.md << EOF
+          # Cache Cleanup Report
+          
+          **Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)  
+          **Type**: ${{ github.event_name == 'schedule' && 'Scheduled' || 'Manual' }}
+          
+          ## GitHub Actions Cache
+          Check workflow logs for details.
+          
+          ## S3 Cache
+          Deleted objects: $(wc -l < old-caches.txt || echo "0")
+          
+          ## Next Steps
+          - Monitor cache hit rates
+          - Adjust retention policies if needed
+          - Consider cache warming for frequently missed caches
+          EOF
+
+      - name: Upload cleanup report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-cleanup-report
+          path: cleanup-report.md
+
+  # Generate cache usage report
+  generate-report:
+    name: Generate Cache Report
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'report' || github.event_name == 'schedule'
+    steps:
+      - name: Collect cache statistics
+        id: stats
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Get cache statistics
+            const caches = await github.rest.actions.getActionsCacheList({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            // Calculate statistics
+            const stats = {
+              total_caches: caches.data.total_count,
+              total_size_gb: 0,
+              cache_by_type: {},
+              cache_by_age: {
+                '0-1d': 0,
+                '1-3d': 0,
+                '3-7d': 0,
+                '7d+': 0
+              },
+              top_caches: []
+            };
+            
+            const now = new Date();
+            
+            for (const cache of caches.data.actions_caches) {
+              stats.total_size_gb += cache.size_in_bytes / 1024 / 1024 / 1024;
+              
+              // By type
+              const type = cache.key.split('-')[0];
+              stats.cache_by_type[type] = (stats.cache_by_type[type] || 0) + 1;
+              
+              // By age
+              const age = (now - new Date(cache.created_at)) / (1000 * 60 * 60 * 24);
+              if (age < 1) stats.cache_by_age['0-1d']++;
+              else if (age < 3) stats.cache_by_age['1-3d']++;
+              else if (age < 7) stats.cache_by_age['3-7d']++;
+              else stats.cache_by_age['7d+']++;
+            }
+            
+            // Top caches by size
+            stats.top_caches = caches.data.actions_caches
+              .sort((a, b) => b.size_in_bytes - a.size_in_bytes)
+              .slice(0, 10)
+              .map(c => ({
+                key: c.key,
+                size_mb: (c.size_in_bytes / 1024 / 1024).toFixed(2),
+                age_days: ((now - new Date(c.created_at)) / (1000 * 60 * 60 * 24)).toFixed(1)
+              }));
+            
+            return stats;
+
+      - name: Generate comprehensive report
+        run: |
+          cat > cache-usage-report.md << EOF
+          # Cache Usage Report
+          
+          **Generated**: $(date -u +%Y-%m-%dT%H:%M:%SZ)  
+          **Repository**: ${{ github.repository }}
+          
+          ## Summary Statistics
+          
+          | Metric | Value |
+          |--------|-------|
+          | Total Caches | ${{ fromJson(steps.stats.outputs.result).total_caches }} |
+          | Total Size | ${{ fromJson(steps.stats.outputs.result).total_size_gb }} GB |
+          | Usage | $(echo "${{ fromJson(steps.stats.outputs.result).total_size_gb }} / 10 * 100" | bc -l | cut -c1-4)% |
+          
+          ## Cache Distribution
+          
+          ### By Type
+          \`\`\`json
+          ${{ toJson(fromJson(steps.stats.outputs.result).cache_by_type) }}
+          \`\`\`
+          
+          ### By Age
+          \`\`\`json
+          ${{ toJson(fromJson(steps.stats.outputs.result).cache_by_age) }}
+          \`\`\`
+          
+          ## Top 10 Largest Caches
+          
+          | Cache Key | Size (MB) | Age (days) |
+          |-----------|-----------|------------|
+          $(echo '${{ toJson(fromJson(steps.stats.outputs.result).top_caches) }}' | jq -r '.[] | "| \(.key) | \(.size_mb) | \(.age_days) |"')
+          
+          ## Recommendations
+          
+          1. Review and clean up caches older than 7 days
+          2. Optimize cache keys for better reuse
+          3. Consider implementing cache warming for frequently used dependencies
+          4. Monitor cache hit rates to identify optimization opportunities
+          
+          ## Cache Best Practices
+          
+          - Use specific cache keys with proper versioning
+          - Include restore keys for fallback
+          - Regularly clean up old caches
+          - Monitor cache size and usage
+          - Implement cache warming for critical paths
+          EOF
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-usage-report
+          path: cache-usage-report.md

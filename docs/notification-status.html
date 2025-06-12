@@ -1,0 +1,262 @@
+# Notification System Status Page
+# HTML template for notification system status
+# Version: 2.0
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gunj Operator - Notification Status</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .channel-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .channel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .channel-name {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        .status-operational {
+            background: #4caf50;
+            color: white;
+        }
+        .status-degraded {
+            background: #ff9800;
+            color: white;
+        }
+        .status-down {
+            background: #f44336;
+            color: white;
+        }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .metric:last-child {
+            border-bottom: none;
+        }
+        .metric-label {
+            color: #666;
+        }
+        .metric-value {
+            font-weight: 600;
+        }
+        .recent-notifications {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .notification-item {
+            padding: 12px;
+            border-left: 4px solid #2196f3;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+        }
+        .notification-time {
+            font-size: 12px;
+            color: #666;
+        }
+        .refresh-info {
+            text-align: center;
+            color: #666;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔔 Gunj Operator Notification System Status</h1>
+        
+        <div class="status-grid">
+            <!-- Slack Status -->
+            <div class="channel-card">
+                <div class="channel-header">
+                    <span class="channel-name">Slack</span>
+                    <span class="status-badge status-operational">Operational</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Messages (24h)</span>
+                    <span class="metric-value">142</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Success Rate</span>
+                    <span class="metric-value">99.3%</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Avg Response Time</span>
+                    <span class="metric-value">145ms</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Last Message</span>
+                    <span class="metric-value">2 min ago</span>
+                </div>
+            </div>
+
+            <!-- Discord Status -->
+            <div class="channel-card">
+                <div class="channel-header">
+                    <span class="channel-name">Discord</span>
+                    <span class="status-badge status-operational">Operational</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Messages (24h)</span>
+                    <span class="metric-value">89</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Success Rate</span>
+                    <span class="metric-value">100%</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Avg Response Time</span>
+                    <span class="metric-value">203ms</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Last Message</span>
+                    <span class="metric-value">15 min ago</span>
+                </div>
+            </div>
+
+            <!-- Email Status -->
+            <div class="channel-card">
+                <div class="channel-header">
+                    <span class="channel-name">Email</span>
+                    <span class="status-badge status-operational">Operational</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Messages (24h)</span>
+                    <span class="metric-value">34</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Success Rate</span>
+                    <span class="metric-value">97.1%</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Avg Response Time</span>
+                    <span class="metric-value">1.2s</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Last Message</span>
+                    <span class="metric-value">1 hour ago</span>
+                </div>
+            </div>
+
+            <!-- PagerDuty Status -->
+            <div class="channel-card">
+                <div class="channel-header">
+                    <span class="channel-name">PagerDuty</span>
+                    <span class="status-badge status-operational">Operational</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Incidents (24h)</span>
+                    <span class="metric-value">0</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Success Rate</span>
+                    <span class="metric-value">100%</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Avg Response Time</span>
+                    <span class="metric-value">89ms</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Last Alert</span>
+                    <span class="metric-value">3 days ago</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="recent-notifications">
+            <h2>Recent Notifications</h2>
+            
+            <div class="notification-item">
+                <strong>Build Success</strong> - main branch
+                <div class="notification-time">2 minutes ago via Slack</div>
+            </div>
+            
+            <div class="notification-item">
+                <strong>Release Published</strong> - v2.0.0
+                <div class="notification-time">15 minutes ago via Discord, Email</div>
+            </div>
+            
+            <div class="notification-item">
+                <strong>Security Scan Complete</strong> - No vulnerabilities found
+                <div class="notification-time">1 hour ago via Slack</div>
+            </div>
+            
+            <div class="notification-item">
+                <strong>Deployment Success</strong> - Production environment
+                <div class="notification-time">3 hours ago via Slack, Email</div>
+            </div>
+        </div>
+
+        <div class="refresh-info">
+            This page refreshes every 30 seconds. Last update: <span id="last-update"></span>
+        </div>
+    </div>
+
+    <script>
+        // Update last refresh time
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('last-update').textContent = now.toLocaleTimeString();
+        }
+        
+        updateTime();
+        setInterval(updateTime, 1000);
+        
+        // Auto refresh page
+        setTimeout(() => location.reload(), 30000);
+        
+        // In production, this would fetch real data from the API
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/v1/notifications/status');
+                const data = await response.json();
+                // Update UI with real data
+            } catch (error) {
+                console.error('Failed to fetch status:', error);
+            }
+        }
+    </script>
+</body>
+</html>

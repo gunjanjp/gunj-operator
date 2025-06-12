@@ -1,0 +1,471 @@
+# Notification System Configuration
+# Central configuration for all notification channels
+# Version: 2.0
+
+name: Notification Manager
+
+on:
+  workflow_call:
+    inputs:
+      notification_type:
+        required: true
+        type: string
+        description: 'Type of notification (build, deploy, alert, release)'
+      status:
+        required: true
+        type: string
+        description: 'Status (success, failure, warning, info)'
+      title:
+        required: true
+        type: string
+        description: 'Notification title'
+      message:
+        required: false
+        type: string
+        description: 'Detailed message'
+      priority:
+        required: false
+        type: string
+        default: 'normal'
+        description: 'Priority level (low, normal, high, critical)'
+      channels:
+        required: false
+        type: string
+        default: 'default'
+        description: 'Comma-separated list of channels to notify'
+      metadata:
+        required: false
+        type: string
+        default: '{}'
+        description: 'Additional metadata as JSON'
+
+env:
+  # Notification settings
+  DEFAULT_CHANNELS: 'slack,github'
+  CRITICAL_CHANNELS: 'slack,pagerduty,email'
+  RELEASE_CHANNELS: 'slack,discord,email,twitter'
+  
+  # Throttling settings
+  RATE_LIMIT_WINDOW: 300  # 5 minutes
+  RATE_LIMIT_MAX: 10      # Max notifications per window
+
+jobs:
+  # Determine notification routing
+  route-notification:
+    name: Route Notification
+    runs-on: ubuntu-latest
+    outputs:
+      channels: ${{ steps.routing.outputs.channels }}
+      formatted_message: ${{ steps.format.outputs.message }}
+      should_notify: ${{ steps.throttle.outputs.should_notify }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine routing
+        id: routing
+        run: |
+          # Parse requested channels
+          REQUESTED_CHANNELS="${{ inputs.channels }}"
+          PRIORITY="${{ inputs.priority }}"
+          TYPE="${{ inputs.notification_type }}"
+          
+          # Determine final channel list based on priority and type
+          if [[ "$PRIORITY" == "critical" ]]; then
+            CHANNELS="$CRITICAL_CHANNELS"
+          elif [[ "$TYPE" == "release" ]]; then
+            CHANNELS="$RELEASE_CHANNELS"
+          elif [[ "$REQUESTED_CHANNELS" == "default" ]]; then
+            CHANNELS="$DEFAULT_CHANNELS"
+          else
+            CHANNELS="$REQUESTED_CHANNELS"
+          fi
+          
+          echo "channels=$CHANNELS" >> $GITHUB_OUTPUT
+          
+          # Log routing decision
+          echo "Routing notification to: $CHANNELS"
+          echo "Type: $TYPE, Priority: $PRIORITY"
+
+      - name: Format message
+        id: format
+        run: |
+          # Create formatted message based on type
+          TYPE="${{ inputs.notification_type }}"
+          STATUS="${{ inputs.status }}"
+          TITLE="${{ inputs.title }}"
+          MESSAGE="${{ inputs.message }}"
+          
+          # Add status emoji
+          case "$STATUS" in
+            success) EMOJI="✅" ;;
+            failure) EMOJI="❌" ;;
+            warning) EMOJI="⚠️" ;;
+            info) EMOJI="ℹ️" ;;
+            *) EMOJI="📢" ;;
+          esac
+          
+          # Format message
+          FORMATTED="$EMOJI *$TITLE*"
+          if [[ -n "$MESSAGE" ]]; then
+            FORMATTED="$FORMATTED\n$MESSAGE"
+          fi
+          
+          # Add metadata
+          FORMATTED="$FORMATTED\n\n"
+          FORMATTED="${FORMATTED}Repository: ${{ github.repository }}\n"
+          FORMATTED="${FORMATTED}Workflow: ${{ github.workflow }}\n"
+          FORMATTED="${FORMATTED}Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          # Save formatted message
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$FORMATTED" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check throttling
+        id: throttle
+        run: |
+          # Simple throttling check (would use Redis in production)
+          # For now, always allow
+          echo "should_notify=true" >> $GITHUB_OUTPUT
+
+  # Slack notifications
+  notify-slack:
+    name: Notify Slack
+    needs: route-notification
+    runs-on: ubuntu-latest
+    if: contains(needs.route-notification.outputs.channels, 'slack') && needs.route-notification.outputs.should_notify == 'true'
+    steps:
+      - name: Send to Slack
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "attachments": [{
+                "color": "${{ inputs.status == 'success' && 'good' || inputs.status == 'failure' && 'danger' || 'warning' }}",
+                "title": "${{ inputs.title }}",
+                "text": "${{ needs.route-notification.outputs.formatted_message }}",
+                "fields": [
+                  {
+                    "title": "Type",
+                    "value": "${{ inputs.notification_type }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Priority",
+                    "value": "${{ inputs.priority }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Triggered by",
+                    "value": "${{ github.actor }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Branch",
+                    "value": "${{ github.ref_name }}",
+                    "short": true
+                  }
+                ],
+                "footer": "Gunj Operator",
+                "footer_icon": "https://github.com/gunjanjp/gunj-operator/raw/main/assets/logo.png",
+                "ts": ${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at || 'now' }}
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Discord notifications
+  notify-discord:
+    name: Notify Discord
+    needs: route-notification
+    runs-on: ubuntu-latest
+    if: contains(needs.route-notification.outputs.channels, 'discord') && needs.route-notification.outputs.should_notify == 'true'
+    steps:
+      - name: Send to Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          # Determine color based on status
+          case "${{ inputs.status }}" in
+            success) COLOR="3066993" ;;  # Green
+            failure) COLOR="15158332" ;; # Red
+            warning) COLOR="16776960" ;; # Yellow
+            *) COLOR="3447003" ;;       # Blue
+          esac
+          
+          # Create Discord embed
+          curl -X POST $DISCORD_WEBHOOK \
+            -H "Content-Type: application/json" \
+            -d @- << EOF
+          {
+            "embeds": [{
+              "title": "${{ inputs.title }}",
+              "description": "${{ inputs.message }}",
+              "color": $COLOR,
+              "fields": [
+                {
+                  "name": "Repository",
+                  "value": "[${{ github.repository }}](${{ github.server_url }}/${{ github.repository }})",
+                  "inline": true
+                },
+                {
+                  "name": "Workflow",
+                  "value": "${{ github.workflow }}",
+                  "inline": true
+                },
+                {
+                  "name": "Status",
+                  "value": "${{ inputs.status }}",
+                  "inline": true
+                }
+              ],
+              "footer": {
+                "text": "Gunj Operator CI/CD",
+                "icon_url": "https://github.com/gunjanjp/gunj-operator/raw/main/assets/logo.png"
+              },
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }]
+          }
+          EOF
+
+  # Microsoft Teams notifications
+  notify-teams:
+    name: Notify Microsoft Teams
+    needs: route-notification
+    runs-on: ubuntu-latest
+    if: contains(needs.route-notification.outputs.channels, 'teams') && needs.route-notification.outputs.should_notify == 'true'
+    steps:
+      - name: Send to Teams
+        env:
+          TEAMS_WEBHOOK: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          # Determine theme color
+          case "${{ inputs.status }}" in
+            success) COLOR="00FF00" ;;
+            failure) COLOR="FF0000" ;;
+            warning) COLOR="FFA500" ;;
+            *) COLOR="0000FF" ;;
+          esac
+          
+          # Create Teams card
+          curl -X POST $TEAMS_WEBHOOK \
+            -H "Content-Type: application/json" \
+            -d @- << EOF
+          {
+            "@type": "MessageCard",
+            "@context": "https://schema.org/extensions",
+            "themeColor": "$COLOR",
+            "summary": "${{ inputs.title }}",
+            "sections": [{
+              "activityTitle": "${{ inputs.title }}",
+              "activitySubtitle": "Gunj Operator Notification",
+              "activityImage": "https://github.com/gunjanjp/gunj-operator/raw/main/assets/logo.png",
+              "facts": [
+                {
+                  "name": "Repository",
+                  "value": "${{ github.repository }}"
+                },
+                {
+                  "name": "Type",
+                  "value": "${{ inputs.notification_type }}"
+                },
+                {
+                  "name": "Status",
+                  "value": "${{ inputs.status }}"
+                },
+                {
+                  "name": "Triggered by",
+                  "value": "${{ github.actor }}"
+                }
+              ],
+              "markdown": true,
+              "text": "${{ inputs.message }}"
+            }],
+            "potentialAction": [{
+              "@type": "OpenUri",
+              "name": "View Workflow Run",
+              "targets": [{
+                "os": "default",
+                "uri": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              }]
+            }]
+          }
+          EOF
+
+  # Email notifications
+  notify-email:
+    name: Notify Email
+    needs: route-notification
+    runs-on: ubuntu-latest
+    if: contains(needs.route-notification.outputs.channels, 'email') && needs.route-notification.outputs.should_notify == 'true'
+    steps:
+      - name: Send email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "[Gunj Operator] ${{ inputs.title }}"
+          to: ${{ secrets.EMAIL_RECIPIENTS }}
+          from: Gunj Operator CI/CD <noreply@gunj-operator.io>
+          body: |
+            Notification Type: ${{ inputs.notification_type }}
+            Status: ${{ inputs.status }}
+            Priority: ${{ inputs.priority }}
+            
+            ${{ inputs.message }}
+            
+            ---
+            Repository: ${{ github.repository }}
+            Workflow: ${{ github.workflow }}
+            Run ID: ${{ github.run_id }}
+            Actor: ${{ github.actor }}
+            
+            View Details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            This is an automated notification from the Gunj Operator CI/CD system.
+
+  # PagerDuty alerts
+  notify-pagerduty:
+    name: Notify PagerDuty
+    needs: route-notification
+    runs-on: ubuntu-latest
+    if: contains(needs.route-notification.outputs.channels, 'pagerduty') && needs.route-notification.outputs.should_notify == 'true' && inputs.priority == 'critical'
+    steps:
+      - name: Create PagerDuty incident
+        env:
+          PAGERDUTY_TOKEN: ${{ secrets.PAGERDUTY_TOKEN }}
+          PAGERDUTY_SERVICE_ID: ${{ secrets.PAGERDUTY_SERVICE_ID }}
+        run: |
+          # Create incident for critical notifications
+          curl -X POST https://api.pagerduty.com/incidents \
+            -H "Authorization: Token token=$PAGERDUTY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -H "From: gunj-operator-ci@example.com" \
+            -d @- << EOF
+          {
+            "incident": {
+              "type": "incident",
+              "title": "${{ inputs.title }}",
+              "service": {
+                "id": "$PAGERDUTY_SERVICE_ID",
+                "type": "service_reference"
+              },
+              "body": {
+                "type": "incident_body",
+                "details": "${{ inputs.message }}\n\nWorkflow: ${{ github.workflow }}\nRepository: ${{ github.repository }}\nRun: ${{ github.run_id }}"
+              },
+              "urgency": "high"
+            }
+          }
+          EOF
+
+  # GitHub commit status
+  update-github-status:
+    name: Update GitHub Status
+    needs: route-notification
+    runs-on: ubuntu-latest
+    if: contains(needs.route-notification.outputs.channels, 'github') && github.event_name == 'pull_request'
+    steps:
+      - name: Update commit status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const state = '${{ inputs.status }}' === 'success' ? 'success' : 
+                          '${{ inputs.status }}' === 'failure' ? 'failure' : 
+                          '${{ inputs.status }}' === 'warning' ? 'pending' : 'pending';
+            
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: state,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: '${{ inputs.title }}',
+              context: 'gunj-operator/${{ inputs.notification_type }}'
+            });
+
+  # Custom webhook notifications
+  notify-webhook:
+    name: Notify Custom Webhook
+    needs: route-notification
+    runs-on: ubuntu-latest
+    if: contains(needs.route-notification.outputs.channels, 'webhook') && needs.route-notification.outputs.should_notify == 'true'
+    steps:
+      - name: Send to webhook
+        env:
+          CUSTOM_WEBHOOK_URL: ${{ secrets.CUSTOM_WEBHOOK_URL }}
+          CUSTOM_WEBHOOK_SECRET: ${{ secrets.CUSTOM_WEBHOOK_SECRET }}
+        run: |
+          # Create payload
+          PAYLOAD=$(cat << EOF
+          {
+            "event": "gunj-operator.notification",
+            "type": "${{ inputs.notification_type }}",
+            "status": "${{ inputs.status }}",
+            "priority": "${{ inputs.priority }}",
+            "title": "${{ inputs.title }}",
+            "message": "${{ inputs.message }}",
+            "metadata": ${{ inputs.metadata }},
+            "context": {
+              "repository": "${{ github.repository }}",
+              "workflow": "${{ github.workflow }}",
+              "run_id": "${{ github.run_id }}",
+              "run_number": "${{ github.run_number }}",
+              "actor": "${{ github.actor }}",
+              "ref": "${{ github.ref }}",
+              "sha": "${{ github.sha }}"
+            },
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          )
+          
+          # Calculate HMAC signature
+          SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$CUSTOM_WEBHOOK_SECRET" | sed 's/^.* //')
+          
+          # Send webhook
+          curl -X POST "$CUSTOM_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-Gunj-Signature: sha256=$SIGNATURE" \
+            -H "X-Gunj-Event: notification" \
+            -d "$PAYLOAD"
+
+  # Notification summary
+  notification-summary:
+    name: Notification Summary
+    needs: [notify-slack, notify-discord, notify-teams, notify-email, notify-pagerduty, update-github-status, notify-webhook]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # Notification Summary
+          
+          **Type**: ${{ inputs.notification_type }}  
+          **Status**: ${{ inputs.status }}  
+          **Priority**: ${{ inputs.priority }}  
+          
+          ## Channels Notified
+          
+          | Channel | Status |
+          |---------|--------|
+          | Slack | ${{ needs.notify-slack.result }} |
+          | Discord | ${{ needs.notify-discord.result }} |
+          | Teams | ${{ needs.notify-teams.result }} |
+          | Email | ${{ needs.notify-email.result }} |
+          | PagerDuty | ${{ needs.notify-pagerduty.result }} |
+          | GitHub | ${{ needs.update-github-status.result }} |
+          | Webhook | ${{ needs.notify-webhook.result }} |
+          
+          ## Message
+          
+          **Title**: ${{ inputs.title }}
+          
+          ${{ inputs.message }}
+          EOF

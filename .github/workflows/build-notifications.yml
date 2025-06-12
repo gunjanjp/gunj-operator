@@ -1,0 +1,219 @@
+# Build Notification Workflow
+# Sends notifications for build events with appropriate routing
+# Version: 2.0
+
+name: Build Notifications
+
+on:
+  workflow_run:
+    workflows: ["Build Matrix"]
+    types:
+      - completed
+  workflow_call:
+    inputs:
+      build_status:
+        required: true
+        type: string
+      build_url:
+        required: true
+        type: string
+      components:
+        required: false
+        type: string
+        default: 'all'
+
+jobs:
+  analyze-build:
+    name: Analyze Build Results
+    runs-on: ubuntu-latest
+    outputs:
+      notification_type: ${{ steps.analyze.outputs.type }}
+      priority: ${{ steps.analyze.outputs.priority }}
+      channels: ${{ steps.analyze.outputs.channels }}
+      title: ${{ steps.analyze.outputs.title }}
+      message: ${{ steps.analyze.outputs.message }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Analyze build results
+        id: analyze
+        run: |
+          # Determine build status
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            BUILD_STATUS="${{ github.event.workflow_run.conclusion }}"
+            BUILD_URL="${{ github.event.workflow_run.html_url }}"
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+            COMMIT="${{ github.event.workflow_run.head_sha }}"
+          else
+            BUILD_STATUS="${{ inputs.build_status }}"
+            BUILD_URL="${{ inputs.build_url }}"
+            BRANCH="${{ github.ref_name }}"
+            COMMIT="${{ github.sha }}"
+          fi
+          
+          # Set notification parameters based on status and branch
+          if [[ "$BUILD_STATUS" == "success" ]]; then
+            TYPE="build"
+            PRIORITY="low"
+            TITLE="✅ Build Successful"
+            
+            # Only notify for main/release branches on success
+            if [[ "$BRANCH" == "main" ]] || [[ "$BRANCH" =~ ^release/.* ]]; then
+              CHANNELS="slack,github"
+            else
+              CHANNELS="github"
+            fi
+          else
+            TYPE="build"
+            TITLE="❌ Build Failed"
+            
+            # Critical for main branch failures
+            if [[ "$BRANCH" == "main" ]]; then
+              PRIORITY="critical"
+              CHANNELS="slack,pagerduty,email"
+              TITLE="🚨 CRITICAL: Main Branch Build Failed"
+            else
+              PRIORITY="high"
+              CHANNELS="slack,github"
+            fi
+          fi
+          
+          # Create detailed message
+          MESSAGE="Repository: ${{ github.repository }}"
+          MESSAGE="$MESSAGE\nBranch: $BRANCH"
+          MESSAGE="$MESSAGE\nCommit: ${COMMIT:0:7}"
+          MESSAGE="$MESSAGE\nAuthor: ${{ github.actor }}"
+          MESSAGE="$MESSAGE\nStatus: $BUILD_STATUS"
+          
+          # Add failure details if available
+          if [[ "$BUILD_STATUS" != "success" ]]; then
+            MESSAGE="$MESSAGE\n\n**Action Required**: Please check the build logs and fix any issues."
+          fi
+          
+          # Output results
+          echo "type=$TYPE" >> $GITHUB_OUTPUT
+          echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
+          echo "channels=$CHANNELS" >> $GITHUB_OUTPUT
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$MESSAGE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Get build metrics
+        if: always()
+        run: |
+          # Calculate build duration and other metrics
+          START_TIME="${{ github.event.workflow_run.created_at || github.event.head_commit.timestamp }}"
+          END_TIME="${{ github.event.workflow_run.updated_at || github.event.workflow.updated_at }}"
+          
+          # Add metrics to message
+          echo "Build metrics calculated"
+
+  send-notification:
+    name: Send Build Notification
+    needs: analyze-build
+    uses: ./.github/workflows/notification-manager.yml
+    with:
+      notification_type: ${{ needs.analyze-build.outputs.notification_type }}
+      status: ${{ github.event.workflow_run.conclusion || inputs.build_status }}
+      title: ${{ needs.analyze-build.outputs.title }}
+      message: ${{ needs.analyze-build.outputs.message }}
+      priority: ${{ needs.analyze-build.outputs.priority }}
+      channels: ${{ needs.analyze-build.outputs.channels }}
+      metadata: |
+        {
+          "workflow_id": "${{ github.run_id }}",
+          "repository": "${{ github.repository }}",
+          "branch": "${{ github.ref_name }}",
+          "commit": "${{ github.sha }}",
+          "actor": "${{ github.actor }}"
+        }
+    secrets: inherit
+
+  update-build-dashboard:
+    name: Update Build Dashboard
+    needs: analyze-build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Update metrics
+        run: |
+          # Update build metrics for dashboard
+          echo "Updating build metrics..."
+          
+          # In real implementation, would update metrics storage
+          METRICS=$(cat << EOF
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "repository": "${{ github.repository }}",
+            "branch": "${{ github.ref_name }}",
+            "status": "${{ github.event.workflow_run.conclusion || inputs.build_status }}",
+            "duration_seconds": 0,
+            "components": "${{ inputs.components }}",
+            "trigger": "${{ github.event_name }}"
+          }
+          EOF
+          )
+          
+          echo "Metrics: $METRICS"
+
+  create-issue-for-failure:
+    name: Create Issue for Persistent Failures
+    needs: [analyze-build, send-notification]
+    runs-on: ubuntu-latest
+    if: needs.analyze-build.outputs.priority == 'critical'
+    steps:
+      - name: Check for existing issue
+        id: check-issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'build-failure,critical',
+              state: 'open'
+            });
+            
+            const existingIssue = issues.data.find(issue => 
+              issue.title.includes('Main Branch Build Failure')
+            );
+            
+            return existingIssue ? existingIssue.number : null;
+
+      - name: Create or update issue
+        if: steps.check-issue.outputs.result == 'null'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Critical: Main Branch Build Failure',
+              body: `## Build Failure on Main Branch
+              
+              The main branch build is currently failing and requires immediate attention.
+              
+              **Failed Build**: ${context.payload.workflow_run.html_url}
+              **Commit**: ${context.payload.workflow_run.head_sha}
+              **Author**: ${context.payload.workflow_run.actor.login}
+              **Time**: ${new Date().toISOString()}
+              
+              ### Impact
+              - ❌ New PRs cannot be merged
+              - ❌ Releases are blocked
+              - ❌ CI/CD pipeline is broken
+              
+              ### Action Required
+              1. Review the build logs
+              2. Identify the failing component
+              3. Fix the issue or revert the breaking change
+              4. Verify the build passes
+              
+              cc @${context.payload.workflow_run.actor.login}`,
+              labels: ['build-failure', 'critical', 'incident'],
+              assignees: [context.payload.workflow_run.actor.login]
+            });
+            
+            console.log(`Created issue #${issue.data.number}`);

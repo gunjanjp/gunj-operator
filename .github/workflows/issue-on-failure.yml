@@ -1,0 +1,224 @@
+# Create GitHub Issue for Critical Failures
+name: Create Issue on Critical Failure
+
+on:
+  workflow_call:
+    inputs:
+      workflow_name:
+        required: true
+        type: string
+        description: 'Name of the failed workflow'
+      error_message:
+        required: true
+        type: string
+        description: 'Error message or failure reason'
+      severity:
+        required: false
+        type: string
+        default: 'critical'
+        description: 'Severity level: critical, high, medium, low'
+      logs_url:
+        required: false
+        type: string
+        description: 'URL to the workflow logs'
+
+jobs:
+  create-issue:
+    name: Create GitHub Issue
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for existing issue
+        id: check-issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const workflowName = '${{ inputs.workflow_name }}';
+            
+            // Search for open issues with the same workflow name
+            const issues = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              labels: 'ci-failure',
+              per_page: 100
+            });
+            
+            const existingIssue = issues.data.find(issue => 
+              issue.title.includes(workflowName) && 
+              issue.title.includes('[CI Failure]')
+            );
+            
+            if (existingIssue) {
+              core.setOutput('issue_exists', 'true');
+              core.setOutput('issue_number', existingIssue.number);
+            } else {
+              core.setOutput('issue_exists', 'false');
+            }
+
+      - name: Create new issue
+        if: steps.check-issue.outputs.issue_exists == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const workflowName = '${{ inputs.workflow_name }}';
+            const errorMessage = `${{ inputs.error_message }}`;
+            const severity = '${{ inputs.severity }}';
+            const logsUrl = '${{ inputs.logs_url }}';
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            
+            // Create severity label if it doesn't exist
+            const severityLabel = `severity-${severity}`;
+            try {
+              await github.rest.issues.getLabel({
+                owner,
+                repo,
+                name: severityLabel
+              });
+            } catch (error) {
+              if (error.status === 404) {
+                const colors = {
+                  critical: 'b60205',
+                  high: 'd93f0b',
+                  medium: 'fbca04',
+                  low: '0e8a16'
+                };
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name: severityLabel,
+                  color: colors[severity] || 'cccccc',
+                  description: `${severity} severity issues`
+                });
+              }
+            }
+            
+            // Create issue body
+            const issueBody = `## CI Failure Report
+            
+            ### Summary
+            The workflow **${workflowName}** has failed with ${severity} severity.
+            
+            ### Error Details
+            \`\`\`
+            ${errorMessage}
+            \`\`\`
+            
+            ### Context
+            - **Workflow Run**: [View Run](${runUrl})
+            ${logsUrl ? `- **Logs**: [View Logs](${logsUrl})` : ''}
+            - **Commit**: ${context.sha}
+            - **Branch**: ${context.ref.replace('refs/heads/', '')}
+            - **Triggered by**: ${context.actor}
+            - **Time**: ${new Date().toISOString()}
+            
+            ### Action Items
+            - [ ] Investigate the root cause
+            - [ ] Fix the issue
+            - [ ] Verify the fix works
+            - [ ] Close this issue
+            
+            ### Additional Information
+            <details>
+            <summary>Environment Details</summary>
+            
+            - **Runner OS**: ${context.runnerOS}
+            - **Event**: ${context.eventName}
+            - **Workflow**: ${context.workflow}
+            - **Job**: ${context.job}
+            
+            </details>
+            
+            ---
+            *This issue was automatically created by the CI failure notification system.*`;
+            
+            const issue = await github.rest.issues.create({
+              owner,
+              repo,
+              title: `[CI Failure] ${workflowName} - ${new Date().toLocaleDateString()}`,
+              body: issueBody,
+              labels: ['ci-failure', severityLabel, 'automated'],
+              assignees: []
+            });
+            
+            console.log(`Created issue #${issue.data.number}`);
+            core.setOutput('issue_number', issue.data.number);
+            core.setOutput('issue_url', issue.data.html_url);
+
+      - name: Update existing issue
+        if: steps.check-issue.outputs.issue_exists == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = parseInt('${{ steps.check-issue.outputs.issue_number }}');
+            const workflowName = '${{ inputs.workflow_name }}';
+            const errorMessage = `${{ inputs.error_message }}`;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const logsUrl = '${{ inputs.logs_url }}';
+            
+            // Add comment to existing issue
+            const commentBody = `## Additional Failure Occurrence
+            
+            The workflow **${workflowName}** has failed again.
+            
+            ### Error Details
+            \`\`\`
+            ${errorMessage}
+            \`\`\`
+            
+            ### Context
+            - **Workflow Run**: [View Run](${runUrl})
+            ${logsUrl ? `- **Logs**: [View Logs](${logsUrl})` : ''}
+            - **Commit**: ${context.sha}
+            - **Time**: ${new Date().toISOString()}
+            
+            ---
+            *This is an automated update to track recurring failures.*`;
+            
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              body: commentBody
+            });
+            
+            // Update issue labels if needed
+            const issue = await github.rest.issues.get({
+              owner,
+              repo,
+              issue_number: issueNumber
+            });
+            
+            // Increase severity if multiple failures
+            const comments = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: issueNumber
+            });
+            
+            const failureCount = comments.data.filter(c => 
+              c.body.includes('Additional Failure Occurrence')
+            ).length + 1;
+            
+            if (failureCount >= 3 && !issue.data.labels.find(l => l.name === 'severity-critical')) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                labels: ['severity-critical', 'recurring-failure']
+              });
+            }
+            
+            console.log(`Updated issue #${issueNumber}`);
+            core.setOutput('issue_number', issueNumber);
+            core.setOutput('issue_url', issue.data.html_url);

@@ -1,0 +1,214 @@
+# Notification Templates Configuration
+# This file defines notification templates for different scenarios
+
+version: '1.0'
+
+# Notification channel configurations
+channels:
+  slack:
+    enabled: true
+    webhook_url_secret: SLACK_WEBHOOK_URL
+    templates:
+      success:
+        color: good
+        emoji: ✅
+        title: "Build Successful"
+      failure:
+        color: danger
+        emoji: ❌
+        title: "Build Failed"
+      warning:
+        color: warning
+        emoji: ⚠️
+        title: "Build Warning"
+
+  discord:
+    enabled: true
+    webhook_url_secret: DISCORD_WEBHOOK_URL
+    templates:
+      success:
+        color: 5763719  # Green
+        emoji: ✅
+      failure:
+        color: 15548997  # Red
+        emoji: ❌
+      warning:
+        color: 16705372  # Yellow
+        emoji: ⚠️
+
+  teams:
+    enabled: true
+    webhook_url_secret: TEAMS_WEBHOOK_URL
+    theme_colors:
+      success: "2EA44F"
+      failure: "CB2431"
+      warning: "DBAB09"
+
+  email:
+    enabled: true
+    api_key_secret: SENDGRID_API_KEY
+    from_address_secret: NOTIFICATION_EMAIL_FROM
+    to_address_secret: NOTIFICATION_EMAIL_TO
+    templates:
+      subject_prefix: "[Gunj Operator]"
+
+# Notification rules
+rules:
+  # Send notifications for all main branch events
+  - name: main-branch-all
+    branches: [main]
+    events: [success, failure, cancelled]
+    channels: [slack, discord, teams, email]
+
+  # Only send failure notifications for develop branch
+  - name: develop-failures-only
+    branches: [develop]
+    events: [failure]
+    channels: [slack, discord]
+
+  # Create issues for repeated failures
+  - name: repeated-failures
+    condition: failure_count >= 3
+    action: create_issue
+    severity: critical
+
+  # High priority notifications for production
+  - name: production-critical
+    tags: [production, release]
+    events: [failure]
+    channels: [slack, discord, teams, email, pagerduty]
+    priority: high
+
+# Message templates
+templates:
+  default:
+    title: "{{emoji}} {{workflow_name}}: {{status}}"
+    fields:
+      - name: Repository
+        value: "{{repository}}"
+        short: true
+      - name: Branch
+        value: "{{branch}}"
+        short: true
+      - name: Commit
+        value: "{{commit_sha}}"
+        short: true
+      - name: Author
+        value: "{{author}}"
+        short: true
+      - name: Message
+        value: "{{commit_message}}"
+        short: false
+    footer: "GitHub Actions"
+    timestamp: true
+
+  detailed:
+    title: "{{emoji}} {{workflow_name}}: {{status}}"
+    description: |
+      The {{workflow_name}} workflow has {{status}} for commit {{commit_sha}}.
+    fields:
+      - name: Repository
+        value: "{{repository}}"
+      - name: Branch/PR
+        value: "{{context}}"
+      - name: Triggered by
+        value: "{{actor}}"
+      - name: Duration
+        value: "{{duration}}"
+      - name: Commit Message
+        value: "{{commit_message}}"
+      - name: Changed Files
+        value: "{{changed_files_count}} files"
+    actions:
+      - name: View Run
+        url: "{{run_url}}"
+      - name: View Commit
+        url: "{{commit_url}}"
+
+  minimal:
+    title: "{{workflow_name}}: {{status}}"
+    description: "{{repository}}@{{branch}} - {{commit_message}}"
+
+# Escalation policies
+escalation:
+  policies:
+    - name: standard
+      levels:
+        - delay: 0
+          channels: [slack, discord]
+        - delay: 15m
+          channels: [email]
+        - delay: 30m
+          channels: [pagerduty]
+
+    - name: critical
+      levels:
+        - delay: 0
+          channels: [slack, discord, email, pagerduty]
+        - delay: 5m
+          channels: [phone]
+
+# Channel-specific settings
+channel_settings:
+  slack:
+    rate_limit: 1/second
+    retry_attempts: 3
+    retry_delay: 5s
+    max_message_length: 3000
+
+  discord:
+    rate_limit: 5/second
+    retry_attempts: 3
+    retry_delay: 3s
+    max_embeds: 10
+
+  teams:
+    rate_limit: 2/second
+    retry_attempts: 3
+    retry_delay: 5s
+
+  email:
+    rate_limit: 10/second
+    retry_attempts: 5
+    retry_delay: 10s
+    batch_size: 50
+
+# Quiet hours (optional)
+quiet_hours:
+  enabled: false
+  timezone: UTC
+  start: "22:00"
+  end: "07:00"
+  override_for: [critical, security]
+  fallback_channel: email
+
+# Notification aggregation
+aggregation:
+  enabled: true
+  window: 5m
+  max_notifications: 10
+  summary_template: |
+    Multiple {{status}} events occurred in the last {{window}}:
+    {{#each events}}
+    - {{this.workflow_name}} ({{this.branch}})
+    {{/each}}
+
+# Security settings
+security:
+  allowed_webhooks:
+    - github.com
+    - api.github.com
+  encrypted_secrets: true
+  audit_log: true
+  secret_rotation_days: 90
+
+# Metrics and monitoring
+monitoring:
+  enabled: true
+  metrics:
+    - notification_sent_total
+    - notification_failed_total
+    - notification_duration_seconds
+    - notification_queue_size
+  health_check_endpoint: /health/notifications
+  dashboard_url: https://grafana.gunj-operator.io/d/notifications

@@ -1,0 +1,389 @@
+# Notification Configuration
+# Defines notification rules, templates, and routing for the Gunj Operator
+# Version: 2.0
+
+# Notification channels configuration
+channels:
+  slack:
+    enabled: true
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    default_channel: "#gunj-operator"
+    channels:
+      builds: "#gunj-operator-builds"
+      alerts: "#gunj-operator-alerts"
+      releases: "#gunj-operator-releases"
+    mentions:
+      critical: "@channel"
+      high: "@oncall"
+    rate_limit:
+      window: 300  # 5 minutes
+      max_messages: 10
+    
+  discord:
+    enabled: true
+    webhook_url: "${DISCORD_WEBHOOK_URL}"
+    server_id: "123456789"
+    channels:
+      general: "gunj-operator"
+      builds: "builds"
+      alerts: "alerts"
+    roles:
+      critical: "@everyone"
+      high: "@developers"
+    
+  teams:
+    enabled: false
+    webhook_url: "${TEAMS_WEBHOOK_URL}"
+    team: "Engineering"
+    channel: "Gunj Operator"
+    
+  email:
+    enabled: true
+    smtp:
+      server: smtp.gmail.com
+      port: 587
+      username: "${EMAIL_USERNAME}"
+      password: "${EMAIL_PASSWORD}"
+    recipients:
+      default:
+        - gunjanjp@gmail.com
+      critical:
+        - gunjanjp@gmail.com
+        - oncall@example.com
+      releases:
+        - gunjanjp@gmail.com
+        - team@example.com
+    from: "Gunj Operator CI/CD <noreply@gunj-operator.io>"
+    
+  pagerduty:
+    enabled: true
+    api_token: "${PAGERDUTY_TOKEN}"
+    service_id: "${PAGERDUTY_SERVICE_ID}"
+    escalation_policy: "${PAGERDUTY_ESCALATION_POLICY}"
+    trigger_conditions:
+      - priority: critical
+      - type: production_failure
+      - consecutive_failures: 3
+    
+  github:
+    enabled: true
+    update_commit_status: true
+    create_issues_for_failures: false
+    comment_on_pr: true
+    
+  webhook:
+    enabled: false
+    url: "${CUSTOM_WEBHOOK_URL}"
+    secret: "${CUSTOM_WEBHOOK_SECRET}"
+    headers:
+      X-Custom-Header: "gunj-operator"
+    retry:
+      attempts: 3
+      backoff: exponential
+
+# Notification rules and routing
+rules:
+  # Build notifications
+  - name: build-success
+    conditions:
+      - type: build
+      - status: success
+    channels:
+      - slack:builds
+      - github
+    priority: low
+    template: build_success
+    
+  - name: build-failure
+    conditions:
+      - type: build
+      - status: failure
+    channels:
+      - slack:builds
+      - github
+      - email:default
+    priority: high
+    template: build_failure
+    
+  - name: build-failure-main
+    conditions:
+      - type: build
+      - status: failure
+      - branch: main
+    channels:
+      - slack:alerts
+      - pagerduty
+      - email:critical
+    priority: critical
+    template: build_failure_critical
+    
+  # Deployment notifications
+  - name: deploy-success
+    conditions:
+      - type: deploy
+      - status: success
+    channels:
+      - slack:builds
+      - discord:general
+    priority: normal
+    template: deploy_success
+    
+  - name: deploy-failure-prod
+    conditions:
+      - type: deploy
+      - status: failure
+      - environment: production
+    channels:
+      - slack:alerts
+      - pagerduty
+      - email:critical
+      - teams
+    priority: critical
+    template: deploy_failure_critical
+    
+  # Release notifications
+  - name: release-published
+    conditions:
+      - type: release
+      - status: published
+    channels:
+      - slack:releases
+      - discord:general
+      - email:releases
+      - twitter
+    priority: normal
+    template: release_published
+    
+  # Alert notifications
+  - name: security-alert
+    conditions:
+      - type: security
+      - severity: [critical, high]
+    channels:
+      - slack:alerts
+      - pagerduty
+      - email:critical
+    priority: critical
+    template: security_alert
+    
+  # Test notifications
+  - name: test-failure
+    conditions:
+      - type: test
+      - status: failure
+      - test_type: [e2e, integration]
+    channels:
+      - slack:builds
+      - github
+    priority: high
+    template: test_failure
+
+# Message templates
+templates:
+  build_success:
+    title: "✅ Build Successful"
+    message: |
+      Build completed successfully for ${GITHUB_REPOSITORY}
+      
+      Branch: ${GITHUB_REF_NAME}
+      Commit: ${GITHUB_SHA:0:7}
+      Duration: ${BUILD_DURATION}
+    fields:
+      - name: "Artifacts"
+        value: "[View Artifacts](${ARTIFACTS_URL})"
+        
+  build_failure:
+    title: "❌ Build Failed"
+    message: |
+      Build failed for ${GITHUB_REPOSITORY}
+      
+      Branch: ${GITHUB_REF_NAME}
+      Commit: ${GITHUB_SHA:0:7}
+      Error: ${ERROR_MESSAGE}
+      
+      [View Logs](${LOGS_URL})
+    color: danger
+    
+  build_failure_critical:
+    title: "🚨 CRITICAL: Main Branch Build Failed"
+    message: |
+      @channel Main branch build is broken!
+      
+      Repository: ${GITHUB_REPOSITORY}
+      Commit: ${GITHUB_SHA}
+      Author: ${GITHUB_ACTOR}
+      
+      **Immediate action required!**
+      
+      [View Failed Build](${BUILD_URL})
+    color: danger
+    priority: critical
+    
+  deploy_success:
+    title: "🚀 Deployment Successful"
+    message: |
+      Successfully deployed to ${ENVIRONMENT}
+      
+      Version: ${VERSION}
+      Components: ${COMPONENTS}
+      Duration: ${DEPLOY_DURATION}
+    color: good
+    
+  deploy_failure_critical:
+    title: "💥 PRODUCTION DEPLOYMENT FAILED"
+    message: |
+      Production deployment failed and requires immediate attention!
+      
+      Environment: ${ENVIRONMENT}
+      Version: ${VERSION}
+      Error: ${ERROR_MESSAGE}
+      
+      Rollback initiated: ${ROLLBACK_STATUS}
+      
+      [View Deployment](${DEPLOY_URL})
+      [View Logs](${LOGS_URL})
+    color: danger
+    priority: critical
+    
+  release_published:
+    title: "🎉 New Release Published"
+    message: |
+      Gunj Operator ${VERSION} has been released!
+      
+      **What's New:**
+      ${RELEASE_NOTES}
+      
+      **Downloads:**
+      - [Docker Images](https://hub.docker.com/r/gunjanjp/gunj-operator)
+      - [Binary Releases](${RELEASE_URL})
+      - [Helm Chart](https://gunjanjp.github.io/gunj-operator/charts)
+      
+      **Installation:**
+      ```bash
+      helm upgrade --install gunj-operator gunj-operator/gunj-operator --version ${VERSION}
+      ```
+    color: good
+    
+  security_alert:
+    title: "🔒 Security Alert"
+    message: |
+      Security vulnerability detected in ${COMPONENT}
+      
+      Severity: ${SEVERITY}
+      CVE: ${CVE_ID}
+      Package: ${PACKAGE}
+      Version: ${PACKAGE_VERSION}
+      
+      **Recommended Action:** ${REMEDIATION}
+      
+      [View Details](${SECURITY_URL})
+    color: danger
+    priority: critical
+    
+  test_failure:
+    title: "🧪 Test Failure"
+    message: |
+      ${TEST_TYPE} tests failed
+      
+      Failed: ${FAILED_COUNT}/${TOTAL_COUNT}
+      Suite: ${TEST_SUITE}
+      Duration: ${TEST_DURATION}
+      
+      **Failed Tests:**
+      ${FAILED_TESTS}
+      
+      [View Test Report](${TEST_REPORT_URL})
+    color: warning
+
+# Notification preferences by user/team
+preferences:
+  teams:
+    platform:
+      channels: [slack, email]
+      types: [build, deploy, release]
+      min_priority: normal
+      
+    security:
+      channels: [slack, pagerduty, email]
+      types: [security, alert]
+      min_priority: high
+      
+    oncall:
+      channels: [pagerduty, slack, phone]
+      types: all
+      min_priority: critical
+      
+  users:
+    gunjanjp:
+      email: gunjanjp@gmail.com
+      slack: "@gunjan"
+      preferences:
+        email_digest: daily
+        slack_mentions: critical_only
+        quiet_hours:
+          enabled: true
+          start: "22:00"
+          end: "08:00"
+          timezone: "America/New_York"
+
+# Rate limiting and throttling
+rate_limiting:
+  global:
+    window: 3600  # 1 hour
+    max_notifications: 100
+    
+  per_channel:
+    slack:
+      window: 300
+      max_notifications: 20
+    email:
+      window: 3600
+      max_notifications: 10
+    pagerduty:
+      window: 900
+      max_notifications: 5
+      
+  throttling:
+    duplicate_detection:
+      enabled: true
+      window: 300
+      fields: [title, type, component]
+    
+    aggregation:
+      enabled: true
+      window: 900
+      max_aggregated: 10
+      
+# Escalation policies
+escalation:
+  policies:
+    default:
+      levels:
+        - wait: 0
+          channels: [slack, email]
+        - wait: 300  # 5 minutes
+          channels: [pagerduty]
+        - wait: 900  # 15 minutes
+          channels: [phone]
+          
+    critical:
+      levels:
+        - wait: 0
+          channels: [slack, pagerduty, email]
+        - wait: 300
+          channels: [phone]
+          
+# Notification history and audit
+history:
+  retention_days: 90
+  storage: s3
+  bucket: gunj-operator-notifications
+  encryption: true
+  
+audit:
+  enabled: true
+  log_level: info
+  include_payload: false
+  destinations:
+    - cloudwatch
+    - s3

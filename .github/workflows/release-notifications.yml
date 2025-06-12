@@ -1,0 +1,241 @@
+# Release Notification Workflow
+# Handles notifications for new releases and deployments
+# Version: 2.0
+
+name: Release Notifications
+
+on:
+  release:
+    types: [published, created, edited]
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      release_notes:
+        required: false
+        type: string
+      pre_release:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  prepare-release-notification:
+    name: Prepare Release Announcement
+    runs-on: ubuntu-latest
+    outputs:
+      title: ${{ steps.prepare.outputs.title }}
+      message: ${{ steps.prepare.outputs.message }}
+      channels: ${{ steps.prepare.outputs.channels }}
+      priority: ${{ steps.prepare.outputs.priority }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get release information
+        id: release-info
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            RELEASE_NOTES="${{ github.event.release.body }}"
+            PRERELEASE="${{ github.event.release.prerelease }}"
+            RELEASE_URL="${{ github.event.release.html_url }}"
+          else
+            VERSION="${{ inputs.version }}"
+            RELEASE_NOTES="${{ inputs.release_notes }}"
+            PRERELEASE="${{ inputs.pre_release }}"
+            RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$VERSION"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "release_url=$RELEASE_URL" >> $GITHUB_OUTPUT
+          echo "is_prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [[ -n "$PREVIOUS_TAG" ]]; then
+            # Generate commit list
+            COMMITS=$(git log --pretty=format:"- %s (%an)" $PREVIOUS_TAG..HEAD)
+            
+            # Count changes by type
+            FEATURES=$(echo "$COMMITS" | grep -c "^- feat" || true)
+            FIXES=$(echo "$COMMITS" | grep -c "^- fix" || true)
+            BREAKING=$(echo "$COMMITS" | grep -c "BREAKING CHANGE" || true)
+            
+            echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+            echo "feature_count=$FEATURES" >> $GITHUB_OUTPUT
+            echo "fix_count=$FIXES" >> $GITHUB_OUTPUT
+            echo "breaking_changes=$BREAKING" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Prepare notification content
+        id: prepare
+        run: |
+          VERSION="${{ steps.release-info.outputs.version }}"
+          IS_PRERELEASE="${{ steps.release-info.outputs.is_prerelease }}"
+          
+          # Set title
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            TITLE="🚧 Pre-release: Gunj Operator $VERSION"
+            PRIORITY="normal"
+            CHANNELS="slack,discord"
+          else
+            TITLE="🎉 Gunj Operator $VERSION Released!"
+            PRIORITY="normal"
+            CHANNELS="slack,discord,email,twitter"
+          fi
+          
+          # Build message
+          MESSAGE="We're excited to announce the release of Gunj Operator $VERSION!"
+          
+          # Add stats if available
+          if [[ -n "${{ steps.changelog.outputs.previous_tag }}" ]]; then
+            MESSAGE="$MESSAGE\n\n**What's New:**"
+            MESSAGE="$MESSAGE\n- 🚀 ${{ steps.changelog.outputs.feature_count }} new features"
+            MESSAGE="$MESSAGE\n- 🐛 ${{ steps.changelog.outputs.fix_count }} bug fixes"
+            
+            if [[ "${{ steps.changelog.outputs.breaking_changes }}" -gt 0 ]]; then
+              MESSAGE="$MESSAGE\n- ⚠️  ${{ steps.changelog.outputs.breaking_changes }} breaking changes"
+            fi
+          fi
+          
+          # Add installation instructions
+          MESSAGE="$MESSAGE\n\n**Installation:**"
+          MESSAGE="$MESSAGE\n\`\`\`bash"
+          MESSAGE="$MESSAGE\n# Helm"
+          MESSAGE="$MESSAGE\nhelm upgrade --install gunj-operator gunj-operator/gunj-operator --version $VERSION"
+          MESSAGE="$MESSAGE\n\n# Docker"
+          MESSAGE="$MESSAGE\ndocker pull gunjanjp/gunj-operator:$VERSION"
+          MESSAGE="$MESSAGE\n\`\`\`"
+          
+          # Add links
+          MESSAGE="$MESSAGE\n\n**Resources:**"
+          MESSAGE="$MESSAGE\n- 📄 [Release Notes](${{ steps.release-info.outputs.release_url }})"
+          MESSAGE="$MESSAGE\n- 📚 [Documentation](https://gunjanjp.github.io/gunj-operator/)"
+          MESSAGE="$MESSAGE\n- 💾 [Downloads](https://github.com/${{ github.repository }}/releases/tag/$VERSION)"
+          MESSAGE="$MESSAGE\n- 🐳 [Container Images](https://hub.docker.com/r/gunjanjp/gunj-operator)"
+          
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
+          echo "channels=$CHANNELS" >> $GITHUB_OUTPUT
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$MESSAGE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+  send-release-notification:
+    name: Send Release Announcement
+    needs: prepare-release-notification
+    uses: ./.github/workflows/notification-manager.yml
+    with:
+      notification_type: release
+      status: success
+      title: ${{ needs.prepare-release-notification.outputs.title }}
+      message: ${{ needs.prepare-release-notification.outputs.message }}
+      priority: ${{ needs.prepare-release-notification.outputs.priority }}
+      channels: ${{ needs.prepare-release-notification.outputs.channels }}
+      metadata: |
+        {
+          "version": "${{ steps.release-info.outputs.version }}",
+          "release_url": "${{ steps.release-info.outputs.release_url }}",
+          "is_prerelease": "${{ steps.release-info.outputs.is_prerelease }}"
+        }
+    secrets: inherit
+
+  update-community:
+    name: Update Community Channels
+    needs: [prepare-release-notification, send-release-notification]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update GitHub Discussions
+        if: steps.release-info.outputs.is_prerelease != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const discussion = await github.rest.discussions.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🎉 Released: Gunj Operator ${{ steps.release-info.outputs.version }}`,
+              body: `${{ needs.prepare-release-notification.outputs.message }}`,
+              category_id: 'announcements'
+            });
+            
+            console.log(`Created discussion: ${discussion.data.html_url}`);
+
+      - name: Tweet release (if not pre-release)
+        if: steps.release-info.outputs.is_prerelease != 'true' && env.TWITTER_API_KEY != ''
+        env:
+          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
+          TWITTER_API_SECRET: ${{ secrets.TWITTER_API_SECRET }}
+        run: |
+          # In real implementation, would use Twitter API
+          echo "Would tweet about release ${{ steps.release-info.outputs.version }}"
+
+      - name: Update website
+        if: steps.release-info.outputs.is_prerelease != 'true'
+        run: |
+          # Update version on website
+          echo "Would update website with version ${{ steps.release-info.outputs.version }}"
+
+  notify-deployment-targets:
+    name: Notify Deployment Targets
+    needs: prepare-release-notification
+    runs-on: ubuntu-latest
+    if: github.event.release.prerelease != true
+    steps:
+      - name: Notify staging environments
+        run: |
+          # Send notification to staging environment managers
+          echo "Notifying staging environments about new release"
+
+      - name: Schedule production notifications
+        run: |
+          # Schedule notifications for production deployments
+          echo "Scheduling production deployment notifications"
+
+  create-upgrade-guide:
+    name: Create Upgrade Guide
+    needs: prepare-release-notification
+    runs-on: ubuntu-latest
+    if: contains(needs.prepare-release-notification.outputs.message, 'breaking changes')
+    steps:
+      - name: Generate upgrade guide
+        run: |
+          # Create upgrade guide for breaking changes
+          cat > UPGRADE-${{ steps.release-info.outputs.version }}.md << EOF
+          # Upgrade Guide for ${{ steps.release-info.outputs.version }}
+          
+          This release contains breaking changes. Please follow this guide to upgrade.
+          
+          ## Breaking Changes
+          
+          <!-- List breaking changes here -->
+          
+          ## Upgrade Steps
+          
+          1. Backup your current configuration
+          2. Review the breaking changes
+          3. Update your configuration files
+          4. Apply the upgrade
+          
+          ## Rollback Plan
+          
+          If you need to rollback:
+          \`\`\`bash
+          helm rollback gunj-operator
+          \`\`\`
+          EOF
+
+      - name: Create PR for upgrade guide
+        uses: peter-evans/create-pull-request@v5
+        with:
+          title: "docs: Add upgrade guide for ${{ steps.release-info.outputs.version }}"
+          body: "This PR adds an upgrade guide for version ${{ steps.release-info.outputs.version }} which contains breaking changes."
+          branch: "docs/upgrade-guide-${{ steps.release-info.outputs.version }}"
+          commit-message: "docs: add upgrade guide for ${{ steps.release-info.outputs.version }}"

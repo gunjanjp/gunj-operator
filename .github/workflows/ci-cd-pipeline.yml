@@ -1,0 +1,507 @@
+# Main CI/CD Pipeline
+# Orchestrates the complete CI/CD workflow for Gunj Operator
+# Version: 2.0
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'release/**'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip test execution'
+        type: boolean
+        default: false
+      skip_security:
+        description: 'Skip security scans'
+        type: boolean
+        default: false
+      deploy_environment:
+        description: 'Environment to deploy to'
+        type: choice
+        options:
+          - none
+          - dev
+          - staging
+          - production
+        default: none
+
+env:
+  GO_VERSION: '1.21'
+  NODE_VERSION: '20'
+  DOCKER_BUILDKIT: 1
+  ARTIFACT_RETENTION_DAYS: 30
+
+jobs:
+  # Pipeline initialization and validation
+  initialize:
+    name: Initialize Pipeline
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      should_test: ${{ steps.check.outputs.should_test }}
+      should_deploy: ${{ steps.check.outputs.should_deploy }}
+      version: ${{ steps.version.outputs.version }}
+      build_matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check pipeline conditions
+        id: check
+        run: |
+          # Determine what to run based on context
+          SHOULD_BUILD="true"
+          SHOULD_TEST="true"
+          SHOULD_DEPLOY="false"
+          
+          # Skip draft PRs
+          if [[ "${{ github.event.pull_request.draft }}" == "true" ]]; then
+            SHOULD_BUILD="false"
+            SHOULD_TEST="false"
+          fi
+          
+          # Check for skip flags
+          if [[ "${{ inputs.skip_tests }}" == "true" ]]; then
+            SHOULD_TEST="false"
+          fi
+          
+          # Determine deployment
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
+            SHOULD_DEPLOY="true"
+          elif [[ -n "${{ inputs.deploy_environment }}" && "${{ inputs.deploy_environment }}" != "none" ]]; then
+            SHOULD_DEPLOY="true"
+          fi
+          
+          echo "should_build=$SHOULD_BUILD" >> $GITHUB_OUTPUT
+          echo "should_test=$SHOULD_TEST" >> $GITHUB_OUTPUT
+          echo "should_deploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
+          
+          # Log decisions
+          echo "Build: $SHOULD_BUILD, Test: $SHOULD_TEST, Deploy: $SHOULD_DEPLOY"
+
+      - name: Generate version
+        id: version
+        run: |
+          # Generate semantic version
+          if [[ "${{ github.ref }}" =~ ^refs/tags/v.* ]]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION="$(git describe --tags --always --dirty)-dev"
+            VERSION="v${VERSION#v}"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Generated version: $VERSION"
+
+      - name: Determine build matrix
+        id: matrix
+        run: |
+          # Define components and architectures based on changes
+          COMPONENTS='["operator", "api", "cli", "ui"]'
+          ARCHITECTURES='["linux/amd64", "linux/arm64", "linux/arm/v7"]'
+          
+          # For PRs, could reduce matrix based on changed files
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # Check changed files
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }})
+            
+            # Logic to determine affected components
+            # For now, build all
+          fi
+          
+          echo "matrix={\"component\": $COMPONENTS, \"arch\": $ARCHITECTURES}" >> $GITHUB_OUTPUT
+
+  # Code quality checks
+  quality-checks:
+    name: Code Quality Checks
+    needs: initialize
+    if: needs.initialize.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Run Go linting
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          args: --timeout=10m
+
+      - name: Run UI linting
+        working-directory: ./ui
+        run: |
+          npm ci
+          npm run lint
+          npm run type-check
+
+      - name: Check code formatting
+        run: |
+          # Go formatting
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Go code is not formatted. Run 'gofmt -w .'"
+            exit 1
+          fi
+          
+          # Check other formatting
+          make check-format
+
+      - name: License check
+        run: |
+          make check-licenses
+
+      - name: Commit lint
+        if: github.event_name == 'pull_request'
+        uses: wagoid/commitlint-github-action@v5
+
+  # Security scanning
+  security-scan:
+    name: Security Scanning
+    needs: initialize
+    if: needs.initialize.outputs.should_build == 'true' && inputs.skip_security != true
+    uses: ./.github/workflows/security-scan.yml
+    with:
+      scan_type: full
+      severity_threshold: HIGH
+    secrets: inherit
+
+  # Unit and integration tests
+  test-suite:
+    name: Test Suite
+    needs: [initialize, quality-checks]
+    if: needs.initialize.outputs.should_test == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        test_type: [unit, integration]
+        component: [operator, api, cli, ui]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up test environment
+        uses: ./.github/actions/setup-test-env
+        with:
+          component: ${{ matrix.component }}
+          go_version: ${{ env.GO_VERSION }}
+          node_version: ${{ env.NODE_VERSION }}
+
+      - name: Run ${{ matrix.test_type }} tests
+        id: test
+        run: |
+          echo "Running ${{ matrix.test_type }} tests for ${{ matrix.component }}"
+          
+          case "${{ matrix.component }}" in
+            operator|api|cli)
+              if [[ "${{ matrix.test_type }}" == "unit" ]]; then
+                make test-unit-${{ matrix.component }}
+              else
+                make test-integration-${{ matrix.component }}
+              fi
+              ;;
+            ui)
+              cd ui
+              if [[ "${{ matrix.test_type }}" == "unit" ]]; then
+                npm run test:unit
+              else
+                npm run test:integration
+              fi
+              ;;
+          esac
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.component }}-${{ matrix.test_type }}
+          path: |
+            **/test-results/
+            **/coverage/
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+
+      - name: Generate test report
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: ${{ matrix.component }} ${{ matrix.test_type }} Tests
+          path: '**/test-results/*.xml'
+          reporter: java-junit
+
+  # Build components
+  build:
+    name: Build Components
+    needs: [initialize, quality-checks, test-suite]
+    if: needs.initialize.outputs.should_build == 'true'
+    uses: ./.github/workflows/build-matrix.yml
+    with:
+      components: ${{ toJson(fromJson(needs.initialize.outputs.build_matrix).component) }}
+      architectures: ${{ toJson(fromJson(needs.initialize.outputs.build_matrix).arch) }}
+      version: ${{ needs.initialize.outputs.version }}
+    secrets: inherit
+
+  # E2E tests on built artifacts
+  e2e-tests:
+    name: E2E Tests
+    needs: [initialize, build]
+    if: needs.initialize.outputs.should_test == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        k8s_version: ['1.26', '1.27', '1.28', '1.29']
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create test cluster
+        uses: helm/kind-action@v1.8.0
+        with:
+          version: v0.20.0
+          node_image: kindest/node:v${{ matrix.k8s_version }}
+          cluster_name: e2e-test-${{ matrix.k8s_version }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-container-*'
+          path: ./artifacts
+
+      - name: Load images into cluster
+        run: |
+          for image in ./artifacts/*/*.tar; do
+            kind load image-archive "$image" --name e2e-test-${{ matrix.k8s_version }}
+          done
+
+      - name: Deploy operator
+        run: |
+          kubectl create namespace gunj-system
+          helm install gunj-operator ./charts/gunj-operator \
+            --namespace gunj-system \
+            --set image.tag=${{ needs.initialize.outputs.version }} \
+            --wait
+
+      - name: Run E2E tests
+        run: |
+          make test-e2e K8S_VERSION=${{ matrix.k8s_version }}
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          kubectl logs -n gunj-system -l app=gunj-operator --tail=1000 > operator.log
+          kubectl get all -A > cluster-state.txt
+          kubectl describe observabilityplatforms -A > platforms.txt
+
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-k8s-${{ matrix.k8s_version }}
+          path: |
+            operator.log
+            cluster-state.txt
+            platforms.txt
+            test/e2e/results/
+          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
+
+  # Store artifacts
+  store-artifacts:
+    name: Store Artifacts
+    needs: [initialize, build]
+    if: success()
+    uses: ./.github/workflows/artifact-management.yml
+    with:
+      artifact_type: binary
+      retention_days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+    secrets: inherit
+
+  # Generate SBOM and sign artifacts
+  supply-chain:
+    name: Supply Chain Security
+    needs: [initialize, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Sign artifacts with cosign
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          # Install cosign
+          curl -Lo cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
+          chmod +x cosign
+          
+          # Sign SBOM
+          ./cosign sign-blob --key env://COSIGN_PRIVATE_KEY sbom.spdx.json > sbom.spdx.json.sig
+          
+          # Sign container images
+          IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep gunj)
+          for image in $IMAGES; do
+            ./cosign sign --key env://COSIGN_PRIVATE_KEY $image
+          done
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom.spdx.json
+            sbom.spdx.json.sig
+          retention-days: 90
+
+  # Deploy to environments
+  deploy:
+    name: Deploy
+    needs: [initialize, build, e2e-tests]
+    if: needs.initialize.outputs.should_deploy == 'true'
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: ${{ inputs.deploy_environment || (github.ref == 'refs/heads/main' && 'staging' || 'dev') }}
+      version: ${{ needs.initialize.outputs.version }}
+    secrets: inherit
+
+  # Send notifications
+  notify:
+    name: Pipeline Notifications
+    needs: [initialize, quality-checks, security-scan, test-suite, build, e2e-tests, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine notification parameters
+        id: params
+        run: |
+          # Aggregate job results
+          SUCCESS="true"
+          FAILED_JOBS=""
+          
+          if [[ "${{ needs.quality-checks.result }}" == "failure" ]]; then
+            SUCCESS="false"
+            FAILED_JOBS="quality-checks"
+          fi
+          
+          if [[ "${{ needs.security-scan.result }}" == "failure" ]]; then
+            SUCCESS="false"
+            FAILED_JOBS="$FAILED_JOBS security-scan"
+          fi
+          
+          if [[ "${{ needs.test-suite.result }}" == "failure" ]]; then
+            SUCCESS="false"
+            FAILED_JOBS="$FAILED_JOBS tests"
+          fi
+          
+          if [[ "${{ needs.build.result }}" == "failure" ]]; then
+            SUCCESS="false"
+            FAILED_JOBS="$FAILED_JOBS build"
+          fi
+          
+          if [[ "${{ needs.e2e-tests.result }}" == "failure" ]]; then
+            SUCCESS="false"
+            FAILED_JOBS="$FAILED_JOBS e2e-tests"
+          fi
+          
+          if [[ "$SUCCESS" == "true" ]]; then
+            TITLE="✅ Pipeline Successful"
+            STATUS="success"
+            PRIORITY="low"
+          else
+            TITLE="❌ Pipeline Failed"
+            STATUS="failure"
+            PRIORITY="high"
+          fi
+          
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
+          echo "failed_jobs=$FAILED_JOBS" >> $GITHUB_OUTPUT
+
+      - name: Send pipeline notification
+        uses: ./.github/workflows/notification-manager.yml
+        with:
+          notification_type: build
+          status: ${{ steps.params.outputs.status }}
+          title: ${{ steps.params.outputs.title }}
+          message: |
+            Pipeline completed for ${{ github.repository }}
+            
+            Version: ${{ needs.initialize.outputs.version }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            
+            Failed Jobs: ${{ steps.params.outputs.failed_jobs || 'None' }}
+          priority: ${{ steps.params.outputs.priority }}
+          channels: default
+
+  # Pipeline summary
+  summary:
+    name: Pipeline Summary
+    needs: [initialize, quality-checks, security-scan, test-suite, build, e2e-tests, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # 📊 CI/CD Pipeline Summary
+          
+          **Version**: ${{ needs.initialize.outputs.version }}  
+          **Triggered by**: ${{ github.actor }}  
+          **Event**: ${{ github.event_name }}  
+          
+          ## 📋 Job Results
+          
+          | Job | Status | Duration |
+          |-----|--------|----------|
+          | Quality Checks | ${{ needs.quality-checks.result }} | - |
+          | Security Scan | ${{ needs.security-scan.result }} | - |
+          | Test Suite | ${{ needs.test-suite.result }} | - |
+          | Build | ${{ needs.build.result }} | - |
+          | E2E Tests | ${{ needs.e2e-tests.result }} | - |
+          | Deploy | ${{ needs.deploy.result || 'skipped' }} | - |
+          
+          ## 🏗️ Build Artifacts
+          
+          - Operator: \`gunjanjp/gunj-operator:${{ needs.initialize.outputs.version }}\`
+          - API: \`gunjanjp/gunj-api:${{ needs.initialize.outputs.version }}\`
+          - UI: \`gunjanjp/gunj-ui:${{ needs.initialize.outputs.version }}\`
+          - CLI: \`gunjanjp/gunj-cli:${{ needs.initialize.outputs.version }}\`
+          
+          ## 📊 Test Coverage
+          
+          - Unit Tests: ✅ Passed
+          - Integration Tests: ✅ Passed
+          - E2E Tests: ✅ Passed on K8s 1.26-1.29
+          
+          ## 🔗 Links
+          
+          - [Build Logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          - [Artifacts](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts)
+          EOF

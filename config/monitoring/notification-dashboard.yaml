@@ -1,0 +1,361 @@
+# Notification Dashboard Configuration
+# Grafana dashboard for monitoring notifications
+# Version: 2.0
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gunj-operator-notification-dashboard
+  namespace: gunj-system
+data:
+  dashboard.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "uid": "gunj-notifications",
+        "title": "Gunj Operator Notifications",
+        "tags": ["gunj-operator", "notifications", "monitoring"],
+        "timezone": "browser",
+        "schemaVersion": 39,
+        "version": 1,
+        "refresh": "30s",
+        "time": {
+          "from": "now-6h",
+          "to": "now"
+        },
+        "panels": [
+          {
+            "id": 1,
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+            "type": "stat",
+            "title": "Total Notifications (24h)",
+            "targets": [
+              {
+                "expr": "sum(increase(gunj_notifications_sent_total[24h]))",
+                "refId": "A"
+              }
+            ],
+            "options": {
+              "graphMode": "area",
+              "colorMode": "value",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": ["lastNotNull"]
+              }
+            }
+          },
+          {
+            "id": 2,
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+            "type": "piechart",
+            "title": "Notifications by Channel",
+            "targets": [
+              {
+                "expr": "sum by(channel) (increase(gunj_notifications_sent_total[24h]))",
+                "refId": "A"
+              }
+            ],
+            "options": {
+              "pieType": "donut",
+              "legendDisplayMode": "list",
+              "legendPlacement": "right"
+            }
+          },
+          {
+            "id": 3,
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
+            "type": "timeseries",
+            "title": "Notification Rate",
+            "targets": [
+              {
+                "expr": "sum by(type) (rate(gunj_notifications_sent_total[5m]))",
+                "legendFormat": "{{type}}",
+                "refId": "A"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "ops",
+                "displayName": "${__field.labels.type}"
+              }
+            },
+            "options": {
+              "legend": {
+                "displayMode": "list",
+                "placement": "bottom"
+              }
+            }
+          },
+          {
+            "id": 4,
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+            "type": "stat",
+            "title": "Failed Notifications",
+            "targets": [
+              {
+                "expr": "sum(increase(gunj_notifications_failed_total[1h]))",
+                "refId": "A"
+              }
+            ],
+            "options": {
+              "graphMode": "none",
+              "colorMode": "thresholds",
+              "orientation": "auto",
+              "reduceOptions": {
+                "calcs": ["lastNotNull"]
+              }
+            },
+            "fieldConfig": {
+              "defaults": {
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {"color": "green", "value": 0},
+                    {"color": "yellow", "value": 1},
+                    {"color": "red", "value": 5}
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "id": 5,
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+            "type": "gauge",
+            "title": "Notification Queue Size",
+            "targets": [
+              {
+                "expr": "gunj_notification_queue_size",
+                "refId": "A"
+              }
+            ],
+            "options": {
+              "showThresholdLabels": true,
+              "showThresholdMarkers": true
+            },
+            "fieldConfig": {
+              "defaults": {
+                "min": 0,
+                "max": 100,
+                "thresholds": {
+                  "mode": "absolute",
+                  "steps": [
+                    {"color": "green", "value": 0},
+                    {"color": "yellow", "value": 50},
+                    {"color": "red", "value": 80}
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "id": 6,
+            "gridPos": {"h": 10, "w": 24, "x": 0, "y": 24},
+            "type": "table",
+            "title": "Recent Notifications",
+            "targets": [
+              {
+                "expr": "topk(20, gunj_notification_last_sent_timestamp) by (type, channel, priority)",
+                "format": "table",
+                "instant": true,
+                "refId": "A"
+              }
+            ],
+            "options": {
+              "showHeader": true,
+              "sortBy": [
+                {
+                  "displayName": "Time",
+                  "desc": true
+                }
+              ]
+            },
+            "transformations": [
+              {
+                "id": "organize",
+                "options": {
+                  "excludeByName": {},
+                  "indexByName": {},
+                  "renameByName": {
+                    "type": "Type",
+                    "channel": "Channel",
+                    "priority": "Priority",
+                    "Value": "Timestamp"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": 7,
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 34},
+            "type": "heatmap",
+            "title": "Notification Heatmap",
+            "targets": [
+              {
+                "expr": "sum by (le) (rate(gunj_notification_duration_seconds_bucket[5m]))",
+                "format": "heatmap",
+                "refId": "A"
+              }
+            ],
+            "options": {
+              "calculate": true,
+              "yAxis": {
+                "axisLabel": "Duration",
+                "unit": "s"
+              }
+            }
+          },
+          {
+            "id": 8,
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 34},
+            "type": "alertlist",
+            "title": "Active Notification Alerts",
+            "options": {
+              "maxItems": 10,
+              "sortOrder": 1,
+              "dashboardAlerts": false,
+              "alertName": "",
+              "dashboardTitle": "",
+              "tags": ["notifications"]
+            }
+          }
+        ],
+        "templating": {
+          "list": [
+            {
+              "name": "datasource",
+              "type": "datasource",
+              "query": "prometheus",
+              "current": {
+                "text": "Prometheus",
+                "value": "prometheus"
+              }
+            },
+            {
+              "name": "channel",
+              "type": "query",
+              "query": "label_values(gunj_notifications_sent_total, channel)",
+              "multi": true,
+              "includeAll": true,
+              "current": {
+                "text": "All",
+                "value": "$__all"
+              }
+            },
+            {
+              "name": "type",
+              "type": "query",
+              "query": "label_values(gunj_notifications_sent_total, type)",
+              "multi": true,
+              "includeAll": true,
+              "current": {
+                "text": "All",
+                "value": "$__all"
+              }
+            }
+          ]
+        },
+        "annotations": {
+          "list": [
+            {
+              "datasource": "prometheus",
+              "enable": true,
+              "expr": "gunj_notification_sent_total",
+              "name": "Notifications",
+              "tagKeys": "type,channel,priority",
+              "textFormat": "{{type}} notification sent to {{channel}}"
+            }
+          ]
+        }
+      }
+    }
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notification-prometheus-rules
+  namespace: gunj-system
+data:
+  notification-rules.yaml: |
+    groups:
+      - name: notification_alerts
+        interval: 30s
+        rules:
+          - alert: NotificationChannelDown
+            expr: up{job="notification-manager"} == 0
+            for: 5m
+            labels:
+              severity: critical
+              component: notifications
+            annotations:
+              summary: "Notification channel {{ $labels.channel }} is down"
+              description: "The {{ $labels.channel }} notification channel has been down for more than 5 minutes."
+          
+          - alert: HighNotificationFailureRate
+            expr: |
+              (
+                sum(rate(gunj_notifications_failed_total[5m])) by (channel)
+                /
+                sum(rate(gunj_notifications_sent_total[5m])) by (channel)
+              ) > 0.1
+            for: 10m
+            labels:
+              severity: warning
+              component: notifications
+            annotations:
+              summary: "High notification failure rate on {{ $labels.channel }}"
+              description: "More than 10% of notifications are failing on {{ $labels.channel }}."
+          
+          - alert: NotificationQueueBacklog
+            expr: gunj_notification_queue_size > 100
+            for: 5m
+            labels:
+              severity: warning
+              component: notifications
+            annotations:
+              summary: "Notification queue backlog detected"
+              description: "The notification queue has more than 100 pending notifications."
+          
+          - alert: NotificationRateLimitExceeded
+            expr: |
+              sum(rate(gunj_notifications_rate_limited_total[5m])) by (channel) > 0
+            for: 5m
+            labels:
+              severity: info
+              component: notifications
+            annotations:
+              summary: "Rate limiting active on {{ $labels.channel }}"
+              description: "Notifications are being rate limited on {{ $labels.channel }}."
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-metrics
+  namespace: gunj-system
+  labels:
+    app: notification-manager
+spec:
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+  selector:
+    app: notification-manager
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: notification-manager
+  namespace: gunj-system
+spec:
+  selector:
+    matchLabels:
+      app: notification-manager
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics

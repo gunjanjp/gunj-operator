@@ -1,0 +1,708 @@
+# Artifact Retention Policy Management
+# Automatically manages artifact lifecycle and cleanup
+# Version: 2.0
+
+name: Artifact Retention Policy
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - apply_policies
+          - dry_run
+          - generate_report
+          - emergency_cleanup
+      target:
+        description: 'Target storage backend'
+        required: false
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - github_artifacts
+          - s3_storage
+          - container_registries
+          - package_registries
+
+env:
+  # Policy configuration file
+  POLICY_CONFIG: .github/artifact-storage/storage-config.yml
+  
+  # Default retention days by artifact type
+  DEFAULT_RETENTION_DAYS: |
+    development: 7
+    feature_branch: 14
+    main_branch: 30
+    release: 365
+    test_results: 7
+    coverage_reports: 30
+    security_scans: 90
+
+jobs:
+  load-policies:
+    name: Load Retention Policies
+    runs-on: ubuntu-latest
+    outputs:
+      policies: ${{ steps.load.outputs.policies }}
+      targets: ${{ steps.load.outputs.targets }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Load policy configuration
+        id: load
+        run: |
+          # Parse retention policies from config
+          if [[ -f "${{ env.POLICY_CONFIG }}" ]]; then
+            # Extract policies using yq
+            pip install yq
+            
+            # Get retention policies
+            POLICIES=$(yq -c '.storage_backends.github_artifacts.retention_policies' ${{ env.POLICY_CONFIG }})
+            echo "policies=${POLICIES}" >> $GITHUB_OUTPUT
+            
+            # Determine targets
+            if [[ "${{ github.event.inputs.target }}" == "all" ]] || [[ -z "${{ github.event.inputs.target }}" ]]; then
+              TARGETS='["github_artifacts","s3_storage","container_registries"]'
+            else
+              TARGETS='["${{ github.event.inputs.target }}"]'
+            fi
+            echo "targets=${TARGETS}" >> $GITHUB_OUTPUT
+          else
+            echo "Policy configuration not found, using defaults"
+            echo "policies={}" >> $GITHUB_OUTPUT
+            echo "targets=[]" >> $GITHUB_OUTPUT
+          fi
+
+  # Apply retention policies to GitHub Artifacts
+  github-artifacts-retention:
+    name: GitHub Artifacts Retention
+    runs-on: ubuntu-latest
+    needs: load-policies
+    if: contains(fromJson(needs.load-policies.outputs.targets), 'github_artifacts')
+    steps:
+      - name: List artifacts
+        id: list
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const artifacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              }
+            );
+            
+            console.log(`Found ${artifacts.length} artifacts`);
+            
+            // Categorize artifacts
+            const categorized = {
+              development: [],
+              feature_branch: [],
+              main_branch: [],
+              release: [],
+              test_results: [],
+              coverage_reports: [],
+              other: []
+            };
+            
+            for (const artifact of artifacts) {
+              let category = 'other';
+              
+              // Categorize based on name patterns
+              if (artifact.name.includes('-dev-')) {
+                category = 'development';
+              } else if (artifact.name.includes('-feature-')) {
+                category = 'feature_branch';
+              } else if (artifact.name.includes('-main-')) {
+                category = 'main_branch';
+              } else if (artifact.name.includes('-release-') || artifact.name.includes('-v')) {
+                category = 'release';
+              } else if (artifact.name.includes('-test-')) {
+                category = 'test_results';
+              } else if (artifact.name.includes('-coverage-')) {
+                category = 'coverage_reports';
+              }
+              
+              categorized[category].push(artifact);
+            }
+            
+            return categorized;
+
+      - name: Apply retention policies
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const artifacts = ${{ steps.list.outputs.result }};
+            const isDryRun = '${{ github.event.inputs.action }}' === 'dry_run';
+            
+            // Default retention policies
+            const retentionDays = {
+              development: 7,
+              feature_branch: 14,
+              main_branch: 30,
+              release: 365,
+              test_results: 7,
+              coverage_reports: 30,
+              other: 30
+            };
+            
+            // Override with loaded policies if available
+            const loadedPolicies = ${{ needs.load-policies.outputs.policies || '{}' }};
+            for (const [category, policy] of Object.entries(loadedPolicies)) {
+              if (policy.retention_days) {
+                retentionDays[category] = policy.retention_days;
+              }
+            }
+            
+            const now = new Date();
+            let deletedCount = 0;
+            let deletedSize = 0;
+            const deletionLog = [];
+            
+            // Process each category
+            for (const [category, artifactList] of Object.entries(artifacts)) {
+              const maxAge = retentionDays[category] || 30;
+              
+              for (const artifact of artifactList) {
+                const createdAt = new Date(artifact.created_at);
+                const ageInDays = (now - createdAt) / (1000 * 60 * 60 * 24);
+                
+                if (ageInDays > maxAge) {
+                  if (!isDryRun) {
+                    try {
+                      await github.rest.actions.deleteArtifact({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        artifact_id: artifact.id
+                      });
+                      
+                      deletedCount++;
+                      deletedSize += artifact.size_in_bytes;
+                      deletionLog.push({
+                        name: artifact.name,
+                        category: category,
+                        age_days: ageInDays.toFixed(1),
+                        size_mb: (artifact.size_in_bytes / 1024 / 1024).toFixed(2)
+                      });
+                    } catch (error) {
+                      console.error(`Failed to delete ${artifact.name}: ${error.message}`);
+                    }
+                  } else {
+                    console.log(`[DRY RUN] Would delete ${artifact.name} (${category}, ${ageInDays.toFixed(1)} days old)`);
+                    deletionLog.push({
+                      name: artifact.name,
+                      category: category,
+                      age_days: ageInDays.toFixed(1),
+                      size_mb: (artifact.size_in_bytes / 1024 / 1024).toFixed(2),
+                      dry_run: true
+                    });
+                  }
+                }
+              }
+            }
+            
+            // Generate summary
+            const summary = {
+              total_deleted: deletedCount,
+              total_size_mb: (deletedSize / 1024 / 1024).toFixed(2),
+              deletion_log: deletionLog,
+              dry_run: isDryRun
+            };
+            
+            // Save summary for reporting
+            const fs = require('fs');
+            fs.writeFileSync('github-artifacts-summary.json', JSON.stringify(summary, null, 2));
+            
+            console.log(`${isDryRun ? '[DRY RUN] Would delete' : 'Deleted'} ${deletedCount} artifacts, ${summary.total_size_mb} MB`);
+
+      - name: Upload deletion summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-artifacts-retention-summary
+          path: github-artifacts-summary.json
+
+  # Apply retention policies to S3 storage
+  s3-storage-retention:
+    name: S3 Storage Retention
+    runs-on: ubuntu-latest
+    needs: load-policies
+    if: contains(fromJson(needs.load-policies.outputs.targets), 's3_storage')
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Apply S3 lifecycle policies
+        run: |
+          # Load lifecycle configuration
+          cat > lifecycle-policy.json << 'EOF'
+          {
+            "Rules": [
+              {
+                "ID": "DeleteOldDevelopmentArtifacts",
+                "Status": "Enabled",
+                "Filter": {
+                  "Prefix": "artifacts/development/"
+                },
+                "Expiration": {
+                  "Days": 7
+                }
+              },
+              {
+                "ID": "TransitionOldBinaries",
+                "Status": "Enabled",
+                "Filter": {
+                  "Prefix": "binaries/"
+                },
+                "Transitions": [
+                  {
+                    "Days": 30,
+                    "StorageClass": "STANDARD_IA"
+                  },
+                  {
+                    "Days": 90,
+                    "StorageClass": "GLACIER"
+                  }
+                ],
+                "Expiration": {
+                  "Days": 365
+                }
+              },
+              {
+                "ID": "DeleteOldTestResults",
+                "Status": "Enabled",
+                "Filter": {
+                  "Prefix": "test-results/"
+                },
+                "Expiration": {
+                  "Days": 30
+                }
+              },
+              {
+                "ID": "ArchiveReleases",
+                "Status": "Enabled",
+                "Filter": {
+                  "Prefix": "releases/"
+                },
+                "Transitions": [
+                  {
+                    "Days": 180,
+                    "StorageClass": "GLACIER"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+          
+          # Apply lifecycle policy
+          if [[ "${{ github.event.inputs.action }}" != "dry_run" ]]; then
+            aws s3api put-bucket-lifecycle-configuration \
+              --bucket gunj-operator-artifacts \
+              --lifecycle-configuration file://lifecycle-policy.json
+            echo "Applied S3 lifecycle policies"
+          else
+            echo "[DRY RUN] Would apply S3 lifecycle policies"
+            cat lifecycle-policy.json
+          fi
+
+      - name: Manual cleanup of expired objects
+        run: |
+          # List objects older than retention period
+          BUCKET="gunj-operator-artifacts"
+          
+          # Function to delete old objects
+          delete_old_objects() {
+            local prefix=$1
+            local days=$2
+            local cutoff=$(date -d "$days days ago" +%s)
+            
+            echo "Checking $prefix (retention: $days days)..."
+            
+            aws s3api list-objects-v2 \
+              --bucket $BUCKET \
+              --prefix $prefix \
+              --query "Contents[?LastModified<'$(date -d "$days days ago" --iso-8601)'].[Key,Size,LastModified]" \
+              --output text | while read key size modified; do
+                
+                if [[ -n "$key" ]]; then
+                  if [[ "${{ github.event.inputs.action }}" != "dry_run" ]]; then
+                    aws s3 rm "s3://$BUCKET/$key"
+                    echo "Deleted: $key ($(( size / 1024 / 1024 )) MB)"
+                  else
+                    echo "[DRY RUN] Would delete: $key ($(( size / 1024 / 1024 )) MB, modified: $modified)"
+                  fi
+                fi
+            done
+          }
+          
+          # Apply retention for different prefixes
+          delete_old_objects "cache/" 7
+          delete_old_objects "temp/" 1
+          delete_old_objects "logs/" 30
+
+      - name: Generate S3 storage report
+        run: |
+          # Get storage metrics
+          BUCKET="gunj-operator-artifacts"
+          
+          # Get bucket size
+          TOTAL_SIZE=$(aws s3 ls s3://$BUCKET --recursive --summarize | grep "Total Size" | awk '{print $3}')
+          TOTAL_OBJECTS=$(aws s3 ls s3://$BUCKET --recursive --summarize | grep "Total Objects" | awk '{print $3}')
+          
+          # Get size by prefix
+          echo "Storage usage by prefix:" > s3-storage-report.txt
+          for prefix in artifacts binaries releases test-results cache; do
+            SIZE=$(aws s3 ls s3://$BUCKET/$prefix/ --recursive --summarize | grep "Total Size" | awk '{print $3}' || echo "0")
+            echo "$prefix: $(( SIZE / 1024 / 1024 / 1024 )) GB" >> s3-storage-report.txt
+          done
+          
+          echo "" >> s3-storage-report.txt
+          echo "Total objects: $TOTAL_OBJECTS" >> s3-storage-report.txt
+          echo "Total size: $(( TOTAL_SIZE / 1024 / 1024 / 1024 )) GB" >> s3-storage-report.txt
+
+      - name: Upload S3 report
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-storage-retention-report
+          path: s3-storage-report.txt
+
+  # Apply retention policies to container registries
+  container-registry-retention:
+    name: Container Registry Retention
+    runs-on: ubuntu-latest
+    needs: load-policies
+    if: contains(fromJson(needs.load-policies.outputs.targets), 'container_registries')
+    strategy:
+      matrix:
+        registry:
+          - type: dockerhub
+            enabled: true
+          - type: ghcr
+            enabled: true
+    steps:
+      - name: Docker Hub cleanup
+        if: matrix.registry.type == 'dockerhub' && matrix.registry.enabled
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          # Login to Docker Hub
+          echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+          
+          # Get token for API access
+          TOKEN=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"username":"'$DOCKER_USERNAME'","password":"'$DOCKER_PASSWORD'"}' \
+            https://hub.docker.com/v2/users/login/ | jq -r .token)
+          
+          # List repositories
+          REPOS=("gunj-operator" "gunj-api" "gunj-ui" "gunj-cli")
+          
+          for REPO in "${REPOS[@]}"; do
+            echo "Processing repository: $REPO"
+            
+            # Get tags
+            TAGS=$(curl -s -H "Authorization: Bearer $TOKEN" \
+              "https://hub.docker.com/v2/repositories/$DOCKER_USERNAME/$REPO/tags/?page_size=100" | \
+              jq -r '.results[] | select(.name != "latest" and .name != "stable") | .name')
+            
+            # Keep only the last 50 tags
+            TAG_COUNT=$(echo "$TAGS" | wc -l)
+            if [[ $TAG_COUNT -gt 50 ]]; then
+              TAGS_TO_DELETE=$(echo "$TAGS" | tail -n +51)
+              
+              for TAG in $TAGS_TO_DELETE; do
+                if [[ "${{ github.event.inputs.action }}" != "dry_run" ]]; then
+                  curl -s -X DELETE \
+                    -H "Authorization: Bearer $TOKEN" \
+                    "https://hub.docker.com/v2/repositories/$DOCKER_USERNAME/$REPO/tags/$TAG/"
+                  echo "Deleted tag: $REPO:$TAG"
+                else
+                  echo "[DRY RUN] Would delete tag: $REPO:$TAG"
+                fi
+              done
+            fi
+          done
+
+      - name: GitHub Container Registry cleanup
+        if: matrix.registry.type == 'ghcr' && matrix.registry.enabled
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const packages = ['gunj-operator', 'gunj-api', 'gunj-ui', 'gunj-cli'];
+            const isDryRun = '${{ github.event.inputs.action }}' === 'dry_run';
+            
+            for (const packageName of packages) {
+              try {
+                // Get package versions
+                const versions = await github.paginate(
+                  github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg,
+                  {
+                    package_type: 'container',
+                    package_name: packageName,
+                    org: context.repo.owner,
+                    per_page: 100
+                  }
+                );
+                
+                console.log(`Found ${versions.length} versions for ${packageName}`);
+                
+                // Sort by created_at
+                versions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                
+                // Keep latest 50 versions
+                const versionsToDelete = versions.slice(50);
+                
+                for (const version of versionsToDelete) {
+                  // Skip if tagged with 'latest' or 'stable'
+                  if (version.metadata?.container?.tags?.includes('latest') ||
+                      version.metadata?.container?.tags?.includes('stable')) {
+                    continue;
+                  }
+                  
+                  if (!isDryRun) {
+                    await github.rest.packages.deletePackageVersionForOrg({
+                      package_type: 'container',
+                      package_name: packageName,
+                      org: context.repo.owner,
+                      package_version_id: version.id
+                    });
+                    console.log(`Deleted version: ${packageName}@${version.name}`);
+                  } else {
+                    console.log(`[DRY RUN] Would delete version: ${packageName}@${version.name}`);
+                  }
+                }
+              } catch (error) {
+                console.error(`Error processing ${packageName}: ${error.message}`);
+              }
+            }
+
+  # Generate comprehensive retention report
+  generate-retention-report:
+    name: Generate Retention Report
+    runs-on: ubuntu-latest
+    needs: [github-artifacts-retention, s3-storage-retention, container-registry-retention]
+    if: always()
+    steps:
+      - name: Download all reports
+        uses: actions/download-artifact@v4
+        with:
+          path: reports/
+
+      - name: Generate comprehensive report
+        run: |
+          cat > retention-policy-report.md << 'EOF'
+          # Artifact Retention Policy Report
+          
+          **Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)  
+          **Action**: ${{ github.event.inputs.action || 'scheduled' }}  
+          **Target**: ${{ github.event.inputs.target || 'all' }}  
+          
+          ## Summary
+          
+          This report summarizes the application of retention policies across all artifact storage backends.
+          
+          ## GitHub Artifacts
+          
+          EOF
+          
+          # Add GitHub artifacts summary
+          if [[ -f reports/github-artifacts-retention-summary/github-artifacts-summary.json ]]; then
+            SUMMARY=$(cat reports/github-artifacts-retention-summary/github-artifacts-summary.json)
+            DELETED=$(echo "$SUMMARY" | jq -r '.total_deleted')
+            SIZE=$(echo "$SUMMARY" | jq -r '.total_size_mb')
+            
+            cat >> retention-policy-report.md << EOF
+          - Artifacts deleted: $DELETED
+          - Space freed: ${SIZE} MB
+          - Dry run: $(echo "$SUMMARY" | jq -r '.dry_run')
+          
+          ### Deletion Log
+          
+          | Artifact | Category | Age (days) | Size (MB) |
+          |----------|----------|------------|-----------|
+          $(echo "$SUMMARY" | jq -r '.deletion_log[] | "| \(.name) | \(.category) | \(.age_days) | \(.size_mb) |"' | head -20)
+          
+          EOF
+          fi
+          
+          # Add S3 storage summary
+          cat >> retention-policy-report.md << 'EOF'
+          ## S3 Storage
+          
+          EOF
+          
+          if [[ -f reports/s3-storage-retention-report/s3-storage-report.txt ]]; then
+            cat reports/s3-storage-retention-report/s3-storage-report.txt >> retention-policy-report.md
+          fi
+          
+          # Add container registry summary
+          cat >> retention-policy-report.md << 'EOF'
+          
+          ## Container Registries
+          
+          - Docker Hub: Check workflow logs for details
+          - GitHub Container Registry: Check workflow logs for details
+          
+          ## Retention Policy Configuration
+          
+          Current retention policies:
+          - Development artifacts: 7 days
+          - Feature branch artifacts: 14 days
+          - Main branch artifacts: 30 days
+          - Release artifacts: 365 days
+          - Test results: 7 days
+          - Coverage reports: 30 days
+          
+          ## Recommendations
+          
+          1. Review and adjust retention policies based on usage patterns
+          2. Consider implementing automated tagging for better categorization
+          3. Monitor storage costs and optimize retention periods
+          4. Implement alerts for storage quota warnings
+          
+          ## Next Steps
+          
+          - [ ] Review deletion log for any critical artifacts
+          - [ ] Update retention policies if needed
+          - [ ] Schedule next retention policy review
+          - [ ] Monitor storage usage trends
+          EOF
+
+      - name: Upload comprehensive report
+        uses: actions/upload-artifact@v4
+        with:
+          name: retention-policy-report
+          path: retention-policy-report.md
+
+      - name: Post summary to PR/Issue
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const report = require('fs').readFileSync('retention-policy-report.md', 'utf8');
+            
+            // Create an issue with the report
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Artifact Retention Policy Report - ${new Date().toISOString().split('T')[0]}`,
+              body: report,
+              labels: ['artifact-management', 'automated']
+            });
+
+  # Emergency cleanup for space issues
+  emergency-cleanup:
+    name: Emergency Cleanup
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'emergency_cleanup'
+    steps:
+      - name: Aggressive GitHub artifacts cleanup
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log('Starting emergency cleanup...');
+            
+            // Delete all artifacts older than 1 day except releases
+            const artifacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              }
+            );
+            
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - 1);
+            
+            let deleted = 0;
+            let freed = 0;
+            
+            for (const artifact of artifacts) {
+              if (!artifact.name.includes('release') && 
+                  new Date(artifact.created_at) < cutoff) {
+                try {
+                  await github.rest.actions.deleteArtifact({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    artifact_id: artifact.id
+                  });
+                  deleted++;
+                  freed += artifact.size_in_bytes;
+                } catch (error) {
+                  console.error(`Failed to delete ${artifact.name}: ${error.message}`);
+                }
+              }
+            }
+            
+            console.log(`Emergency cleanup completed: deleted ${deleted} artifacts, freed ${(freed / 1024 / 1024 / 1024).toFixed(2)} GB`);
+
+      - name: Notify team
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            Emergency artifact cleanup completed!
+            Action: ${{ github.event.inputs.action }}
+            Triggered by: ${{ github.actor }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Schedule next retention review
+  schedule-review:
+    name: Schedule Retention Review
+    runs-on: ubuntu-latest
+    needs: generate-retention-report
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Create review reminder
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const nextReviewDate = new Date();
+            nextReviewDate.setDate(nextReviewDate.getDate() + 30);
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Retention Policy Review Due - ${nextReviewDate.toISOString().split('T')[0]}`,
+              body: `## Retention Policy Review Reminder
+              
+              It's time to review and update artifact retention policies.
+              
+              ### Review Checklist
+              - [ ] Analyze storage usage trends
+              - [ ] Review deletion logs for patterns
+              - [ ] Update retention periods if needed
+              - [ ] Check cost optimization opportunities
+              - [ ] Validate emergency cleanup procedures
+              
+              ### Current Policies
+              See the latest retention report for current policy details.
+              
+              ### Actions
+              - Run retention policy report: \`workflow_dispatch\` with \`generate_report\`
+              - Update policies in \`.github/artifact-storage/storage-config.yml\`
+              - Test policy changes with \`dry_run\` option
+              `,
+              labels: ['artifact-management', 'review-needed'],
+              milestone: context.payload.milestone?.number,
+              assignees: ['gunjanjp']
+            });

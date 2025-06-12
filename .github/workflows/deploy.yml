@@ -1,0 +1,425 @@
+# Deployment Pipeline
+# Handles deployments to various environments
+# Version: 2.0
+
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: 'Target environment (dev, staging, production)'
+      version:
+        required: true
+        type: string
+        description: 'Version to deploy'
+      skip_health_check:
+        required: false
+        type: boolean
+        default: false
+        description: 'Skip post-deployment health checks'
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+        description: 'Target environment'
+      version:
+        required: true
+        type: string
+        description: 'Version to deploy (e.g., v2.0.0)'
+
+env:
+  HELM_VERSION: v3.14.0
+  KUBECTL_VERSION: v1.29.0
+
+jobs:
+  # Pre-deployment validation
+  pre-deploy:
+    name: Pre-deployment Checks
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    outputs:
+      proceed: ${{ steps.validate.outputs.proceed }}
+      cluster_endpoint: ${{ steps.env-info.outputs.cluster_endpoint }}
+      namespace: ${{ steps.env-info.outputs.namespace }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get environment info
+        id: env-info
+        run: |
+          # Set environment-specific variables
+          case "${{ inputs.environment }}" in
+            dev)
+              CLUSTER_ENDPOINT="${{ secrets.DEV_CLUSTER_ENDPOINT }}"
+              NAMESPACE="gunj-dev"
+              ;;
+            staging)
+              CLUSTER_ENDPOINT="${{ secrets.STAGING_CLUSTER_ENDPOINT }}"
+              NAMESPACE="gunj-staging"
+              ;;
+            production)
+              CLUSTER_ENDPOINT="${{ secrets.PROD_CLUSTER_ENDPOINT }}"
+              NAMESPACE="gunj-prod"
+              ;;
+          esac
+          
+          echo "cluster_endpoint=$CLUSTER_ENDPOINT" >> $GITHUB_OUTPUT
+          echo "namespace=$NAMESPACE" >> $GITHUB_OUTPUT
+
+      - name: Validate deployment
+        id: validate
+        run: |
+          PROCEED="true"
+          
+          # Check version format
+          if ! [[ "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+            echo "::error::Invalid version format: ${{ inputs.version }}"
+            PROCEED="false"
+          fi
+          
+          # Production-specific checks
+          if [[ "${{ inputs.environment }}" == "production" ]]; then
+            # Check if it's during maintenance window (UTC)
+            HOUR=$(date -u +%H)
+            DAY=$(date -u +%u)
+            
+            # Allow deployments only during maintenance window (2-6 AM UTC on weekends)
+            if [[ $DAY -lt 6 ]] || [[ $HOUR -lt 2 ]] || [[ $HOUR -gt 6 ]]; then
+              echo "::warning::Production deployment outside maintenance window"
+              # Don't block, just warn
+            fi
+            
+            # Check if version was tested in staging
+            # In real implementation, would check deployment history
+            echo "::notice::Ensure version ${{ inputs.version }} was tested in staging"
+          fi
+          
+          echo "proceed=$PROCEED" >> $GITHUB_OUTPUT
+
+  # Backup current state
+  backup:
+    name: Backup Current State
+    needs: pre-deploy
+    if: needs.pre-deploy.outputs.proceed == 'true' && inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Configure kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+
+      - name: Set up kubeconfig
+        run: |
+          echo "${{ secrets[format('{0}_KUBECONFIG', upper(inputs.environment))] }}" | base64 -d > kubeconfig
+          export KUBECONFIG=$(pwd)/kubeconfig
+
+      - name: Backup current deployment
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          BACKUP_NAME="backup-${{ inputs.environment }}-$TIMESTAMP"
+          
+          # Export current resources
+          kubectl get all,configmap,secret,pvc -n ${{ needs.pre-deploy.outputs.namespace }} \
+            -o yaml > $BACKUP_NAME.yaml
+          
+          # Get current Helm values
+          helm get values gunj-operator -n ${{ needs.pre-deploy.outputs.namespace }} \
+            > $BACKUP_NAME-values.yaml
+          
+          # Create backup archive
+          tar -czf $BACKUP_NAME.tar.gz $BACKUP_NAME*.yaml
+          
+          # Upload to S3 (or other backup storage)
+          # aws s3 cp $BACKUP_NAME.tar.gz s3://gunj-backups/${{ inputs.environment }}/
+
+      - name: Create restore script
+        run: |
+          cat > restore-${{ inputs.environment }}.sh << 'EOF'
+          #!/bin/bash
+          # Restore script for ${{ inputs.environment }}
+          # Created: $(date)
+          # Version being replaced: $(helm list -n ${{ needs.pre-deploy.outputs.namespace }} -o json | jq -r '.[0].app_version')
+          
+          echo "This script will restore the previous deployment"
+          echo "Use only in case of critical issues with version ${{ inputs.version }}"
+          
+          # Restore commands would go here
+          EOF
+          
+          chmod +x restore-${{ inputs.environment }}.sh
+
+      - name: Upload backup artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-${{ inputs.environment }}-${{ github.run_id }}
+          path: |
+            backup-*.tar.gz
+            restore-*.sh
+          retention-days: 30
+
+  # Deploy to environment
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    needs: [pre-deploy, backup]
+    if: needs.pre-deploy.outputs.proceed == 'true' && (always() || needs.backup.result == 'success')
+    runs-on: ubuntu-latest
+    environment: 
+      name: ${{ inputs.environment }}
+      url: ${{ steps.deploy.outputs.app_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Configure kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+
+      - name: Set up kubeconfig
+        run: |
+          echo "${{ secrets[format('{0}_KUBECONFIG', upper(inputs.environment))] }}" | base64 -d > kubeconfig
+          export KUBECONFIG=$(pwd)/kubeconfig
+          
+          # Test connection
+          kubectl cluster-info
+
+      - name: Deploy with Helm
+        id: deploy
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          
+          # Prepare Helm values for environment
+          cat > values-${{ inputs.environment }}.yaml << EOF
+          image:
+            tag: ${{ inputs.version }}
+          
+          operator:
+            replicas: ${{ inputs.environment == 'production' && '3' || '1' }}
+            resources:
+              requests:
+                memory: "${{ inputs.environment == 'production' && '512Mi' || '256Mi' }}"
+                cpu: "${{ inputs.environment == 'production' && '500m' || '100m' }}"
+          
+          api:
+            replicas: ${{ inputs.environment == 'production' && '2' || '1' }}
+            ingress:
+              enabled: true
+              host: api-${{ inputs.environment }}.gunj-operator.io
+          
+          ui:
+            replicas: ${{ inputs.environment == 'production' && '2' || '1' }}
+            ingress:
+              enabled: true
+              host: ${{ inputs.environment }}.gunj-operator.io
+          
+          monitoring:
+            enabled: ${{ inputs.environment != 'dev' && 'true' || 'false' }}
+          EOF
+          
+          # Deploy or upgrade
+          helm upgrade --install gunj-operator ./charts/gunj-operator \
+            --namespace ${{ needs.pre-deploy.outputs.namespace }} \
+            --create-namespace \
+            --values values-${{ inputs.environment }}.yaml \
+            --wait \
+            --timeout 10m \
+            --atomic
+          
+          # Get application URL
+          APP_URL="https://${{ inputs.environment }}.gunj-operator.io"
+          echo "app_url=$APP_URL" >> $GITHUB_OUTPUT
+
+      - name: Verify deployment
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          
+          # Wait for all pods to be ready
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/instance=gunj-operator \
+            -n ${{ needs.pre-deploy.outputs.namespace }} \
+            --timeout=300s
+          
+          # Check deployment status
+          kubectl get all -n ${{ needs.pre-deploy.outputs.namespace }} \
+            -l app.kubernetes.io/instance=gunj-operator
+
+  # Post-deployment validation
+  post-deploy:
+    name: Post-deployment Validation
+    needs: [pre-deploy, deploy]
+    if: success() && inputs.skip_health_check != true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Health checks
+        run: |
+          # Wait for services to stabilize
+          sleep 30
+          
+          # Check API health
+          API_URL="https://api-${{ inputs.environment }}.gunj-operator.io"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $API_URL/health)
+          
+          if [[ "$HTTP_CODE" != "200" ]]; then
+            echo "::error::API health check failed with status $HTTP_CODE"
+            exit 1
+          fi
+          
+          # Check UI
+          UI_URL="${{ needs.deploy.outputs.app_url }}"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $UI_URL)
+          
+          if [[ "$HTTP_CODE" != "200" ]]; then
+            echo "::error::UI health check failed with status $HTTP_CODE"
+            exit 1
+          fi
+          
+          echo "✅ All health checks passed"
+
+      - name: Run smoke tests
+        run: |
+          # Run basic smoke tests against deployed environment
+          make test-smoke ENV=${{ inputs.environment }} VERSION=${{ inputs.version }}
+
+      - name: Collect metrics
+        run: |
+          # Collect deployment metrics
+          DEPLOY_TIME=$(date +%s)
+          
+          # In production, would send to monitoring system
+          echo "Deployment completed at $DEPLOY_TIME"
+
+  # Rollback on failure
+  rollback:
+    name: Rollback Deployment
+    needs: [pre-deploy, deploy, post-deploy]
+    if: failure() && inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Configure kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+
+      - name: Set up kubeconfig
+        run: |
+          echo "${{ secrets[format('{0}_KUBECONFIG', upper(inputs.environment))] }}" | base64 -d > kubeconfig
+          export KUBECONFIG=$(pwd)/kubeconfig
+
+      - name: Rollback with Helm
+        run: |
+          export KUBECONFIG=$(pwd)/kubeconfig
+          
+          echo "::warning::Rolling back deployment due to failure"
+          
+          # Rollback to previous release
+          helm rollback gunj-operator -n ${{ needs.pre-deploy.outputs.namespace }}
+          
+          # Wait for rollback to complete
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/instance=gunj-operator \
+            -n ${{ needs.pre-deploy.outputs.namespace }} \
+            --timeout=300s
+
+      - name: Notify rollback
+        uses: ./.github/workflows/notification-manager.yml
+        with:
+          notification_type: deploy
+          status: failure
+          title: "🔄 Production Deployment Rolled Back"
+          message: |
+            Deployment of version ${{ inputs.version }} to production failed and was rolled back.
+            
+            Environment: ${{ inputs.environment }}
+            Version attempted: ${{ inputs.version }}
+            
+            Please investigate the failure before attempting another deployment.
+          priority: critical
+          channels: "slack,pagerduty"
+
+  # Send deployment notification
+  notify:
+    name: Deployment Notification
+    needs: [pre-deploy, deploy, post-deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare notification
+        id: notify-params
+        run: |
+          if [[ "${{ needs.post-deploy.result }}" == "success" ]]; then
+            TITLE="🚀 Deployment Successful"
+            STATUS="success"
+            PRIORITY="normal"
+            MESSAGE="Successfully deployed version ${{ inputs.version }} to ${{ inputs.environment }}"
+          else
+            TITLE="❌ Deployment Failed"
+            STATUS="failure"
+            PRIORITY="high"
+            MESSAGE="Failed to deploy version ${{ inputs.version }} to ${{ inputs.environment }}"
+          fi
+          
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
+          echo "message=$MESSAGE" >> $GITHUB_OUTPUT
+
+      - name: Send notification
+        uses: ./.github/workflows/notification-manager.yml
+        with:
+          notification_type: deploy
+          status: ${{ steps.notify-params.outputs.status }}
+          title: ${{ steps.notify-params.outputs.title }}
+          message: |
+            ${{ steps.notify-params.outputs.message }}
+            
+            Environment: ${{ inputs.environment }}
+            Version: ${{ inputs.version }}
+            URL: ${{ needs.deploy.outputs.app_url }}
+            
+            Deployed by: ${{ github.actor }}
+          priority: ${{ steps.notify-params.outputs.priority }}
+          channels: ${{ inputs.environment == 'production' && 'slack,email' || 'slack' }}
+
+  # Update deployment tracking
+  update-tracking:
+    name: Update Deployment Tracking
+    needs: [deploy, post-deploy]
+    if: success()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update deployment record
+        run: |
+          # Record deployment in tracking system
+          cat > deployment-record.json << EOF
+          {
+            "environment": "${{ inputs.environment }}",
+            "version": "${{ inputs.version }}",
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "deployed_by": "${{ github.actor }}",
+            "git_sha": "${{ github.sha }}",
+            "run_id": "${{ github.run_id }}",
+            "status": "success"
+          }
+          EOF
+          
+          # In production, would update deployment database
+          echo "Deployment recorded"

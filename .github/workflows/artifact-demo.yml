@@ -1,0 +1,245 @@
+# Example workflow demonstrating artifact storage usage
+# This shows how different workflows interact with the artifact system
+# Version: 2.0
+
+name: Artifact Storage Demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      demo_type:
+        description: 'Type of demo to run'
+        required: true
+        type: choice
+        options:
+          - full-cycle
+          - binary-only
+          - container-only
+          - test-results
+
+env:
+  DEMO_VERSION: demo-${{ github.run_number }}
+
+jobs:
+  # Generate demo artifacts
+  generate-artifacts:
+    name: Generate Demo Artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create demo binaries
+        run: |
+          mkdir -p demo-output/binaries
+          
+          # Simulate building binaries
+          for component in operator api cli; do
+            for arch in amd64 arm64; do
+              echo "#!/bin/bash" > demo-output/binaries/gunj-$component-linux-$arch
+              echo "echo 'Gunj $component v${{ env.DEMO_VERSION }} ($arch)'" >> demo-output/binaries/gunj-$component-linux-$arch
+              chmod +x demo-output/binaries/gunj-$component-linux-$arch
+            done
+          done
+
+      - name: Create demo test results
+        run: |
+          mkdir -p demo-output/test-results
+          
+          # Generate JUnit XML
+          cat > demo-output/test-results/junit.xml << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <testsuites>
+            <testsuite name="DemoTests" tests="10" failures="0" errors="0" time="1.23">
+              <testcase name="TestArtifactStorage" classname="demo.ArtifactTest" time="0.123"/>
+            </testsuite>
+          </testsuites>
+          EOF
+          
+          # Generate coverage report
+          echo "Coverage: 85%" > demo-output/test-results/coverage.txt
+
+      - name: Upload binary artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-binaries-${{ github.run_number }}
+          path: demo-output/binaries/*
+          retention-days: 1
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-test-results-${{ github.run_number }}
+          path: demo-output/test-results/*
+          retention-days: 1
+
+  # Store artifacts using our system
+  store-artifacts:
+    name: Store Artifacts
+    needs: generate-artifacts
+    uses: ./.github/workflows/artifact-management.yml
+    with:
+      artifact_type: binary
+      retention_days: 7
+    secrets: inherit
+
+  # Demonstrate artifact retrieval
+  use-artifacts:
+    name: Use Stored Artifacts
+    needs: store-artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: demo-*
+          path: ./downloaded-artifacts
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find downloaded-artifacts -type f -ls
+
+      - name: Test binary execution
+        run: |
+          chmod +x downloaded-artifacts/demo-binaries-*/gunj-operator-linux-amd64
+          ./downloaded-artifacts/demo-binaries-*/gunj-operator-linux-amd64
+
+  # Multi-arch container demo
+  container-demo:
+    name: Container Multi-arch Demo
+    runs-on: ubuntu-latest
+    if: inputs.demo_type == 'full-cycle' || inputs.demo_type == 'container-only'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create demo Dockerfile
+        run: |
+          cat > Dockerfile.demo << EOF
+          FROM alpine:latest
+          RUN echo "Demo container for artifact storage"
+          CMD ["echo", "Gunj Operator Demo Container"]
+          EOF
+
+      - name: Build multi-arch image
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64,linux/arm/v7 \
+            --tag gunj-demo:${{ env.DEMO_VERSION }} \
+            --file Dockerfile.demo \
+            --output type=oci,dest=demo-container.tar \
+            .
+
+      - name: Upload container artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-container-${{ github.run_number }}
+          path: demo-container.tar
+          retention-days: 1
+
+  # S3 storage demo
+  s3-demo:
+    name: S3 Storage Demo
+    needs: generate-artifacts
+    runs-on: ubuntu-latest
+    if: inputs.demo_type == 'full-cycle'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+        continue-on-error: true
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: demo-binaries-${{ github.run_number }}
+          path: ./artifacts-to-upload
+
+      - name: Upload to S3 (if configured)
+        if: env.AWS_ACCESS_KEY_ID != ''
+        run: |
+          aws s3 sync ./artifacts-to-upload \
+            s3://gunj-operator-artifacts/demo/${{ env.DEMO_VERSION }}/ \
+            --metadata version=${{ env.DEMO_VERSION }},demo=true
+        continue-on-error: true
+
+  # Cleanup demo
+  cleanup-demo:
+    name: Cleanup Demo Artifacts
+    needs: [use-artifacts, container-demo, s3-demo]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: List artifacts to clean
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const artifacts = await github.rest.actions.listArtifactsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            });
+            
+            const demoArtifacts = artifacts.data.artifacts.filter(a => 
+              a.name.startsWith('demo-')
+            );
+            
+            console.log(`Found ${demoArtifacts.length} demo artifacts`);
+            
+            for (const artifact of demoArtifacts) {
+              console.log(`- ${artifact.name} (${artifact.size_in_bytes} bytes)`);
+            }
+
+      - name: Generate summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # Artifact Storage Demo Summary
+          
+          **Demo Type**: ${{ inputs.demo_type }}
+          **Version**: ${{ env.DEMO_VERSION }}
+          
+          ## Artifacts Created
+          
+          - Binary artifacts for 3 components × 2 architectures
+          - Test results with JUnit XML
+          - Multi-arch container image
+          
+          ## Storage Locations Tested
+          
+          - ✅ GitHub Artifacts
+          - ✅ Local workflow storage
+          - 🔄 S3 (if configured)
+          - 🔄 Container registry (if configured)
+          
+          ## Key Features Demonstrated
+          
+          1. **Multi-architecture support**: Built for amd64 and arm64
+          2. **Artifact management workflow**: Automated storage and retrieval
+          3. **Retention policies**: 7-day retention for demo artifacts
+          4. **Cross-job artifact sharing**: Artifacts passed between jobs
+          5. **S3 integration**: Optional external storage
+          
+          ## Next Steps
+          
+          To use artifact storage in your workflows:
+          
+          \`\`\`yaml
+          - uses: ./.github/workflows/artifact-management.yml
+            with:
+              artifact_type: binary
+              retention_days: 30
+          \`\`\`
+          EOF

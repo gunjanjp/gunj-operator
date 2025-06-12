@@ -1,0 +1,260 @@
+# Reusable workflow for CI/CD notifications
+name: Notifications
+
+on:
+  workflow_call:
+    inputs:
+      status:
+        required: true
+        type: string
+        description: 'Build status: success, failure, cancelled'
+      workflow_name:
+        required: true
+        type: string
+        description: 'Name of the workflow that triggered this notification'
+      branch:
+        required: false
+        type: string
+        default: ${{ github.ref_name }}
+        description: 'Branch name'
+      commit_sha:
+        required: false
+        type: string
+        default: ${{ github.sha }}
+        description: 'Commit SHA'
+      pull_request_number:
+        required: false
+        type: string
+        description: 'Pull request number if applicable'
+    secrets:
+      SLACK_WEBHOOK_URL:
+        required: false
+      DISCORD_WEBHOOK_URL:
+        required: false
+      TEAMS_WEBHOOK_URL:
+        required: false
+      SENDGRID_API_KEY:
+        required: false
+      NOTIFICATION_EMAIL_TO:
+        required: false
+      NOTIFICATION_EMAIL_FROM:
+        required: false
+
+jobs:
+  send-notifications:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set color and emoji based on status
+        id: status-info
+        run: |
+          if [ "${{ inputs.status }}" = "success" ]; then
+            echo "color=2EA44F" >> $GITHUB_OUTPUT
+            echo "emoji=✅" >> $GITHUB_OUTPUT
+            echo "slack_color=good" >> $GITHUB_OUTPUT
+            echo "discord_color=5763719" >> $GITHUB_OUTPUT
+          elif [ "${{ inputs.status }}" = "failure" ]; then
+            echo "color=CB2431" >> $GITHUB_OUTPUT
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+            echo "slack_color=danger" >> $GITHUB_OUTPUT
+            echo "discord_color=15548997" >> $GITHUB_OUTPUT
+          else
+            echo "color=DBAB09" >> $GITHUB_OUTPUT
+            echo "emoji=⚠️" >> $GITHUB_OUTPUT
+            echo "slack_color=warning" >> $GITHUB_OUTPUT
+            echo "discord_color=16705372" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate notification content
+        id: content
+        run: |
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B | head -n 1)
+          COMMIT_AUTHOR=$(git log -1 --pretty=%an)
+          
+          if [ -n "${{ inputs.pull_request_number }}" ]; then
+            CONTEXT="PR #${{ inputs.pull_request_number }}"
+            URL="${{ github.server_url }}/${{ github.repository }}/pull/${{ inputs.pull_request_number }}"
+          else
+            CONTEXT="Branch: ${{ inputs.branch }}"
+            URL="${{ github.server_url }}/${{ github.repository }}/commit/${{ inputs.commit_sha }}"
+          fi
+          
+          echo "context=$CONTEXT" >> $GITHUB_OUTPUT
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "commit_message=$COMMIT_MESSAGE" >> $GITHUB_OUTPUT
+          echo "commit_author=$COMMIT_AUTHOR" >> $GITHUB_OUTPUT
+
+      # Slack Notification
+      - name: Send Slack notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "attachments": [
+                {
+                  "color": "${{ steps.status-info.outputs.slack_color }}",
+                  "fallback": "${{ steps.status-info.outputs.emoji }} ${{ inputs.workflow_name }}: ${{ inputs.status }}",
+                  "title": "${{ steps.status-info.outputs.emoji }} ${{ inputs.workflow_name }}: ${{ inputs.status }}",
+                  "title_link": "${{ steps.content.outputs.url }}",
+                  "fields": [
+                    {
+                      "title": "Repository",
+                      "value": "${{ github.repository }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Context",
+                      "value": "${{ steps.content.outputs.context }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Commit",
+                      "value": "`${{ github.sha }}`",
+                      "short": true
+                    },
+                    {
+                      "title": "Author",
+                      "value": "${{ steps.content.outputs.commit_author }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Message",
+                      "value": "${{ steps.content.outputs.commit_message }}",
+                      "short": false
+                    }
+                  ],
+                  "footer": "GitHub Actions",
+                  "footer_icon": "https://github.githubassets.com/favicon.ico",
+                  "ts": "${{ github.event.head_commit.timestamp }}"
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      # Discord Notification
+      - name: Send Discord notification
+        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -X POST $DISCORD_WEBHOOK_URL \
+            -H "Content-Type: application/json" \
+            -d '{
+              "embeds": [{
+                "title": "${{ steps.status-info.outputs.emoji }} ${{ inputs.workflow_name }}: ${{ inputs.status }}",
+                "url": "${{ steps.content.outputs.url }}",
+                "color": ${{ steps.status-info.outputs.discord_color }},
+                "fields": [
+                  {
+                    "name": "Repository",
+                    "value": "${{ github.repository }}",
+                    "inline": true
+                  },
+                  {
+                    "name": "Context",
+                    "value": "${{ steps.content.outputs.context }}",
+                    "inline": true
+                  },
+                  {
+                    "name": "Commit",
+                    "value": "`${{ github.sha }}`",
+                    "inline": false
+                  },
+                  {
+                    "name": "Author",
+                    "value": "${{ steps.content.outputs.commit_author }}",
+                    "inline": true
+                  },
+                  {
+                    "name": "Message",
+                    "value": "${{ steps.content.outputs.commit_message }}",
+                    "inline": false
+                  }
+                ],
+                "timestamp": "${{ github.event.head_commit.timestamp }}",
+                "footer": {
+                  "text": "GitHub Actions",
+                  "icon_url": "https://github.githubassets.com/favicon.ico"
+                }
+              }]
+            }'
+
+      # Microsoft Teams Notification
+      - name: Send Teams notification
+        if: ${{ secrets.TEAMS_WEBHOOK_URL != '' }}
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: |
+          curl -X POST $TEAMS_WEBHOOK_URL \
+            -H "Content-Type: application/json" \
+            -d '{
+              "@type": "MessageCard",
+              "@context": "https://schema.org/extensions",
+              "themeColor": "${{ steps.status-info.outputs.color }}",
+              "summary": "${{ inputs.workflow_name }}: ${{ inputs.status }}",
+              "sections": [{
+                "activityTitle": "${{ steps.status-info.outputs.emoji }} ${{ inputs.workflow_name }}: ${{ inputs.status }}",
+                "facts": [
+                  {
+                    "name": "Repository:",
+                    "value": "${{ github.repository }}"
+                  },
+                  {
+                    "name": "Context:",
+                    "value": "${{ steps.content.outputs.context }}"
+                  },
+                  {
+                    "name": "Commit:",
+                    "value": "${{ github.sha }}"
+                  },
+                  {
+                    "name": "Author:",
+                    "value": "${{ steps.content.outputs.commit_author }}"
+                  },
+                  {
+                    "name": "Message:",
+                    "value": "${{ steps.content.outputs.commit_message }}"
+                  }
+                ],
+                "markdown": true
+              }],
+              "potentialAction": [{
+                "@type": "OpenUri",
+                "name": "View in GitHub",
+                "targets": [{
+                  "os": "default",
+                  "uri": "${{ steps.content.outputs.url }}"
+                }]
+              }]
+            }'
+
+      # Email Notification
+      - name: Send email notification
+        if: ${{ secrets.SENDGRID_API_KEY != '' && secrets.NOTIFICATION_EMAIL_TO != '' }}
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: 'https://api.sendgrid.com/v3/mail/send'
+          method: 'POST'
+          customHeaders: |
+            {
+              "Authorization": "Bearer ${{ secrets.SENDGRID_API_KEY }}",
+              "Content-Type": "application/json"
+            }
+          data: |
+            {
+              "personalizations": [{
+                "to": [{"email": "${{ secrets.NOTIFICATION_EMAIL_TO }}"}]
+              }],
+              "from": {"email": "${{ secrets.NOTIFICATION_EMAIL_FROM }}"},
+              "subject": "${{ steps.status-info.outputs.emoji }} Gunj Operator Build: ${{ inputs.workflow_name }} - ${{ inputs.status }}",
+              "content": [{
+                "type": "text/html",
+                "value": "<h2>${{ steps.status-info.outputs.emoji }} ${{ inputs.workflow_name }}: ${{ inputs.status }}</h2><table><tr><td><strong>Repository:</strong></td><td>${{ github.repository }}</td></tr><tr><td><strong>Context:</strong></td><td>${{ steps.content.outputs.context }}</td></tr><tr><td><strong>Commit:</strong></td><td><code>${{ github.sha }}</code></td></tr><tr><td><strong>Author:</strong></td><td>${{ steps.content.outputs.commit_author }}</td></tr><tr><td><strong>Message:</strong></td><td>${{ steps.content.outputs.commit_message }}</td></tr></table><p><a href=\"${{ steps.content.outputs.url }}\">View details in GitHub</a></p>"
+              }]
+            }
