@@ -1,0 +1,588 @@
+# Enable conversion webhook for ObservabilityPlatform CRD
+- op: add
+  path: /spec/conversion
+  value:
+    strategy: Webhook
+    webhook:
+      clientConfig:
+        service:
+          name: gunj-operator-webhook-service
+          namespace: gunj-system
+          path: /convert
+      conversionReviewVersions:
+      - v1
+      - v1beta1
+
+# Mark v1beta1 as the storage version
+- op: replace
+  path: /spec/versions/0/storage
+  value: true
+
+# Add v1alpha1 version
+- op: add
+  path: /spec/versions/-
+  value:
+    name: v1alpha1
+    served: true
+    storage: false
+    deprecated: true
+    deprecationWarning: "v1alpha1 is deprecated, please use v1beta1"
+    schema:
+      openAPIV3Schema:
+        description: ObservabilityPlatform is the Schema for the observabilityplatforms API (v1alpha1)
+        type: object
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ObservabilityPlatformSpec defines the desired state (v1alpha1)
+            type: object
+            required:
+            - components
+            properties:
+              components:
+                type: object
+                properties:
+                  prometheus:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        default: true
+                      version:
+                        type: string
+                        pattern: '^v?\d+\.\d+\.\d+$'
+                      replicas:
+                        type: integer
+                        minimum: 1
+                        default: 1
+                      resources:
+                        type: object
+                        properties:
+                          requests:
+                            type: object
+                            properties:
+                              memory:
+                                type: string
+                              cpu:
+                                type: string
+                          limits:
+                            type: object
+                            properties:
+                              memory:
+                                type: string
+                              cpu:
+                                type: string
+                      storage:
+                        type: object
+                        properties:
+                          size:
+                            type: string
+                            default: "10Gi"
+                          storageClassName:
+                            type: string
+                      retention:
+                        type: string
+                        default: "30d"
+                        pattern: '^\d+[hdwmy]$'
+                      customConfig:
+                        type: object
+                        additionalProperties:
+                          type: string
+                      serviceMonitorSelector:
+                        type: object
+                        properties:
+                          matchLabels:
+                            type: object
+                            additionalProperties:
+                              type: string
+                          matchExpressions:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                key:
+                                  type: string
+                                operator:
+                                  type: string
+                                values:
+                                  type: array
+                                  items:
+                                    type: string
+                      remoteWrite:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            url:
+                              type: string
+                            remoteTimeout:
+                              type: string
+                            headers:
+                              type: object
+                              additionalProperties:
+                                type: string
+                  grafana:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        default: true
+                      version:
+                        type: string
+                        pattern: '^\d+\.\d+\.\d+$'
+                      replicas:
+                        type: integer
+                        minimum: 1
+                        default: 1
+                      resources:
+                        type: object
+                        properties:
+                          requests:
+                            type: object
+                            properties:
+                              memory:
+                                type: string
+                              cpu:
+                                type: string
+                          limits:
+                            type: object
+                            properties:
+                              memory:
+                                type: string
+                              cpu:
+                                type: string
+                      adminPassword:
+                        type: string
+                      ingress:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                            default: false
+                          className:
+                            type: string
+                          host:
+                            type: string
+                          path:
+                            type: string
+                            default: "/"
+                          tls:
+                            type: object
+                            properties:
+                              enabled:
+                                type: boolean
+                                default: true
+                              secretName:
+                                type: string
+                          annotations:
+                            type: object
+                            additionalProperties:
+                              type: string
+                      dataSources:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            type:
+                              type: string
+                            url:
+                              type: string
+                            access:
+                              type: string
+                              default: "proxy"
+                            isDefault:
+                              type: boolean
+                            jsonData:
+                              type: object
+                              additionalProperties:
+                                type: string
+                      dashboards:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            folder:
+                              type: string
+                            configMap:
+                              type: string
+                            url:
+                              type: string
+                  loki:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        default: true
+                      version:
+                        type: string
+                        pattern: '^\d+\.\d+\.\d+$'
+                      resources:
+                        type: object
+                        properties:
+                          requests:
+                            type: object
+                            properties:
+                              memory:
+                                type: string
+                              cpu:
+                                type: string
+                          limits:
+                            type: object
+                            properties:
+                              memory:
+                                type: string
+                              cpu:
+                                type: string
+                      storage:
+                        type: object
+                        properties:
+                          size:
+                            type: string
+                            default: "10Gi"
+                          storageClassName:
+                            type: string
+                      s3:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                            default: false
+                          bucketName:
+                            type: string
+                          region:
+                            type: string
+                          endpoint:
+                            type: string
+                          accessKeyId:
+                            type: string
+                          secretAccessKey:
+                            type: string
+                      retention:
+                        type: string
+                        default: "7d"
+                        pattern: '^\d+[hdwmy]$'
+                  tempo:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        default: true
+                      version:
+                        type: string
+                        pattern: '^\d+\.\d+\.\d+$'
+                      resources:
+                        type: object
+                        properties:
+                          requests:
+                            type: object
+                            properties:
+                              memory:
+                                type: string
+                              cpu:
+                                type: string
+                          limits:
+                            type: object
+                            properties:
+                              memory:
+                                type: string
+                              cpu:
+                                type: string
+                      storage:
+                        type: object
+                        properties:
+                          size:
+                            type: string
+                            default: "10Gi"
+                          storageClassName:
+                            type: string
+                      retention:
+                        type: string
+                        default: "24h"
+                        pattern: '^\d+[hdwmy]$'
+                  openTelemetryCollector:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        default: true
+                      version:
+                        type: string
+                      replicas:
+                        type: integer
+                        minimum: 1
+                        default: 1
+                      resources:
+                        type: object
+                        properties:
+                          requests:
+                            type: object
+                            properties:
+                              memory:
+                                type: string
+                              cpu:
+                                type: string
+                          limits:
+                            type: object
+                            properties:
+                              memory:
+                                type: string
+                              cpu:
+                                type: string
+                      config:
+                        type: string
+              global:
+                type: object
+                properties:
+                  externalLabels:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  logLevel:
+                    type: string
+                    default: "info"
+                    enum: ["debug", "info", "warn", "error"]
+                  nodeSelector:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  tolerations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                        operator:
+                          type: string
+                        value:
+                          type: string
+                        effect:
+                          type: string
+                        tolerationSeconds:
+                          type: integer
+                  securityContext:
+                    type: object
+                    properties:
+                      runAsNonRoot:
+                        type: boolean
+                      runAsUser:
+                        type: integer
+                      runAsGroup:
+                        type: integer
+                      fsGroup:
+                        type: integer
+              highAvailability:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                    default: true
+                  minReplicas:
+                    type: integer
+                    minimum: 2
+                    default: 2
+                  antiAffinity:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        default: "soft"
+                        enum: ["soft", "hard"]
+                      topologyKey:
+                        type: string
+              backup:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                    default: false
+                  schedule:
+                    type: string
+                    default: "0 2 * * *"
+                  retentionDays:
+                    type: integer
+                    minimum: 1
+                    default: 7
+                  destination:
+                    type: object
+                    required:
+                    - type
+                    properties:
+                      type:
+                        type: string
+                        enum: ["s3", "gcs", "azure"]
+                      s3:
+                        type: object
+                        properties:
+                          enabled:
+                            type: boolean
+                          bucketName:
+                            type: string
+                          region:
+                            type: string
+                          endpoint:
+                            type: string
+                          accessKeyId:
+                            type: string
+                          secretAccessKey:
+                            type: string
+                      gcs:
+                        type: object
+                        properties:
+                          bucketName:
+                            type: string
+                          serviceAccountKey:
+                            type: string
+                      azure:
+                        type: object
+                        properties:
+                          containerName:
+                            type: string
+                          storageAccount:
+                            type: string
+                          storageAccessKey:
+                            type: string
+              alerting:
+                type: object
+                properties:
+                  alertmanager:
+                    type: object
+                    properties:
+                      enabled:
+                        type: boolean
+                        default: true
+                      replicas:
+                        type: integer
+                        minimum: 1
+                        default: 1
+                      config:
+                        type: string
+                  rules:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        groups:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                              interval:
+                                type: string
+                                default: "1m"
+                              rules:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    alert:
+                                      type: string
+                                    expr:
+                                      type: string
+                                    for:
+                                      type: string
+                                    labels:
+                                      type: object
+                                      additionalProperties:
+                                        type: string
+                                    annotations:
+                                      type: object
+                                      additionalProperties:
+                                        type: string
+              paused:
+                type: boolean
+                default: false
+          status:
+            description: ObservabilityPlatformStatus defines the observed state (v1alpha1)
+            type: object
+            properties:
+              phase:
+                type: string
+                enum: ["Pending", "Installing", "Ready", "Failed", "Upgrading"]
+              message:
+                type: string
+              lastReconcileTime:
+                type: string
+                format: date-time
+              observedGeneration:
+                type: integer
+              conditions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    status:
+                      type: string
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    reason:
+                      type: string
+                    message:
+                      type: string
+              componentStatus:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    phase:
+                      type: string
+                    version:
+                      type: string
+                    readyReplicas:
+                      type: integer
+                    lastUpdateTime:
+                      type: string
+                      format: date-time
+              endpoints:
+                type: object
+                additionalProperties:
+                  type: string
+    additionalPrinterColumns:
+    - name: Phase
+      type: string
+      jsonPath: .status.phase
+      description: Current phase of the platform
+    - name: Ready
+      type: string
+      jsonPath: .status.conditions[?(@.type=='Ready')].status
+      description: Ready condition status
+      priority: 1
+    - name: Prometheus
+      type: string
+      jsonPath: .status.componentStatus.prometheus.phase
+      description: Prometheus status
+      priority: 1
+    - name: Grafana
+      type: string
+      jsonPath: .status.componentStatus.grafana.phase
+      description: Grafana status
+      priority: 1
+    - name: Message
+      type: string
+      jsonPath: .status.message
+      description: Status message
+      priority: 1
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+      description: Time since creation
+    subresources:
+      status: {}

@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gunj-operator-config
+  namespace: gunj-system
+data:
+  config.yaml: |
+    # Gunj Operator Configuration
+    operator:
+      # Health check configuration
+      healthCheck:
+        # Interval between health checks
+        interval: 30s
+        # Timeout for individual health checks
+        timeout: 10s
+        # Port for health server
+        port: 8081
+        # Enable detailed health metrics
+        enableMetrics: true
+        
+      # Component-specific health check settings
+      components:
+        prometheus:
+          # Custom health endpoint (optional)
+          healthEndpoint: "/-/healthy"
+          # Additional health check timeout
+          timeout: 5s
+          
+        grafana:
+          healthEndpoint: "/api/health"
+          timeout: 5s
+          
+        loki:
+          healthEndpoint: "/ready"
+          timeout: 5s
+          
+        tempo:
+          healthEndpoint: "/ready"
+          timeout: 5s
+      
+      # Reconciliation settings
+      reconciliation:
+        # Normal requeue duration
+        requeueAfter: 5m
+        # Requeue after error
+        requeueAfterError: 30s
+        # Max concurrent reconciles
+        maxConcurrent: 3
+      
+      # Metrics configuration
+      metrics:
+        # Metrics server port
+        port: 8080
+        # Enable detailed metrics
+        detailed: true
+        
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gunj-operator-health
+  namespace: gunj-system
+  labels:
+    app: gunj-operator
+spec:
+  selector:
+    app: gunj-operator
+  ports:
+  - name: health
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+    
+---
+apiVersion: v1
+kind: ServiceMonitor
+metadata:
+  name: gunj-operator
+  namespace: gunj-system
+spec:
+  selector:
+    matchLabels:
+      app: gunj-operator
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+  - port: health
+    path: /metrics/health
+    interval: 60s
