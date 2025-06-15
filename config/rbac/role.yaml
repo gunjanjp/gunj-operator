@@ -1,15 +1,13 @@
-# Operator cluster role
+# Role for managing ObservabilityPlatform resources and their status
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: gunj-operator-role
+  name: gunj-operator-manager-role
   labels:
     app.kubernetes.io/name: gunj-operator
-    app.kubernetes.io/instance: gunj-operator
-    app.kubernetes.io/component: controller
     app.kubernetes.io/managed-by: kustomize
 rules:
-# ObservabilityPlatform resources
+# ObservabilityPlatform resource permissions
 - apiGroups:
   - observability.io
   resources:
@@ -22,12 +20,9 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - observability.io
-  resources:
-  - observabilityplatforms/finalizers
-  verbs:
-  - update
+
+# ObservabilityPlatform status subresource permissions
+# This allows the operator to update status independently
 - apiGroups:
   - observability.io
   resources:
@@ -37,18 +32,24 @@ rules:
   - patch
   - update
 
-# Core resources
+# ObservabilityPlatform finalizers permissions
 - apiGroups:
-  - ""
+  - observability.io
   resources:
-  - configmaps
-  - endpoints
-  - events
-  - persistentvolumeclaims
-  - pods
-  - secrets
-  - serviceaccounts
-  - services
+  - observabilityplatforms/finalizers
+  verbs:
+  - update
+
+# Permissions for managing Prometheus resources
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - prometheuses
+  - prometheusrules
+  - servicemonitors
+  - podmonitors
+  - alertmanagers
+  - alertmanagerconfigs
   verbs:
   - create
   - delete
@@ -58,13 +59,34 @@ rules:
   - update
   - watch
 
-# Apps resources
+# Permissions for managing core Kubernetes resources
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - services
+  - services/finalizers
+  - endpoints
+  - persistentvolumeclaims
+  - events
+  - configmaps
+  - secrets
+  - serviceaccounts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Permissions for managing apps resources
 - apiGroups:
   - apps
   resources:
-  - daemonsets
   - deployments
-  - replicasets
+  - daemonsets
   - statefulsets
   verbs:
   - create
@@ -75,22 +97,7 @@ rules:
   - update
   - watch
 
-# Batch resources
-- apiGroups:
-  - batch
-  resources:
-  - cronjobs
-  - jobs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-
-# Networking resources
+# Permissions for managing networking resources
 - apiGroups:
   - networking.k8s.io
   resources:
@@ -105,12 +112,12 @@ rules:
   - update
   - watch
 
-# RBAC resources (for creating component service accounts)
+# Permissions for managing RBAC resources
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
-  - rolebindings
   - roles
+  - rolebindings
   verbs:
   - create
   - delete
@@ -120,7 +127,7 @@ rules:
   - update
   - watch
 
-# Policy resources
+# Permissions for managing policy resources
 - apiGroups:
   - policy
   resources:
@@ -134,25 +141,7 @@ rules:
   - update
   - watch
 
-# Monitoring resources (for Prometheus Operator integration)
-- apiGroups:
-  - monitoring.coreos.com
-  resources:
-  - prometheuses
-  - prometheusrules
-  - servicemonitors
-  - podmonitors
-  - alertmanagers
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-
-# Autoscaling resources
+# Permissions for managing autoscaling resources
 - apiGroups:
   - autoscaling
   resources:
@@ -166,30 +155,34 @@ rules:
   - update
   - watch
 
-# Pod logs (for troubleshooting)
+# Permissions for leader election
 - apiGroups:
-  - ""
+  - coordination.k8s.io
   resources:
-  - pods/log
-  verbs:
-  - get
-  - list
-
-# Pod exec (for debugging - should be removed in production)
-- apiGroups:
-  - ""
-  resources:
-  - pods/exec
+  - leases
   verbs:
   - create
   - get
+  - list
+  - update
+  - patch
+  - watch
 
-# Metrics
+# Permissions for watching nodes (for scheduling decisions)
 - apiGroups:
-  - metrics.k8s.io
+  - ""
   resources:
-  - pods
   - nodes
   verbs:
   - get
   - list
+  - watch
+
+# Permissions for creating events
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch

@@ -1,0 +1,365 @@
+apiVersion: observability.io/v1beta1
+kind: LokiConfig
+metadata:
+  name: lokiconfig-sample
+  namespace: observability
+spec:
+  # Loki version - supports 2.9.x and 3.x
+  version: "2.9.4"
+  
+  # Storage configuration - Choose one backend
+  storage:
+    type: s3  # Options: s3, gcs, azure, filesystem, swift
+    
+    # S3 storage configuration
+    s3:
+      bucketName: loki-logs-bucket
+      region: us-east-1
+      endpoint: ""  # Optional: for S3-compatible storage
+      accessKeyId: ""  # Optional: uses IAM role if not specified
+      secretAccessKey:
+        name: loki-s3-secret
+        key: secret-access-key
+      sse: true  # Enable server-side encryption
+      http2: true
+      forcePathStyle: false
+    
+    # Alternative: GCS storage
+    # gcs:
+    #   bucketName: loki-logs-bucket
+    #   serviceAccount:
+    #     name: loki-gcs-secret
+    #     key: service-account.json
+    #   enableHttp2: true
+    
+    # Alternative: Azure storage
+    # azure:
+    #   containerName: loki-logs
+    #   accountName: mystorageaccount
+    #   accountKey:
+    #     name: loki-azure-secret
+    #     key: account-key
+    #   useManagedIdentity: false
+    
+    # Alternative: Filesystem storage (for testing only)
+    # filesystem:
+    #   directory: /loki/chunks
+    #   persistentVolumeClaim:
+    #     claimName: loki-storage-pvc
+    
+    # BoltDB configuration for index
+    boltdb:
+      directory: /loki/index
+    
+    # Cache configuration
+    cache:
+      enableIndexCache: true
+      indexCache:
+        type: memcached  # Options: inmemory, memcached, redis
+        memcached:
+          addresses:
+            - memcached-index.observability.svc.cluster.local:11211
+          timeout: "100ms"
+          maxIdleConns: 16
+      
+      enableChunkCache: true
+      chunkCache:
+        type: memcached
+        memcached:
+          addresses:
+            - memcached-chunks.observability.svc.cluster.local:11211
+      
+      enableResultsCache: true
+      resultsCache:
+        type: redis
+        redis:
+          endpoint: redis.observability.svc.cluster.local:6379
+          password:
+            name: redis-secret
+            key: password
+          db: 0
+          tls: false
+        maxFreshness: "10m"
+  
+  # Schema configuration - Defines how chunks and indexes are stored
+  schemaConfig:
+    configs:
+      # Initial schema (required)
+      - from: "2024-01-01T00:00:00Z"
+        store: boltdb-shipper
+        objectStore: s3
+        schema: v11
+        index:
+          prefix: index_
+          period: 24h
+        chunks:
+          prefix: chunks_
+          period: 24h
+        rowShards: 16
+      
+      # Schema migration example (upgrade to v12)
+      - from: "2025-01-01T00:00:00Z"
+        store: tsdb
+        objectStore: s3
+        schema: v12
+        index:
+          prefix: index_
+          period: 24h
+        chunks:
+          prefix: chunks_
+          period: 24h
+        rowShards: 32
+  
+  # Limits configuration - Rate limiting and quotas
+  limits:
+    # Ingestion limits
+    ingestionRateMB: 10  # MB per second
+    ingestionBurstSizeMB: 15  # MB burst size
+    maxLabelNameLength: 1024
+    maxLabelValueLength: 2048
+    maxLabelNamesPerSeries: 30
+    
+    # Sample age limits
+    rejectOldSamples: true
+    rejectOldSamplesMaxAge: "168h"  # 7 days
+    creationGracePeriod: "10m"
+    
+    # Stream limits
+    maxStreamsPerUser: 10000
+    maxGlobalStreamsPerUser: 10000
+    perStreamRateLimit: 3  # MB per second per stream
+    perStreamRateLimitBurst: 15
+    
+    # Query limits
+    maxChunksPerQuery: 2000000
+    maxQuerySeries: 500
+    maxQueryLookback: "0s"  # 0 means no limit
+    maxQueryLength: "721h"  # 30 days
+    maxQueryParallelism: 32
+    maxEntriesLimitPerQuery: 5000
+    maxCacheFreshnessPerQuery: "1m"
+    splitQueriesByInterval: "30m"
+    maxStreamsMatchersPerQuery: 1000
+    maxConcurrentTailRequests: 10
+    
+    # Cardinality limit
+    cardinalityLimit: 1000000
+    
+    # Global retention
+    retentionPeriod: "744h"  # 31 days
+    
+    # Per-stream retention
+    retentionStream:
+      - selector: '{namespace="production"}'
+        period: "2160h"  # 90 days
+        priority: 1
+      - selector: '{namespace="development"}'
+        period: "168h"  # 7 days
+        priority: 2
+  
+  # Table manager configuration
+  tableManager:
+    retentionDeletesEnabled: true
+    retentionPeriod: "744h"  # 31 days
+    pollInterval: "10m"
+    creationGracePeriod: "10m"
+  
+  # Ingester configuration
+  ingester:
+    # WAL configuration
+    wal:
+      enabled: true
+      dir: /loki/wal
+      checkpointDuration: "5m"
+      flushOnShutdown: true
+      replayMemoryCeiling: "4GB"
+    
+    # Lifecycler configuration
+    lifecycler:
+      ring:
+        kvStore:
+          store: memberlist  # Options: consul, etcd, inmemory, memberlist
+          prefix: collectors/
+        replicationFactor: 3
+        zoneAwarenessEnabled: true
+      numTokens: 128
+      heartbeatPeriod: "5s"
+      joinAfter: "0s"
+      minReadyDuration: "60s"
+      finalSleep: "0s"
+    
+    # Chunk configuration
+    chunkIdlePeriod: "30m"
+    chunkBlockSize: 262144
+    chunkTargetSize: 1572864  # 1.5 MB
+    chunkEncoding: gzip  # Options: none, gzip, lz4-64k, snappy, lz4-256k, lz4-1M, lz4, flate, zstd
+    maxChunkAge: "2h"
+    
+    # Flush configuration
+    flushOnShutdown: true
+    flushCheckPeriod: "30s"
+    concurrentFlushes: 32
+    maxTransferRetries: 0
+  
+  # Querier configuration
+  querier:
+    maxConcurrent: 20
+    tailMaxDuration: "1h"
+    queryTimeout: "1m"
+    queryIngestersWithin: "3h"
+    engine:
+      timeout: "5m"
+      maxLookBackPeriod: "30d"
+  
+  # Query frontend configuration
+  queryFrontend:
+    compressResponses: true
+    maxOutstandingPerTenant: 2048
+    logQueriesLongerThan: "5s"
+    downstreamURL: ""  # Optional: override querier address
+    splitQueriesByInterval: "30m"
+    alignQueriesWithStep: true
+    cacheResults: true
+    maxRetries: 5
+    paralleliseShardableQueries: true
+    schedulerAddress: ""  # Optional: query scheduler address
+    schedulerDnsLookupPeriod: "10s"
+    schedulerWorkerConcurrency: 5
+  
+  # Compactor configuration
+  compactor:
+    workingDirectory: /loki/compactor
+    sharedStore: s3
+    compactionInterval: "10m"
+    retentionEnabled: true
+    retentionDeleteDelay: "2h"
+    retentionDeleteWorkerCount: 150
+    deleteRequestCancelPeriod: "24h"
+    maxCompactionParallelism: 1
+  
+  # Ruler configuration for recording/alerting rules
+  ruler:
+    enableApi: true
+    enableSharding: true
+    
+    # Storage for rules
+    storage:
+      type: s3  # Options: local, s3, gcs, azure, swift
+      s3:
+        bucketName: loki-ruler-bucket
+        region: us-east-1
+        accessKeyId: ""
+        secretAccessKey:
+          name: loki-s3-secret
+          key: secret-access-key
+    
+    rulePath: /loki/rules-temp
+    evaluationInterval: "1m"
+    pollInterval: "1m"
+    
+    # Alertmanager configuration
+    alertmanagerUrl: http://alertmanager.observability.svc.cluster.local:9093
+    externalUrl: https://loki.example.com
+    externalLabels:
+      cluster: production
+      region: us-east-1
+    
+    enableAlertmanagerV2: true
+    alertmanagerRefreshInterval: "1m"
+    notificationQueueCapacity: 10000
+    notificationTimeout: "10s"
+    searchPendingFor: "5m"
+    
+    # Ring configuration for sharding
+    ring:
+      kvStore:
+        store: memberlist
+        prefix: rulers/
+      replicationFactor: 3
+      zoneAwarenessEnabled: true
+    
+    flushPeriod: "1m"
+    enableQueryStats: true
+  
+  # Authentication configuration
+  auth:
+    type: oidc  # Options: basic, oidc, header
+    
+    # OIDC configuration
+    oidc:
+      issuerUrl: https://auth.example.com
+      clientId: loki-client
+      clientSecret:
+        name: oidc-secret
+        key: client-secret
+      redirectUrl: https://loki.example.com/oidc/callback
+      groupClaim: groups
+      usernameClaim: email
+    
+    # Alternative: Basic auth
+    # basic:
+    #   username: admin
+    #   password:
+    #     name: basic-auth-secret
+    #     key: password
+    
+    # Alternative: Header auth
+    # header:
+    #   headerName: X-Auth-User
+    #   headerValuePrefix: "Bearer "
+  
+  # Multi-tenancy configuration
+  multiTenancy:
+    enabled: true
+    authEnabled: true
+    tenantIdHeader: "X-Scope-OrgID"
+    tenantIdLabel: "tenant_id"
+    
+    # Per-tenant configuration
+    tenants:
+      - id: tenant-a
+        displayName: "Tenant A - Production"
+        limits:
+          ingestionRateMB: 20
+          ingestionBurstSizeMB: 30
+          maxStreamsPerUser: 20000
+          retentionPeriod: "2160h"  # 90 days
+      
+      - id: tenant-b
+        displayName: "Tenant B - Development"
+        limits:
+          ingestionRateMB: 5
+          ingestionBurstSizeMB: 10
+          maxStreamsPerUser: 5000
+          retentionPeriod: "168h"  # 7 days
+  
+  # Server configuration
+  server:
+    httpListenPort: 3100
+    grpcListenPort: 9095
+    registerInstrumentation: true
+    logLevel: info  # Options: debug, info, warn, error
+    logFormat: logfmt  # Options: json, logfmt
+    
+    # gRPC server settings
+    grpcServerMaxRecvMsgSize: 4194304  # 4MB
+    grpcServerMaxSendMsgSize: 4194304  # 4MB
+    grpcServerMaxConcurrentStreams: 100
+    grpcServerMaxConnectionIdle: "300s"
+    grpcServerMaxConnectionAge: "300s"
+    grpcServerMaxConnectionAgeGrace: "30s"
+    grpcServerKeepaliveTime: "120s"
+    grpcServerKeepaliveTimeout: "20s"
+    
+    # HTTP server settings
+    httpServerReadTimeout: "30s"
+    httpServerWriteTimeout: "30s"
+    httpServerIdleTimeout: "120s"
+  
+  # Additional custom configuration (key-value pairs)
+  customConfig:
+    # Any additional Loki configuration options not covered above
+    # These will be merged into the final configuration
+    "distributor.rate_limiter.strategy": "global"
+    "frontend.max_cache_freshness_per_query": "10m"
+    "querier.query_ingester_only": "false"

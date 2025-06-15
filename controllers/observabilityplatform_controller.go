@@ -12,533 +12,639 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
-	observabilityv1 "github.com/gunjanjp/gunj-operator/api/v1alpha1"
+	observabilityv1beta1 "github.com/gunjanjp/gunj-operator/api/v1beta1"
+	"github.com/gunjanjp/gunj-operator/internal/managers"
+	"github.com/gunjanjp/gunj-operator/internal/gitops"
+	"github.com/gunjanjp/gunj-operator/internal/metrics"
 )
 
 const (
-	finalizerName = "observability.io/finalizer"
-	
-	// Platform phases
-	PhasePending    = "Pending"
-	PhaseInstalling = "Installing"
-	PhaseReady      = "Ready"
-	PhaseFailed     = "Failed"
-	PhaseUpgrading  = "Upgrading"
-	
-	// Condition types
-	ConditionReady       = "Ready"
-	ConditionProgressing = "Progressing"
-	ConditionDegraded    = "Degraded"
-	ConditionAvailable   = "Available"
-	
-	// Condition reasons
-	ReasonValidationFailed = "ValidationFailed"
-	ReasonInstalling       = "Installing"
-	ReasonReady           = "Ready"
-	ReasonFailed          = "Failed"
-	ReasonUpgrading       = "Upgrading"
+	// FinalizerName is the name of the finalizer used by this controller
+	FinalizerName = "observabilityplatform.observability.io/finalizer"
+
+	// RequeueAfterSuccess is the duration after which a successful reconciliation will be requeued
+	RequeueAfterSuccess = 5 * time.Minute
+
+	// RequeueAfterError is the duration after which a failed reconciliation will be requeued
+	RequeueAfterError = 30 * time.Second
 )
 
 // ObservabilityPlatformReconciler reconciles a ObservabilityPlatform object
 type ObservabilityPlatformReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
-	
+	Scheme     *runtime.Scheme
+	RestConfig *rest.Config
+	Recorder   record.EventRecorder
+	Log        logr.Logger
+
 	// Component managers
-	prometheusManager ComponentManager
-	grafanaManager    ComponentManager
-	lokiManager       ComponentManager
-	tempoManager      ComponentManager
+	PrometheusManager managers.PrometheusManager
+	GrafanaManager    managers.GrafanaManager
+	LokiManager       managers.LokiManager
+	TempoManager      managers.TempoManager
+
+	// GitOps manager
+	GitOpsManager *gitops.Manager
+
+	// Metrics collector
+	Metrics *metrics.Collector
+
+	// Status management
+	StatusManager *StatusManager
+	EventRecorder *EnhancedEventRecorder
+
+	// Finalizer management
+	FinalizerManager *FinalizerManager
+
+	// Health management
+	HealthCheckManager *HealthCheckManager
+	HealthServer       *HealthServer
+
+	// Cost optimization
+	CostManager managers.CostManager
+
+	// Configuration
+	MaxConcurrentReconciles int
+	RequeueDuration         time.Duration
 }
 
-// ComponentManager interface for managing individual components
-type ComponentManager interface {
-	Deploy(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) error
-	GetStatus(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) (*observabilityv1.ComponentStatus, error)
-	Upgrade(ctx context.Context, platform *observabilityv1.ObservabilityPlatform, fromVersion string) error
-	Delete(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) error
-}
-
-// RetryConfig defines retry behavior for transient errors
-type RetryConfig struct {
-	MaxRetries     int
-	InitialBackoff time.Duration
-	MaxBackoff     time.Duration
-	BackoffFactor  float64
-}
-
-var defaultRetryConfig = RetryConfig{
-	MaxRetries:     5,
-	InitialBackoff: 10 * time.Second,
-	MaxBackoff:     5 * time.Minute,
-	BackoffFactor:  2.0,
-}
-
-//+kubebuilder:rbac:groups=observability.io,resources=observabilityplatforms,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=observability.io,resources=observabilityplatforms/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=observability.io,resources=observabilityplatforms/finalizers,verbs=update
-//+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
-//+kubebuilder:rbac:groups=apps,resources=deployments;statefulsets,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=core,resources=services;configmaps;secrets;persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=observability.io,resources=observabilityplatforms,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=observability.io,resources=observabilityplatforms/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=observability.io,resources=observabilityplatforms/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=services;serviceaccounts;configmaps;secrets;persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses;networkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=prometheuses;alertmanagers;servicemonitors;podmonitors;prometheusrules,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *ObservabilityPlatformReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("Starting reconciliation")
+	log := log.FromContext(ctx).WithValues("observabilityplatform", req.NamespacedName)
+	startTime := time.Now()
+
+	// Record reconciliation metrics
+	defer func() {
+		duration := time.Since(startTime)
+		r.Metrics.RecordReconciliation("observabilityplatform", duration.Seconds())
+		// Update metrics in status
+		r.StatusManager.metricsCollector.reconciliationDuration = duration
+		r.StatusManager.metricsCollector.lastReconcileTime = time.Now()
+	}()
+
+	log.V(1).Info("Starting reconciliation")
 
 	// Fetch the ObservabilityPlatform instance
-	platform := &observabilityv1.ObservabilityPlatform{}
+	platform := &observabilityv1beta1.ObservabilityPlatform{}
 	if err := r.Get(ctx, req.NamespacedName, platform); err != nil {
 		if errors.IsNotFound(err) {
-			// Object not found, could have been deleted
-			log.Info("ObservabilityPlatform resource not found, ignoring")
+			// Object not found, could have been deleted after reconcile request
+			log.Info("ObservabilityPlatform resource not found, ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
+		// Error reading the object - requeue the request
 		log.Error(err, "Failed to get ObservabilityPlatform")
-		return ctrl.Result{}, err
+		r.Metrics.RecordReconciliationError("observabilityplatform")
+		return ctrl.Result{RequeueAfter: RequeueAfterError}, err
 	}
 
-	// Handle deletion
-	if !platform.DeletionTimestamp.IsZero() {
+	// Check if the platform is being deleted
+	if !platform.ObjectMeta.DeletionTimestamp.IsZero() {
 		return r.handleDeletion(ctx, platform)
 	}
 
-	// Add finalizer if needed
-	if !controllerutil.ContainsFinalizer(platform, finalizerName) {
-		log.Info("Adding finalizer")
-		controllerutil.AddFinalizer(platform, finalizerName)
-		if err := r.Update(ctx, platform); err != nil {
-			log.Error(err, "Failed to add finalizer")
-			return ctrl.Result{}, err
-		}
+	// Add finalizers using FinalizerManager
+	if err := r.FinalizerManager.AddFinalizers(ctx, platform); err != nil {
+		log.Error(err, "Failed to add finalizers")
+		return ctrl.Result{RequeueAfter: RequeueAfterError}, err
+	}
+
+	// Check if we need to requeue after adding finalizers
+	if !controllerutil.ContainsFinalizer(platform, FinalizerName) {
+		// Finalizers were just added, requeue to ensure we have the updated object
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Check if paused
+	// Check if reconciliation is paused
 	if platform.Spec.Paused {
-		log.Info("Platform is paused, skipping reconciliation")
-		return ctrl.Result{}, nil
+		log.Info("Reconciliation is paused")
+		r.StatusManager.SetCondition(ctx, platform, ConditionProgressing, metav1.ConditionFalse, "Paused", "Reconciliation paused by user")
+		r.StatusManager.CalculateAndSetPhase(ctx, platform)
+		return ctrl.Result{RequeueAfter: time.Hour}, nil
 	}
 
-	// Initialize status if needed
-	if platform.Status.Phase == "" {
-		platform.Status.Phase = PhasePending
-		platform.Status.ObservedGeneration = platform.Generation
-		if err := r.Status().Update(ctx, platform); err != nil {
-			log.Error(err, "Failed to update initial status")
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Check if spec has changed
-	if platform.Status.ObservedGeneration != platform.Generation {
-		log.Info("Spec has changed, processing update", 
-			"observedGeneration", platform.Status.ObservedGeneration,
-			"generation", platform.Generation)
-		return r.handleSpecChange(ctx, platform)
-	}
-
-	// Handle state transitions
-	log.Info("Processing state", "phase", platform.Status.Phase)
-	switch platform.Status.Phase {
-	case PhasePending:
-		return r.handlePendingState(ctx, platform)
-	case PhaseInstalling:
-		return r.handleInstallingState(ctx, platform)
-	case PhaseReady:
-		return r.handleReadyState(ctx, platform)
-	case PhaseFailed:
-		return r.handleFailedState(ctx, platform)
-	case PhaseUpgrading:
-		return r.handleUpgradingState(ctx, platform)
-	default:
-		err := fmt.Errorf("unknown phase: %s", platform.Status.Phase)
-		log.Error(err, "Invalid platform phase")
-		return ctrl.Result{}, err
-	}
-}
-
-// handlePendingState processes platforms in Pending state
-func (r *ObservabilityPlatformReconciler) handlePendingState(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("Handling Pending state")
-
-	// Perform validation
-	if err := r.validatePlatform(ctx, platform); err != nil {
-		log.Error(err, "Platform validation failed")
-		return r.transitionToFailed(ctx, platform, ReasonValidationFailed, err.Error())
-	}
-
-	// Check prerequisites
-	if err := r.checkPrerequisites(ctx, platform); err != nil {
-		log.Info("Prerequisites not met, requeueing", "error", err)
-		r.updateCondition(platform, ConditionProgressing, metav1.ConditionFalse, 
-			ReasonValidationFailed, fmt.Sprintf("Prerequisites check failed: %v", err))
-		if err := r.Status().Update(ctx, platform); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-
-	// Transition to Installing
-	log.Info("Validation passed, transitioning to Installing")
-	return r.transitionToInstalling(ctx, platform)
-}
-
-// handleInstallingState processes platforms in Installing state
-func (r *ObservabilityPlatformReconciler) handleInstallingState(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("Handling Installing state")
-
-	// Initialize component status map if needed
-	if platform.Status.ComponentStatus == nil {
-		platform.Status.ComponentStatus = make(map[string]observabilityv1.ComponentStatus)
-	}
-
-	// Deploy components in order
-	allReady := true
-	
-	// Deploy Prometheus
-	if platform.Spec.Components.Prometheus != nil && platform.Spec.Components.Prometheus.Enabled {
-		ready, err := r.deployComponent(ctx, platform, "prometheus", r.prometheusManager)
-		if err != nil {
-			return r.transitionToFailed(ctx, platform, ReasonFailed, fmt.Sprintf("Failed to deploy Prometheus: %v", err))
-		}
-		if !ready {
-			allReady = false
-		}
-	}
-
-	// Deploy Loki
-	if platform.Spec.Components.Loki != nil && platform.Spec.Components.Loki.Enabled {
-		ready, err := r.deployComponent(ctx, platform, "loki", r.lokiManager)
-		if err != nil {
-			return r.transitionToFailed(ctx, platform, ReasonFailed, fmt.Sprintf("Failed to deploy Loki: %v", err))
-		}
-		if !ready {
-			allReady = false
-		}
-	}
-
-	// Deploy Tempo
-	if platform.Spec.Components.Tempo != nil && platform.Spec.Components.Tempo.Enabled {
-		ready, err := r.deployComponent(ctx, platform, "tempo", r.tempoManager)
-		if err != nil {
-			return r.transitionToFailed(ctx, platform, ReasonFailed, fmt.Sprintf("Failed to deploy Tempo: %v", err))
-		}
-		if !ready {
-			allReady = false
-		}
-	}
-
-	// Deploy Grafana (depends on other components)
-	if platform.Spec.Components.Grafana != nil && platform.Spec.Components.Grafana.Enabled {
-		ready, err := r.deployComponent(ctx, platform, "grafana", r.grafanaManager)
-		if err != nil {
-			return r.transitionToFailed(ctx, platform, ReasonFailed, fmt.Sprintf("Failed to deploy Grafana: %v", err))
-		}
-		if !ready {
-			allReady = false
-		}
-	}
-
-	// Update status
-	if err := r.Status().Update(ctx, platform); err != nil {
-		log.Error(err, "Failed to update status")
-		return ctrl.Result{}, err
-	}
-
-	// Check if all components are ready
-	if allReady {
-		log.Info("All components ready, transitioning to Ready state")
-		return r.transitionToReady(ctx, platform)
-	}
-
-	// Still installing, requeue
-	log.Info("Components still being deployed, requeueing")
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-}
-
-// handleReadyState processes platforms in Ready state
-func (r *ObservabilityPlatformReconciler) handleReadyState(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("Handling Ready state")
-
-	// Check component health
-	allHealthy := true
-	for componentName, manager := range r.getComponentManagers() {
-		if !r.isComponentEnabled(platform, componentName) {
-			continue
-		}
-
-		status, err := manager.GetStatus(ctx, platform)
-		if err != nil {
-			log.Error(err, "Failed to get component status", "component", componentName)
-			allHealthy = false
-			continue
-		}
-
-		platform.Status.ComponentStatus[componentName] = *status
-		if status.Phase != PhaseReady {
-			allHealthy = false
-		}
-	}
-
-	// Update status
-	platform.Status.LastReconcileTime = &metav1.Time{Time: time.Now()}
-	if err := r.Status().Update(ctx, platform); err != nil {
-		log.Error(err, "Failed to update status")
-		return ctrl.Result{}, err
-	}
-
-	// Check if platform is still healthy
-	if !allHealthy {
-		log.Info("Platform degraded, transitioning to Failed state")
-		return r.transitionToFailed(ctx, platform, ReasonFailed, "One or more components are unhealthy")
-	}
-
-	// Regular health check interval
-	return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
-}
-
-// handleFailedState processes platforms in Failed state
-func (r *ObservabilityPlatformReconciler) handleFailedState(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("Handling Failed state")
-
-	// Check if we should attempt recovery
-	// For now, we'll wait for manual intervention or spec change
-	// In the future, we could implement automatic recovery strategies
-
-	// Regular check interval
-	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
-}
-
-// handleUpgradingState processes platforms in Upgrading state
-func (r *ObservabilityPlatformReconciler) handleUpgradingState(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("Handling Upgrading state")
-
-	// TODO: Implement upgrade logic
-	// For now, transition back to Ready
-	return r.transitionToReady(ctx, platform)
-}
-
-// handleDeletion handles platform deletion
-func (r *ObservabilityPlatformReconciler) handleDeletion(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("Handling deletion")
-
-	// Delete components in reverse order
-	managers := []struct {
-		name    string
-		manager ComponentManager
-	}{
-		{"grafana", r.grafanaManager},
-		{"tempo", r.tempoManager},
-		{"loki", r.lokiManager},
-		{"prometheus", r.prometheusManager},
-	}
-
-	for _, m := range managers {
-		if r.isComponentEnabled(platform, m.name) && m.manager != nil {
-			if err := m.manager.Delete(ctx, platform); err != nil {
-				log.Error(err, "Failed to delete component", "component", m.name)
-				// Continue with other components
-			}
-		}
-	}
-
-	// Remove finalizer
-	controllerutil.RemoveFinalizer(platform, finalizerName)
-	if err := r.Update(ctx, platform); err != nil {
-		log.Error(err, "Failed to remove finalizer")
-		return ctrl.Result{}, err
-	}
-
-	log.Info("Deletion completed")
-	return ctrl.Result{}, nil
-}
-
-// handleSpecChange handles changes to the platform spec
-func (r *ObservabilityPlatformReconciler) handleSpecChange(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
-	log.Info("Handling spec change")
-
-	// Update observed generation
-	platform.Status.ObservedGeneration = platform.Generation
-
-	// Determine if this is an upgrade or just a configuration change
-	// For now, we'll transition to Upgrading state
-	// TODO: Implement logic to differentiate between minor updates and upgrades
-
-	return r.transitionToUpgrading(ctx, platform)
-}
-
-// State transition helpers
-
-func (r *ObservabilityPlatformReconciler) transitionToInstalling(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) (ctrl.Result, error) {
-	platform.Status.Phase = PhaseInstalling
-	platform.Status.Message = "Installing observability components"
-	platform.Status.LastReconcileTime = &metav1.Time{Time: time.Now()}
-	
-	r.updateCondition(platform, ConditionProgressing, metav1.ConditionTrue, ReasonInstalling, "Platform installation in progress")
-	r.updateCondition(platform, ConditionReady, metav1.ConditionFalse, ReasonInstalling, "Platform is being installed")
-	
-	if err := r.Status().Update(ctx, platform); err != nil {
-		return ctrl.Result{}, err
-	}
-	
-	return ctrl.Result{Requeue: true}, nil
-}
-
-func (r *ObservabilityPlatformReconciler) transitionToReady(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) (ctrl.Result, error) {
-	platform.Status.Phase = PhaseReady
-	platform.Status.Message = "All components are running"
-	platform.Status.LastReconcileTime = &metav1.Time{Time: time.Now()}
-	
-	r.updateCondition(platform, ConditionReady, metav1.ConditionTrue, ReasonReady, "Platform is ready")
-	r.updateCondition(platform, ConditionProgressing, metav1.ConditionFalse, ReasonReady, "Installation completed")
-	r.updateCondition(platform, ConditionAvailable, metav1.ConditionTrue, ReasonReady, "Platform is available")
-	
-	if err := r.Status().Update(ctx, platform); err != nil {
-		return ctrl.Result{}, err
-	}
-	
-	return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
-}
-
-func (r *ObservabilityPlatformReconciler) transitionToFailed(ctx context.Context, platform *observabilityv1.ObservabilityPlatform, reason, message string) (ctrl.Result, error) {
-	platform.Status.Phase = PhaseFailed
-	platform.Status.Message = message
-	platform.Status.LastReconcileTime = &metav1.Time{Time: time.Now()}
-	
-	r.updateCondition(platform, ConditionReady, metav1.ConditionFalse, reason, message)
-	r.updateCondition(platform, ConditionProgressing, metav1.ConditionFalse, reason, "Platform operation failed")
-	r.updateCondition(platform, ConditionDegraded, metav1.ConditionTrue, reason, message)
-	
-	if err := r.Status().Update(ctx, platform); err != nil {
-		return ctrl.Result{}, err
-	}
-	
-	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
-}
-
-func (r *ObservabilityPlatformReconciler) transitionToUpgrading(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) (ctrl.Result, error) {
-	platform.Status.Phase = PhaseUpgrading
-	platform.Status.Message = "Upgrading platform components"
-	platform.Status.LastReconcileTime = &metav1.Time{Time: time.Now()}
-	
-	r.updateCondition(platform, ConditionProgressing, metav1.ConditionTrue, ReasonUpgrading, "Platform upgrade in progress")
-	r.updateCondition(platform, ConditionReady, metav1.ConditionTrue, ReasonUpgrading, "Platform is available during upgrade")
-	
-	if err := r.Status().Update(ctx, platform); err != nil {
-		return ctrl.Result{}, err
-	}
-	
-	return ctrl.Result{Requeue: true}, nil
-}
-
-// Helper methods
-
-func (r *ObservabilityPlatformReconciler) updateCondition(platform *observabilityv1.ObservabilityPlatform, conditionType string, status metav1.ConditionStatus, reason, message string) {
-	meta.SetStatusCondition(&platform.Status.Conditions, metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		ObservedGeneration: platform.Generation,
-		LastTransitionTime: metav1.Now(),
-		Reason:             reason,
-		Message:            message,
-	})
-}
-
-func (r *ObservabilityPlatformReconciler) validatePlatform(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) error {
-	// Implement validation logic
-	// Check for required fields, valid configurations, etc.
-	
-	// At least one component should be enabled
-	if platform.Spec.Components.Prometheus == nil &&
-		platform.Spec.Components.Grafana == nil &&
-		platform.Spec.Components.Loki == nil &&
-		platform.Spec.Components.Tempo == nil {
-		return fmt.Errorf("at least one component must be configured")
-	}
-	
-	return nil
-}
-
-func (r *ObservabilityPlatformReconciler) checkPrerequisites(ctx context.Context, platform *observabilityv1.ObservabilityPlatform) error {
-	// Check namespace exists
-	// Check required secrets
-	// Check resource quotas
-	// etc.
-	
-	return nil
-}
-
-func (r *ObservabilityPlatformReconciler) deployComponent(ctx context.Context, platform *observabilityv1.ObservabilityPlatform, componentName string, manager ComponentManager) (bool, error) {
-	if manager == nil {
-		return false, fmt.Errorf("component manager not initialized for %s", componentName)
-	}
-
-	// Deploy the component
-	if err := manager.Deploy(ctx, platform); err != nil {
-		return false, err
-	}
-
-	// Get component status
-	status, err := manager.GetStatus(ctx, platform)
-	if err != nil {
-		return false, err
-	}
-
-	// Update component status
-	platform.Status.ComponentStatus[componentName] = *status
-
-	return status.Phase == PhaseReady, nil
-}
-
-func (r *ObservabilityPlatformReconciler) isComponentEnabled(platform *observabilityv1.ObservabilityPlatform, componentName string) bool {
-	switch componentName {
-	case "prometheus":
-		return platform.Spec.Components.Prometheus != nil && platform.Spec.Components.Prometheus.Enabled
-	case "grafana":
-		return platform.Spec.Components.Grafana != nil && platform.Spec.Components.Grafana.Enabled
-	case "loki":
-		return platform.Spec.Components.Loki != nil && platform.Spec.Components.Loki.Enabled
-	case "tempo":
-		return platform.Spec.Components.Tempo != nil && platform.Spec.Components.Tempo.Enabled
-	default:
-		return false
-	}
-}
-
-func (r *ObservabilityPlatformReconciler) getComponentManagers() map[string]ComponentManager {
-	return map[string]ComponentManager{
-		"prometheus": r.prometheusManager,
-		"grafana":    r.grafanaManager,
-		"loki":       r.lokiManager,
-		"tempo":      r.tempoManager,
-	}
+	// Main reconciliation logic
+	return r.reconcilePlatform(ctx, platform)
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ObservabilityPlatformReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Set defaults if not provided
+	if r.MaxConcurrentReconciles == 0 {
+		r.MaxConcurrentReconciles = 3
+	}
+	if r.RequeueDuration == 0 {
+		r.RequeueDuration = RequeueAfterSuccess
+	}
+
+	// Initialize logger
+	r.Log = ctrl.Log.WithName("controllers").WithName("ObservabilityPlatform")
+
+	// Initialize event recorder
+	r.Recorder = mgr.GetEventRecorderFor("observabilityplatform-controller")
+
+	// Initialize enhanced event recorder
+	r.EventRecorder = NewEnhancedEventRecorder(r.Recorder, "observabilityplatform-controller")
+
+	// Initialize status manager
+	r.StatusManager = NewStatusManager(r.Client, r.Log, r.EventRecorder)
+
+	// Initialize finalizer manager
+	r.FinalizerManager = NewFinalizerManager(r.Client, r.Log)
+
+	// Initialize metrics collector
+	if r.Metrics == nil {
+		r.Metrics = metrics.NewCollector()
+	}
+
+	// Initialize component managers with Helm support if not already set
+	if r.PrometheusManager == nil || r.GrafanaManager == nil || r.LokiManager == nil || r.TempoManager == nil {
+		// Create manager factory with REST config for Helm support
+		managerFactory := managers.NewDefaultManagerFactoryWithConfig(r.Client, r.Scheme, r.RestConfig)
+		
+		if r.PrometheusManager == nil {
+			r.PrometheusManager = managerFactory.CreatePrometheusManager()
+		}
+		if r.GrafanaManager == nil {
+			r.GrafanaManager = managerFactory.CreateGrafanaManager()
+		}
+		if r.LokiManager == nil {
+			r.LokiManager = managerFactory.CreateLokiManager()
+		}
+		if r.TempoManager == nil {
+			r.TempoManager = managerFactory.CreateTempoManager()
+		}
+	}
+
+	// Initialize GitOps manager
+	if r.GitOpsManager == nil {
+		r.GitOpsManager = gitops.NewManager(r.Client, r.Scheme, ctrl.Log.WithName("gitops-manager"))
+	}
+
+	// Initialize Cost Manager
+	if r.CostManager == nil {
+		r.CostManager = managerFactory.CreateCostManager()
+	}
+
+	// Initialize health check manager
+	if r.HealthCheckManager == nil {
+		r.HealthCheckManager = NewHealthCheckManager(r.Client)
+	}
+
+	// Initialize and start health server
+	if r.HealthServer == nil {
+		r.HealthServer = NewHealthServer("8081", r.HealthCheckManager)
+		go func() {
+			if err := r.HealthServer.Start(context.Background()); err != nil {
+				r.Log.Error(err, "Failed to start health server")
+			}
+		}()
+		// Mark as ready after setup
+		r.HealthServer.SetReady(true)
+	}
+
+	// Build the controller
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&observabilityv1.ObservabilityPlatform{}).
+		For(&observabilityv1beta1.ObservabilityPlatform{}, builder.WithPredicates(
+			predicate.GenerationChangedPredicate{},
+		)).
+		// Watch owned resources
+		Owns(&corev1.ConfigMap{}).
+		Owns(&corev1.Secret{}).
+		Owns(&corev1.Service{}).
+		Owns(&corev1.PersistentVolumeClaim{}).
+		// Set controller options
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: r.MaxConcurrentReconciles,
+			LogConstructor: func(req *reconcile.Request) logr.Logger {
+				return r.Log.WithValues("observabilityplatform", req.NamespacedName)
+			},
+		}).
+		// Add custom watches for component-specific resources
+		Watches(
+			&source.Kind{Type: &corev1.Namespace{}},
+			handler.EnqueueRequestsFromMapFunc(r.findPlatformsForNamespace),
+			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}),
+		).
 		Complete(r)
+}
+
+// reconcilePlatform performs the main reconciliation logic
+func (r *ObservabilityPlatformReconciler) reconcilePlatform(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+	startTime := time.Now()
+
+	// Clear any previous errors
+	r.StatusManager.ClearError(ctx, platform)
+
+	// Set progressing condition
+	r.StatusManager.SetCondition(ctx, platform, ConditionProgressing, metav1.ConditionTrue, ReasonReconciling, "Reconciling platform components")
+
+	// Record reconciliation start
+	r.EventRecorder.RecordPlatformEvent(platform, EventReasonPlatformUpdated, "Starting reconciliation")
+
+	// Reconcile namespace
+	if err := r.ensureNamespace(ctx, platform); err != nil {
+		return r.handleError(ctx, platform, err, "Failed to ensure namespace")
+	}
+
+	// Reconcile common resources (RBAC, NetworkPolicies, etc.)
+	if err := r.reconcileCommonResources(ctx, platform); err != nil {
+		return r.handleError(ctx, platform, err, "Failed to reconcile common resources")
+	}
+
+	// Reconcile components with dependency management
+	if err := r.ReconcileWithDependencies(ctx, platform); err != nil {
+		return r.handleError(ctx, platform, err, "Failed to reconcile components")
+	}
+
+	// Reconcile GitOps if configured
+	if platform.Spec.GitOps != nil {
+		if err := r.reconcileGitOps(ctx, platform); err != nil {
+			return r.handleError(ctx, platform, err, "Failed to reconcile GitOps")
+		}
+	}
+
+	// Reconcile cost optimization if configured
+	if platform.Spec.CostOptimization != nil && platform.Spec.CostOptimization.Enabled {
+		if err := r.reconcileCostOptimization(ctx, platform); err != nil {
+			// Don't fail reconciliation on cost optimization errors
+			log.Error(err, "Failed to reconcile cost optimization")
+			r.EventRecorder.RecordPlatformEvent(platform, "CostOptimizationError", err.Error())
+		}
+	}
+
+	// Perform health checks on all components
+	healthCheckStart := time.Now()
+	healthStatus, err := r.HealthCheckManager.CheckComponentHealth(ctx, platform)
+	if err != nil {
+		log.Error(err, "Failed to check component health")
+		RecordHealthCheckError(platform.Name, platform.Namespace, "all", "check_failed")
+	} else {
+		// Update health metrics
+		RecordHealthCheckDuration(platform.Name, platform.Namespace, time.Since(healthCheckStart).Seconds())
+		componentHealthMap := make(map[string]*ComponentHealth)
+		for name, status := range healthStatus.Components {
+			componentHealthMap[name] = &ComponentHealth{
+				Name:              name,
+				Healthy:           status.Healthy,
+				LastChecked:       status.LastChecked.Time,
+				Message:           status.Message,
+				AvailableReplicas: status.AvailableReplicas,
+				DesiredReplicas:   status.DesiredReplicas,
+			}
+		}
+		UpdateHealthMetrics(platform.Name, platform.Namespace, componentHealthMap)
+		
+		// Update platform status with health information
+		platform.Status.Health = *healthStatus
+	}
+
+	// Update health server timestamp
+	r.HealthServer.UpdateLastHealthCheck()
+
+	// All components reconciled successfully
+	log.Info("All components reconciled successfully with health status", "healthy", healthStatus.Healthy)
+
+	// Complete the operation
+	duration := time.Since(startTime)
+	r.StatusManager.CompleteOperation(ctx, platform, "reconciliation", true, "All components reconciled successfully", duration)
+
+	// Update conditions
+	r.StatusManager.SetCondition(ctx, platform, ConditionProgressing, metav1.ConditionFalse, ReasonReady, "Reconciliation complete")
+	r.StatusManager.AggregateComponentStatuses(ctx, platform)
+	r.StatusManager.CalculateAndSetPhase(ctx, platform)
+	r.StatusManager.UpdateMetrics(ctx, platform)
+
+	// Record successful reconciliation
+	r.EventRecorder.RecordPlatformEvent(platform, EventReasonPlatformReady, "Platform is ready")
+	r.Metrics.RecordPlatformStatus(platform.Name, platform.Namespace, string(platform.Status.Phase))
+
+	// Requeue after success duration for continuous reconciliation
+	return ctrl.Result{RequeueAfter: r.RequeueDuration}, nil
+}
+
+// handleDeletion handles the deletion of the ObservabilityPlatform
+func (r *ObservabilityPlatformReconciler) handleDeletion(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+	log.Info("Handling platform deletion")
+
+	// Use FinalizerManager to handle deletion
+	if err := r.FinalizerManager.HandleDeletion(ctx, platform, r); err != nil {
+		log.Error(err, "Failed to handle deletion")
+		r.Recorder.Event(platform, corev1.EventTypeWarning, "DeletionFailed", err.Error())
+		return ctrl.Result{RequeueAfter: RequeueAfterError}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// cleanup performs cleanup operations (deprecated - use FinalizerManager)
+func (r *ObservabilityPlatformReconciler) cleanup(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform) error {
+	// This method is deprecated in favor of FinalizerManager.HandleDeletion
+	// Kept for backward compatibility
+	return nil
+}
+
+// ensureNamespace ensures the namespace exists with proper labels
+func (r *ObservabilityPlatformReconciler) ensureNamespace(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform) error {
+	log := log.FromContext(ctx)
+
+	namespace := &corev1.Namespace{}
+	err := r.Get(ctx, types.NamespacedName{Name: platform.Namespace}, namespace)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Namespace doesn't exist, create it
+			namespace = &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: platform.Namespace,
+					Labels: map[string]string{
+						"observability.io/managed":      "true",
+						"observability.io/platform":     platform.Name,
+						"app.kubernetes.io/managed-by":  "gunj-operator",
+						"app.kubernetes.io/part-of":     "observability-platform",
+						"app.kubernetes.io/instance":    platform.Name,
+					},
+				},
+			}
+			if err := r.Create(ctx, namespace); err != nil {
+				return fmt.Errorf("failed to create namespace: %w", err)
+			}
+			log.Info("Created namespace", "namespace", namespace.Name)
+		} else {
+			return fmt.Errorf("failed to get namespace: %w", err)
+		}
+	}
+	return nil
+}
+
+// reconcileCommonResources creates common resources like RBAC, NetworkPolicies
+func (r *ObservabilityPlatformReconciler) reconcileCommonResources(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform) error {
+	// This will be implemented in the next micro-task
+	return nil
+}
+
+// updateComponentStatus updates the status for a specific component
+func (r *ObservabilityPlatformReconciler) updateComponentStatus(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform, component string, ready bool, message string) error {
+	return r.StatusManager.SetComponentStatus(ctx, platform, component, ready, message)
+}
+
+// handleError handles errors during reconciliation
+func (r *ObservabilityPlatformReconciler) handleError(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform, err error, message string) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+	log.Error(err, message)
+
+	// Record error in status
+	r.StatusManager.RecordError(ctx, platform, err, message)
+
+	// Update phase
+	r.StatusManager.CalculateAndSetPhase(ctx, platform)
+
+	// Update metrics
+	r.StatusManager.metricsCollector.errorCount++
+	r.StatusManager.UpdateMetrics(ctx, platform)
+
+	// Record error metric
+	r.Metrics.RecordReconciliationError("observabilityplatform")
+
+	return ctrl.Result{RequeueAfter: RequeueAfterError}, err
+}
+
+// findPlatformsForNamespace returns requests for all platforms that might be affected by a namespace change
+func (r *ObservabilityPlatformReconciler) findPlatformsForNamespace(obj client.Object) []reconcile.Request {
+	namespace := obj.(*corev1.Namespace)
+	
+	// Check if this namespace has our label
+	if value, ok := namespace.Labels["observability.io/platform"]; ok {
+		return []reconcile.Request{
+			{
+				NamespacedName: types.NamespacedName{
+					Name:      value,
+					Namespace: namespace.Name,
+				},
+			},
+		}
+	}
+	
+	return nil
+}
+
+// reconcileGitOps handles GitOps configuration for the platform
+func (r *ObservabilityPlatformReconciler) reconcileGitOps(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform) error {
+	log := log.FromContext(ctx).WithValues("gitops", "reconcile")
+	log.Info("Reconciling GitOps configuration")
+
+	// Reconcile GitOps
+	if err := r.GitOpsManager.ReconcileGitOps(ctx, platform); err != nil {
+		return fmt.Errorf("failed to reconcile GitOps: %w", err)
+	}
+
+	// Check for drift if enabled
+	if platform.Spec.GitOps.DriftDetection != nil && platform.Spec.GitOps.DriftDetection.Enabled {
+		if err := r.GitOpsManager.DetectAndRemediateDrift(ctx, platform); err != nil {
+			log.Error(err, "Failed to detect/remediate drift")
+			// Don't fail reconciliation on drift detection errors
+		}
+	}
+
+	// Check for automatic rollback conditions
+	if platform.Spec.GitOps.Rollback != nil && platform.Spec.GitOps.Rollback.Enabled {
+		if err := r.GitOpsManager.RollbackMgr.CheckHealthAndRollback(ctx, platform); err != nil {
+			log.Error(err, "Failed to check rollback conditions")
+			// Don't fail reconciliation on rollback check errors
+		}
+	}
+
+	// Update status conditions based on GitOps status
+	if platform.Status.GitOps != nil {
+		synced := platform.Status.GitOps.SyncStatus == "Synced"
+		r.StatusManager.SetCondition(ctx, platform, "GitOpsSynced",
+			metav1.ConditionStatus(fmt.Sprintf("%t", synced)),
+			platform.Status.GitOps.SyncStatus,
+			platform.Status.GitOps.Message)
+		
+		if platform.Status.GitOps.DriftDetected {
+			r.StatusManager.SetCondition(ctx, platform, "GitOpsDrift",
+				metav1.ConditionTrue,
+				"DriftDetected",
+				fmt.Sprintf("%d drift items detected", platform.Status.GitOps.DriftItems))
+		}
+	}
+
+	log.Info("GitOps reconciliation complete")
+	return nil
+}
+
+// PromoteEnvironment handles environment promotion
+func (r *ObservabilityPlatformReconciler) PromoteEnvironment(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform, targetEnv string) error {
+	log := log.FromContext(ctx).WithValues("targetEnv", targetEnv)
+	log.Info("Promoting environment")
+
+	if platform.Spec.GitOps == nil {
+		return fmt.Errorf("GitOps not configured for platform")
+	}
+
+	// Perform promotion
+	if err := r.GitOpsManager.PromoteEnvironment(ctx, platform, targetEnv); err != nil {
+		return fmt.Errorf("failed to promote environment: %w", err)
+	}
+
+	// Record event
+	r.EventRecorder.RecordPlatformEvent(platform, "EnvironmentPromoted",
+		fmt.Sprintf("Promoted configuration to %s", targetEnv))
+
+	return nil
+}
+
+// RollbackPlatform handles platform rollback
+func (r *ObservabilityPlatformReconciler) RollbackPlatform(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform, reason string) error {
+	log := log.FromContext(ctx).WithValues("reason", reason)
+	log.Info("Rolling back platform")
+
+	if platform.Spec.GitOps == nil {
+		return fmt.Errorf("GitOps not configured for platform")
+	}
+
+	// Perform rollback
+	if err := r.GitOpsManager.RollbackDeployment(ctx, platform, reason); err != nil {
+		return fmt.Errorf("failed to rollback: %w", err)
+	}
+
+	// Record event
+	r.EventRecorder.RecordPlatformEvent(platform, "PlatformRolledBack",
+		fmt.Sprintf("Rolled back due to: %s", reason))
+
+	return nil
+}
+
+// SyncGitOps manually triggers a GitOps sync
+func (r *ObservabilityPlatformReconciler) SyncGitOps(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform) error {
+	log := log.FromContext(ctx)
+	log.Info("Manually syncing GitOps")
+
+	if platform.Spec.GitOps == nil {
+		return fmt.Errorf("GitOps not configured for platform")
+	}
+
+	// Trigger sync
+	if err := r.GitOpsManager.SyncManager.TriggerSync(ctx, platform); err != nil {
+		return fmt.Errorf("failed to sync with Git: %w", err)
+	}
+
+	// Record event
+	r.EventRecorder.RecordPlatformEvent(platform, "GitOpsSyncTriggered",
+		"Manual GitOps sync triggered")
+
+	return nil
+}
+
+// reconcileCostOptimization handles cost optimization for the platform
+func (r *ObservabilityPlatformReconciler) reconcileCostOptimization(ctx context.Context, platform *observabilityv1beta1.ObservabilityPlatform) error {
+	log := log.FromContext(ctx).WithValues("costOptimization", "reconcile")
+	log.Info("Reconciling cost optimization")
+
+	// Analyze current costs
+	costAnalysis, err := r.CostManager.AnalyzePlatformCosts(ctx, platform)
+	if err != nil {
+		return fmt.Errorf("failed to analyze platform costs: %w", err)
+	}
+
+	// Update status with current cost information
+	platform.Status.CostOptimization = &observabilityv1beta1.CostOptimizationStatus{
+		LastOptimization: metav1.Now(),
+		CurrentCost:      costAnalysis.TotalCost,
+	}
+
+	// Get optimization recommendations
+	recommendations, err := r.CostManager.GetRecommendations(ctx, platform)
+	if err != nil {
+		return fmt.Errorf("failed to get cost recommendations: %w", err)
+	}
+
+	// Update status with recommendations
+	platform.Status.CostOptimization.RecommendationsCount = len(recommendations.ResourceRecommendations) +
+		len(recommendations.SpotInstanceCandidates) +
+		len(recommendations.ScalingPolicies) +
+		len(recommendations.StorageOptimizations)
+	platform.Status.CostOptimization.EstimatedSavings = recommendations.TotalSavings
+	platform.Status.CostOptimization.OptimizedCost = costAnalysis.TotalCost - recommendations.TotalSavings
+
+	// Apply optimizations if configured
+	if platform.Spec.CostOptimization.ResourceOptimization || 
+	   (platform.Spec.CostOptimization.SpotInstances != nil && platform.Spec.CostOptimization.SpotInstances.Enabled) ||
+	   platform.Spec.CostOptimization.AutoScaling {
+		
+		opts := &managers.OptimizationOptions{
+			ApplyResourceOptimization: platform.Spec.CostOptimization.ResourceOptimization,
+			EnableSpotInstances:       platform.Spec.CostOptimization.SpotInstances != nil && platform.Spec.CostOptimization.SpotInstances.Enabled,
+			ApplyScalingPolicies:      platform.Spec.CostOptimization.AutoScaling,
+		}
+
+		if err := r.CostManager.ApplyOptimizations(ctx, platform, opts); err != nil {
+			return fmt.Errorf("failed to apply cost optimizations: %w", err)
+		}
+
+		platform.Status.CostOptimization.Applied = true
+	}
+
+	// Set up budget alerts if configured
+	if platform.Spec.CostOptimization.Budget != nil {
+		budgetConfig := &managers.BudgetConfig{
+			MonthlyLimit:   platform.Spec.CostOptimization.Budget.MonthlyLimit,
+			AlertThreshold: float64(platform.Spec.CostOptimization.Budget.AlertThresholds[0]), // Use first threshold
+		}
+
+		if err := r.CostManager.SetBudgetAlert(ctx, platform, budgetConfig); err != nil {
+			log.Error(err, "Failed to set budget alert")
+			// Don't fail reconciliation
+		}
+	}
+
+	// Update conditions
+	r.StatusManager.SetCondition(ctx, platform, "CostOptimized",
+		metav1.ConditionTrue, "Optimized", 
+		fmt.Sprintf("Estimated savings: $%.2f/month", recommendations.TotalSavings))
+
+	// Record event
+	r.EventRecorder.RecordPlatformEvent(platform, "CostOptimizationComplete",
+		fmt.Sprintf("Cost optimization complete. Current: $%.2f, Potential savings: $%.2f", 
+			costAnalysis.TotalCost, recommendations.TotalSavings))
+
+	log.Info("Cost optimization reconciliation complete", 
+		"currentCost", costAnalysis.TotalCost,
+		"potentialSavings", recommendations.TotalSavings)
+
+	return nil
 }

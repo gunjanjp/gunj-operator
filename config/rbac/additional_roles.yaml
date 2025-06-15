@@ -1,0 +1,91 @@
+# Read-only role for viewing ObservabilityPlatform resources and status
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gunj-operator-viewer-role
+  labels:
+    app.kubernetes.io/name: gunj-operator
+    app.kubernetes.io/managed-by: kustomize
+rules:
+# Read ObservabilityPlatform resources
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms
+  verbs:
+  - get
+  - list
+  - watch
+
+# Read ObservabilityPlatform status
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms/status
+  verbs:
+  - get
+
+---
+# Role for users who can create/update platforms but not modify status
+# This is useful for GitOps scenarios where the Git repository defines
+# the desired state but only the operator should update status
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gunj-operator-platform-admin-role
+  labels:
+    app.kubernetes.io/name: gunj-operator
+    app.kubernetes.io/managed-by: kustomize
+rules:
+# Manage ObservabilityPlatform resources (but not status)
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Only read status (cannot modify)
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms/status
+  verbs:
+  - get
+
+---
+# Role for the status updater webhook (if using a separate service)
+# This role only allows updating the status subresource
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gunj-operator-status-updater-role
+  labels:
+    app.kubernetes.io/name: gunj-operator
+    app.kubernetes.io/managed-by: kustomize
+rules:
+# Read ObservabilityPlatform resources
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms
+  verbs:
+  - get
+  - list
+  - watch
+
+# Update only the status subresource
+- apiGroups:
+  - observability.io
+  resources:
+  - observabilityplatforms/status
+  verbs:
+  - get
+  - patch
+  - update

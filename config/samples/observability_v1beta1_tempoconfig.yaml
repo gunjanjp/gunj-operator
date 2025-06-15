@@ -1,0 +1,449 @@
+# Example TempoConfig for managing Tempo distributed tracing configuration
+apiVersion: observability.io/v1beta1
+kind: TempoConfig
+metadata:
+  name: production-tempo-config
+  namespace: monitoring
+spec:
+  # Reference to the target ObservabilityPlatform
+  targetPlatform:
+    name: production-platform
+
+  # Storage configuration
+  storage:
+    trace:
+      backend: s3
+      s3:
+        bucket: my-tempo-traces
+        endpoint: s3.amazonaws.com
+        region: us-east-1
+        accessKey: ${AWS_ACCESS_KEY_ID}
+        secretKey:
+          name: aws-credentials
+          key: secret-key
+        forcePathStyle: true
+        sse:
+          type: SSE-S3
+        tags:
+          Environment: production
+          Owner: platform-team
+      pool:
+        maxWorkers: 100
+        queueDepth: 1000
+      blocklistPoll: "5m"
+      blocklistPollConcurrency: 10
+    
+    wal:
+      path: /var/tempo/wal
+      completedFilesCleanupAge: "5m"
+      ingesterFlushOpTimeout: true
+      ingesterFlushOpTimeoutDuration: "5m"
+    
+    cache:
+      type: memcached
+      memcached:
+        host: memcached:11211
+        timeout: "2s"
+        maxIdleConns: 100
+        maxItemSize: 16
+        updateInterval: "30s"
+      ttl: "1h"
+
+  # Distributor configuration
+  distributor:
+    logReceivedTraces: false
+    queueSize: 1000
+    workers: 100
+    forwarderConfig:
+      workers: 10
+      queueSize: 100
+      retryBackoff: "10s"
+    extendedSearch:
+      minDuration: 1000
+      maxDuration: 0
+      tags:
+        - http.status_code
+        - http.method
+        - service.name
+        - error
+
+  # Receivers configuration
+  receivers:
+    otlp:
+      enabled: true
+      grpc:
+        endpoint: "0.0.0.0:4317"
+        maxRecvMsgSize: 65536
+        maxConcurrentStreams: 100
+      http:
+        endpoint: "0.0.0.0:4318"
+        cors:
+          allowedOrigins:
+            - "http://localhost:3000"
+            - "https://*.example.com"
+          allowedHeaders:
+            - "Content-Type"
+            - "Authorization"
+          maxAge: 86400
+        maxRequestBodySize: 100
+
+    jaeger:
+      enabled: true
+      remoteSampling:
+        hostEndpoint: "http://localhost:5778/sampling"
+        serviceName: "jaeger-collector"
+        refreshInterval: "60s"
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:14250"
+        thriftHttp:
+          endpoint: "0.0.0.0:14268"
+        thriftBinary:
+          endpoint: "0.0.0.0:6832"
+          queueSize: 1000
+          workers: 10
+        thriftCompact:
+          endpoint: "0.0.0.0:6831"
+          queueSize: 1000
+          workers: 10
+
+    zipkin:
+      enabled: true
+      endpoint: "0.0.0.0:9411"
+      parseStringTags: false
+
+    kafka:
+      enabled: false
+      brokers:
+        - kafka-broker-1:9092
+        - kafka-broker-2:9092
+      topic: traces
+      groupId: tempo
+      encoding: jaeger
+      sasl:
+        enabled: true
+        mechanism: scram-sha-256
+        username: tempo-consumer
+        password:
+          name: kafka-credentials
+          key: password
+
+  # Ingester configuration
+  ingester:
+    completeBlockTimeout: "5m"
+    maxBlockDuration: 100000
+    maxBlockBytes: 500000000
+    flushCheckPeriod: "30s"
+    flushOpTimeout: "10s"
+    maxTracesPerBlock: 1000
+    lifecyclerConfig:
+      heartbeatPeriod: "30s"
+      numTokens: 3
+      joinAfter: "0s"
+      minReadyDuration: "5m"
+      interfaceNames:
+        - eth0
+        - en0
+      finalSleep: "0s"
+      port: 7946
+
+  # Compactor configuration
+  compactor:
+    blockRetention: "336h"  # 14 days
+    compactedBlockRetention: "24h"
+    compactionWindow: "30s"
+    maxCompactionObjects: 1000000
+    maxBlockBytes: 100000000
+    blockSyncDelay: "5m"
+    retentionConcurrency: 10
+    maxTimePerTenant: "10m"
+    compactionCycle: "30s"
+
+  # Querier configuration
+  querier:
+    concurrentRequests: 20
+    searchDefaultResultLimit: 20
+    searchMaxDuration: "48h"
+    searchMaxResultLimit: 1000
+    searchExternalHedgeRequestsAt: 3
+    searchExternalHedgeRequestsUpTo: "8s"
+    maxConcurrentQueries: 20
+    frontend:
+      address: tempo-query-frontend:9095
+      grpc:
+        insecure: false
+        timeout: "2m"
+
+  # Query Frontend configuration
+  queryFrontend:
+    maxRetries: 2
+    search:
+      concurrentJobs: 300
+      targetBytesPerJob: 1000000
+      defaultResultLimit: 20
+      maxResultLimit: 1000
+      maxDuration: "48h"
+      queryShards: 20
+      hedgeRequestsAt: 2
+      hedgeRequestsUpTo: "8s"
+    traceById:
+      concurrentRequests: 1000
+      hedgeRequestsAt: 2
+      hedgeRequestsUpTo: "8s"
+      queryShards: 20
+    metrics:
+      prometheusEndpoint: "http://prometheus:9090"
+      concurrentRequests: 10
+      targetBytesPerRequest: 1000000
+
+  # Global configuration
+  globalConfig:
+    logLevel: info
+    logFormat: logfmt
+    httpListenPort: 3100
+    grpcListenPort: 9095
+    httpListenAddress: "0.0.0.0"
+    grpcListenAddress: "0.0.0.0"
+    registerInstrumentation: true
+    gracefulShutdownTimeout: "30s"
+    logSourceIpsEnabled: true
+    logSourceIpsHeader: "X-Forwarded-For"
+    logSourceIpsRegex: "^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+    grpcServerMaxRecvMsgSize: 4194304
+    grpcServerMaxSendMsgSize: 4194304
+    grpcServerMaxConcurrentStreams: 150
+    grpcServerKeepaliveTime: "2h"
+    grpcServerKeepaliveTimeout: "20s"
+    httpServerReadTimeout: "10s"
+    httpServerWriteTimeout: "10s"
+    httpServerIdleTimeout: "30s"
+
+  # Search configuration
+  searchConfig:
+    enabled: true
+    maxConcurrentIndexJobs: 1800
+    completeBlockTimeout: "5m"
+
+  # Metrics Generator configuration
+  metricsGenerator:
+    enabled: true
+    ringConfig:
+      kvStore:
+        store: memberlist
+        prefix: "tempo_metrics_generator"
+        memberlistConfig:
+          joinMembers:
+            - tempo-metrics-generator-0
+            - tempo-metrics-generator-1
+          minJoinBackoff: "1m"
+          maxJoinBackoff: "1m"
+          maxJoinRetries: 3
+          abortIfClusterJoinFails: true
+          bindPort: 7946
+      heartbeatTimeout: "30s"
+      replicationFactor: 3
+    
+    processor:
+      serviceGraphs:
+        enabled: true
+        dimensions:
+          - service.name
+          - service.namespace
+          - service.version
+        wait: "30s"
+        maxItems: 10000
+        workers: 10
+      
+      spanMetrics:
+        enabled: true
+        dimensions:
+          - service.name
+          - span.kind
+          - status.code
+        enableTargetInfo: false
+        histogramBuckets: [0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.128, 0.256, 0.512, 1.024, 2.048, 4.096, 8.192, 16.384]
+        filterPolicies:
+          - type: include
+            match:
+              matchType: strict
+              attributes:
+                - key: span.kind
+                  value: server
+    
+    storage:
+      path: /var/tempo/metrics-generator
+      remoteWriteBackend: prometheus
+      remoteWrite:
+        - url: http://prometheus:9090/api/v1/write
+          headers:
+            X-Scope-OrgID: tempo-metrics
+          sendExemplars: true
+      remoteWriteFlushDeadline: "15s"
+      wal:
+        path: /var/tempo/metrics-generator/wal
+        walSegmentDuration: "30s"
+        walTruncateFrequency: "2m"
+        maxWalTime: "10m"
+        minWalTime: "5m"
+    
+    registry:
+      maxLabelNameLength: 20000
+      maxLabelValueLength: 20000
+      maxLabels: 30
+      maxMetrics: 1000000
+    
+    metricsIngestionSlack: "30s"
+    remoteWriteHeaders:
+      X-Scope-OrgID: tempo-metrics
+
+  # Per-tenant overrides
+  overrides:
+    maxBytesPerTrace: "5MB"
+    maxTracesPerUser: 10000
+    maxGlobalTracesPerUser: 20000
+    maxBytesPerTagValuesQuery: 100000
+    maxBlocksPerTagValuesQuery: 5000000
+    ingestionRateLimitBytes: 20000000
+    ingestionBurstSizeBytes: 30000000
+    blockRetention: "336h"
+    perTenantOverrideConfig: /runtime-config/overrides.yaml
+    perTenantOverridePeriod: "10s"
+    tenants:
+      tenant-1:
+        maxBytesPerTrace: "10MB"
+        maxTracesPerUser: 20000
+        ingestionRateLimitBytes: 40000000
+        blockRetention: "720h"  # 30 days
+      tenant-2:
+        maxBytesPerTrace: "2MB"
+        maxTracesPerUser: 5000
+        ingestionRateLimitBytes: 10000000
+        blockRetention: "168h"  # 7 days
+
+  # Multi-tenancy configuration
+  multiTenancy:
+    enabled: true
+    header: "X-Scope-OrgID"
+    defaultTenant: "anonymous"
+
+  # Authentication configuration
+  authConfig:
+    enabled: true
+    type: oidc
+    oidc:
+      issuerUrl: https://auth.example.com
+      clientId: tempo
+      clientSecret:
+        name: oidc-credentials
+        key: client-secret
+      usernameClaim: email
+      groupsClaim: groups
+      audience: tempo-api
+
+  # Rate limiting configuration
+  rateLimiting:
+    enabled: true
+    rps: 100
+    burst: 1000
+    byTenant:
+      tenant-1:
+        rps: 200
+        burst: 2000
+      tenant-2:
+        rps: 50
+        burst: 500
+
+---
+# Example with filesystem storage (for development)
+apiVersion: observability.io/v1beta1
+kind: TempoConfig
+metadata:
+  name: dev-tempo-config
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: dev-platform
+
+  storage:
+    trace:
+      backend: filesystem
+      filesystem:
+        path: /var/tempo/traces
+        createDirectories: true
+        permissions: "0755"
+
+  receivers:
+    otlp:
+      enabled: true
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
+
+  globalConfig:
+    logLevel: debug
+    logFormat: json
+
+  overrides:
+    maxBytesPerTrace: "50MB"
+    maxTracesPerUser: 100000
+    ingestionRateLimitBytes: 100000000
+
+---
+# Example with GCS storage
+apiVersion: observability.io/v1beta1
+kind: TempoConfig
+metadata:
+  name: gcs-tempo-config
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: gcp-platform
+
+  storage:
+    trace:
+      backend: gcs
+      gcs:
+        bucketName: my-tempo-traces
+        chunkBufferSize: 10485760
+        requestTimeout: "5s"
+        serviceAccount:
+          name: gcs-credentials
+          key: service-account.json
+        objectCacheControl: "no-cache"
+
+  receivers:
+    otlp:
+      enabled: true
+
+---
+# Example with Azure storage
+apiVersion: observability.io/v1beta1
+kind: TempoConfig
+metadata:
+  name: azure-tempo-config
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: azure-platform
+
+  storage:
+    trace:
+      backend: azure
+      azure:
+        containerName: tempo-traces
+        accountName: myaccount
+        accountKey:
+          name: azure-credentials
+          key: account-key
+        endpointSuffix: blob.core.windows.net
+        useAzureAD: true
+        clientId: tempo-client
+        clientSecret:
+          name: azure-credentials
+          key: client-secret
+        tenantId: my-tenant-id
+
+  receivers:
+    otlp:
+      enabled: true
