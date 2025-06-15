@@ -1,0 +1,392 @@
+# Example: Network Mesh Configuration
+# This example shows how to set up cross-cluster networking
+---
+# Network Mesh Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gunj-network-mesh
+  labels:
+    gunj.io/component: network-mesh
+    istio-injection: enabled
+---
+# Istio Multi-Cluster Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: istio-multicluster-config
+  namespace: gunj-network-mesh
+data:
+  mesh.yaml: |
+    defaultConfig:
+      proxyStatsMatcher:
+        inclusionRegexps:
+        - ".*circuit_breakers.*"
+        - ".*upstream_rq_retry.*"
+        - ".*upstream_rq_pending.*"
+        - ".*cluster.*.outlier_detection.*"
+        inclusionSuffixes:
+        - "upstream_rq_timeout"
+        - "upstream_rq_total"
+        - "upstream_rq_time"
+    trustDomain: cluster.local
+    # Multi-cluster specific settings
+    defaultConfig:
+      meshNetworks:
+        network1:
+          endpoints:
+          - fromRegistry: hub-cluster
+          gateways:
+          - address: hub-gateway.gunj-network-mesh.svc.cluster.local
+            port: 15443
+        network2:
+          endpoints:
+          - fromRegistry: us-east-1
+          gateways:
+          - address: us-east-gateway.gunj-network-mesh.svc.cluster.local
+            port: 15443
+        network3:
+          endpoints:
+          - fromRegistry: eu-west-1
+          gateways:
+          - address: eu-west-gateway.gunj-network-mesh.svc.cluster.local
+            port: 15443
+---
+# East-West Gateway for Hub Cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: hub-gateway
+  namespace: gunj-network-mesh
+  labels:
+    app: hub-gateway
+    gunj.io/cluster: hub-cluster
+spec:
+  type: LoadBalancer
+  selector:
+    app: hub-gateway
+  ports:
+  - port: 15443
+    targetPort: 15443
+    name: tls
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hub-gateway
+  namespace: gunj-network-mesh
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: hub-gateway
+  template:
+    metadata:
+      labels:
+        app: hub-gateway
+        gunj.io/cluster: hub-cluster
+      annotations:
+        sidecar.istio.io/inject: "true"
+    spec:
+      containers:
+      - name: gateway
+        image: docker.io/istio/proxyv2:1.20.0
+        ports:
+        - containerPort: 15443
+          name: tls
+        env:
+        - name: PILOT_AGENT_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: INSTANCE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: SERVICE_ACCOUNT
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.serviceAccountName
+        volumeMounts:
+        - name: workload-socket
+          mountPath: /var/run/secrets/workload-spiffe-uds
+        - name: workload-certs
+          mountPath: /var/run/secrets/workload-spiffe-credentials
+      volumes:
+      - name: workload-socket
+        emptyDir: {}
+      - name: workload-certs
+        emptyDir: {}
+---
+# Gateway Configuration
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: cross-network-gateway
+  namespace: gunj-network-mesh
+spec:
+  selector:
+    app: hub-gateway
+  servers:
+  - port:
+      number: 15443
+      name: tls
+      protocol: TLS
+    tls:
+      mode: ISTIO_MUTUAL
+    hosts:
+    - "*.local"
+---
+# Service Entry for Remote Clusters
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: remote-cluster-us-east
+  namespace: gunj-network-mesh
+spec:
+  hosts:
+  - us-east-1.remote
+  location: MESH_EXTERNAL
+  ports:
+  - number: 15443
+    name: tls
+    protocol: TLS
+  resolution: DNS
+  addresses:
+  - 240.0.0.1 # Virtual IP for US East cluster
+  endpoints:
+  - address: us-east-gateway.gunj-network-mesh.svc.cluster.local
+    priority: 0
+    weight: 100
+---
+# Service Entry for EU West Cluster
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: remote-cluster-eu-west
+  namespace: gunj-network-mesh
+spec:
+  hosts:
+  - eu-west-1.remote
+  location: MESH_EXTERNAL
+  ports:
+  - number: 15443
+    name: tls
+    protocol: TLS
+  resolution: DNS
+  addresses:
+  - 240.0.0.2 # Virtual IP for EU West cluster
+  endpoints:
+  - address: eu-west-gateway.gunj-network-mesh.svc.cluster.local
+    priority: 0
+    weight: 100
+---
+# DestinationRule for Cross-Cluster Traffic
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: cross-cluster-traffic
+  namespace: gunj-network-mesh
+spec:
+  host: "*.remote"
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 100
+    loadBalancer:
+      simple: ROUND_ROBIN
+    outlierDetection:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+      minHealthPercent: 50
+---
+# Network Policy for Cross-Cluster Communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cross-cluster
+  namespace: gunj-network-mesh
+spec:
+  podSelector:
+    matchLabels:
+      gunj.io/cross-cluster: enabled
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: gunj-network-mesh
+    - podSelector:
+        matchLabels:
+          app: hub-gateway
+    ports:
+    - protocol: TCP
+      port: 15443
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: gunj-network-mesh
+    ports:
+    - protocol: TCP
+      port: 15443
+  - to: # Allow DNS
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+---
+# Root Certificate for mTLS
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cacerts
+  namespace: istio-system
+type: Opaque
+data:
+  # In production, use proper certificate management
+  root-cert.pem: |
+    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCi4uLgotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0t
+  cert-chain.pem: |
+    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCi4uLgotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0t
+  root-key.pem: |
+    LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQouLi4KLS0tLS1FTkQgUlNBIFBSSVZBVEUgS0VZLS0tLS0=
+---
+# PeerAuthentication for mTLS
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: gunj-network-mesh
+spec:
+  mtls:
+    mode: STRICT
+---
+# AuthorizationPolicy for Cross-Cluster Access
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: cross-cluster-authz
+  namespace: gunj-network-mesh
+spec:
+  selector:
+    matchLabels:
+      gunj.io/cross-cluster: enabled
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - "cluster.local/ns/gunj-network-mesh/sa/hub-gateway"
+        - "cluster.local/ns/gunj-network-mesh/sa/remote-gateway"
+    to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE"]
+---
+# ServiceAccount for Gateways
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hub-gateway
+  namespace: gunj-network-mesh
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: remote-gateway
+  namespace: gunj-network-mesh
+---
+# Test Service for Cross-Cluster Communication
+apiVersion: v1
+kind: Service
+metadata:
+  name: cross-cluster-test
+  namespace: gunj-network-mesh
+  labels:
+    app: cross-cluster-test
+    gunj.io/cross-cluster: enabled
+spec:
+  ports:
+  - port: 8080
+    name: http
+  selector:
+    app: cross-cluster-test
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cross-cluster-test
+  namespace: gunj-network-mesh
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cross-cluster-test
+  template:
+    metadata:
+      labels:
+        app: cross-cluster-test
+        gunj.io/cross-cluster: enabled
+    spec:
+      containers:
+      - name: test
+        image: kennethreitz/httpbin
+        ports:
+        - containerPort: 80
+          name: http
+        env:
+        - name: CLUSTER_NAME
+          value: hub-cluster
+---
+# VirtualService for Cross-Cluster Routing
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: cross-cluster-routing
+  namespace: gunj-network-mesh
+spec:
+  hosts:
+  - cross-cluster-test.gunj-network-mesh.svc.cluster.local
+  http:
+  - match:
+    - headers:
+        cluster:
+          exact: us-east-1
+    route:
+    - destination:
+        host: us-east-1.remote
+        port:
+          number: 8080
+  - match:
+    - headers:
+        cluster:
+          exact: eu-west-1
+    route:
+    - destination:
+        host: eu-west-1.remote
+        port:
+          number: 8080
+  - route:
+    - destination:
+        host: cross-cluster-test.gunj-network-mesh.svc.cluster.local
+        port:
+          number: 8080

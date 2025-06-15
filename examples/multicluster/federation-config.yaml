@@ -1,0 +1,155 @@
+# Example: Federation Configuration
+# This example shows how to configure cluster federation for the Gunj Operator
+---
+# Federation Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: federation-config
+  namespace: gunj-multicluster
+data:
+  config.yaml: |
+    # Hub cluster configuration
+    hubCluster: hub-cluster
+    
+    # Sync interval for resource synchronization
+    syncInterval: 30s
+    
+    # Health check interval
+    healthCheckInterval: 60s
+    
+    # Enable automatic cluster discovery
+    enableAutoDiscovery: true
+    
+    # Network mesh configuration
+    networkMesh:
+      enabled: true
+      provider: istio
+      gatewayMode: ingress
+      trustDomain: cluster.local
+      rootCASecret:
+        name: cacerts
+        namespace: istio-system
+    
+    # Failover configuration
+    failoverConfig:
+      enabled: true
+      strategy: active-passive
+      maxUnavailableTime: 5m
+      priorityGroups:
+      - priority: 1
+        clusters:
+        - us-east-1
+        - eu-west-1
+      - priority: 2
+        clusters:
+        - ap-south-1
+      - priority: 3
+        selector:
+          matchLabels:
+            tier: non-production
+---
+# Federation Controller Deployment (if not using operator)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gunj-federation-controller
+  namespace: gunj-multicluster
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gunj-federation
+  template:
+    metadata:
+      labels:
+        app: gunj-federation
+    spec:
+      serviceAccountName: gunj-federation
+      containers:
+      - name: controller
+        image: docker.io/gunjanjp/gunj-operator:v2.0.0
+        command:
+        - /manager
+        - --federation-mode
+        args:
+        - --config=/config/config.yaml
+        - --leader-elect
+        env:
+        - name: FEDERATION_NAMESPACE
+          value: gunj-multicluster
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      volumes:
+      - name: config
+        configMap:
+          name: federation-config
+---
+# ServiceAccount for federation controller
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gunj-federation
+  namespace: gunj-multicluster
+---
+# ClusterRole for federation controller
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gunj-federation
+rules:
+# ObservabilityPlatform resources
+- apiGroups: ["observability.io"]
+  resources: ["observabilityplatforms", "observabilityplatforms/status"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Core resources
+- apiGroups: [""]
+  resources: ["configmaps", "secrets", "services", "endpoints"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Apps resources
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Networking resources
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies", "ingresses"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# Events
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gunj-federation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gunj-federation
+subjects:
+- kind: ServiceAccount
+  name: gunj-federation
+  namespace: gunj-multicluster
+---
+# Federation Status ConfigMap (auto-updated by controller)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: federation-status
+  namespace: gunj-multicluster
+data:
+  status.yaml: |
+    # This will be auto-populated by the federation controller
+    clusters: {}
+    syncStatus: {}
+    lastUpdate: ""

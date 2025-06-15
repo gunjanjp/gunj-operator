@@ -1,0 +1,173 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: circuit-breaker-platform
+  namespace: monitoring
+spec:
+  # Enable service mesh with circuit breaker configuration
+  serviceMesh:
+    enabled: true
+    type: auto
+    
+    # Circuit breaker configuration
+    circuitBreaker:
+      enabled: true
+      consecutiveErrors: 5 # Open circuit after 5 consecutive errors
+      interval: "30s" # Error counting interval
+      baseEjectionTime: "30s" # How long to eject failed instances
+      maxEjectionPercent: 50 # Maximum 50% of instances can be ejected
+    
+    # Traffic management with circuit breaker integration
+    trafficManagement:
+      # Load balancing with outlier detection
+      loadBalancing:
+        algorithm: LEAST_REQUEST # Route to least loaded instances
+      
+      # Conservative retry policy with circuit breaker
+      retry:
+        attempts: 2 # Limited retries to prevent cascading failures
+        perTryTimeout: "5s"
+        retryOn:
+          - "connect-failure"
+          - "refused-stream"
+          - "unavailable"
+        retryBackoff:
+          initialInterval: "1s"
+          maxInterval: "10s"
+          multiplier: 2.0
+      
+      # Aggressive timeouts to detect failures quickly
+      timeout:
+        requestTimeout: "10s"
+        idleTimeout: "60s"
+    
+    # Health checks for circuit breaker
+    healthCheck:
+      enabled: true
+      interval: "5s" # Frequent health checks
+      timeout: "2s" # Quick timeout
+      unhealthyThreshold: 2 # Mark unhealthy quickly
+      healthyThreshold: 5 # Require multiple successes to mark healthy
+    
+    # Observability for circuit breaker monitoring
+    observability:
+      metrics:
+        enabled: true
+        customMetrics:
+          - name: "circuit_breaker_state"
+            dimensions:
+              service: "service_name"
+              state: "open|closed|half-open"
+          - name: "circuit_breaker_ejections_total"
+            dimensions:
+              service: "service_name"
+              reason: "consecutive_errors|success_rate"
+          - name: "outlier_detection_ejection_percentage"
+            dimensions:
+              service: "service_name"
+      
+      tracing:
+        enabled: true
+        samplingRate: 5.0 # 5% sampling
+        customTags:
+          circuit_breaker: "enabled"
+      
+      accessLogging:
+        enabled: true
+        format: JSON
+        filters:
+          - type: "status_code"
+            condition: "gte"
+            value: "500" # Log server errors
+          - type: "header"
+            condition: "exists"
+            value: "x-envoy-upstream-service-time"
+  
+  # Components with resilience configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3 # Multiple replicas for resilience
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 50Gi
+      
+      # Prometheus alerting rules for circuit breaker
+      alertingRules:
+        - name: "CircuitBreakerOpen"
+          expression: 'circuit_breaker_state{state="open"} == 1'
+          duration: "1m"
+          labels:
+            severity: "warning"
+          annotations:
+            summary: "Circuit breaker is open for {{ $labels.service }}"
+            description: "The circuit breaker for {{ $labels.service }} has been open for more than 1 minute"
+        
+        - name: "HighEjectionRate"
+          expression: 'outlier_detection_ejection_percentage > 30'
+          duration: "5m"
+          labels:
+            severity: "critical"
+          annotations:
+            summary: "High ejection rate for {{ $labels.service }}"
+            description: "More than 30% of {{ $labels.service }} instances have been ejected"
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      
+      # Pre-configured circuit breaker dashboard
+      persistence:
+        enabled: true
+        size: 1Gi
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 2 # HA for log collection
+      storage:
+        size: 100Gi
+      
+      # Query timeout aligned with circuit breaker
+      queryTimeout: "5s"
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 1
+      storage:
+        size: 50Gi
+  
+  # High availability with circuit breaker protection
+  highAvailability:
+    enabled: true
+    antiAffinity: soft # Prefer distribution but don't block deployment
+  
+  # Global settings
+  global:
+    externalLabels:
+      cluster: "production"
+      resilience: "circuit-breaker"
+    logLevel: "info"
+    nodeSelector:
+      node-role: "observability"
+    tolerations:
+      - key: "observability"
+        operator: "Equal"
+        value: "dedicated"
+        effect: "NoSchedule"

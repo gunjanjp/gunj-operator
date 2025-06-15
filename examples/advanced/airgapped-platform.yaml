@@ -1,0 +1,314 @@
+# Air-Gapped/Restricted Environment ObservabilityPlatform
+# This example shows configuration for environments with:
+# - No internet access (air-gapped)
+# - Strict security requirements
+# - Compliance requirements (FIPS, etc.)
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: airgapped-platform
+  namespace: secure-monitoring
+  labels:
+    environment: airgapped
+    compliance: fips-140-2
+    security: restricted
+  annotations:
+    observability.io/network: "airgapped"
+    observability.io/registry: "internal-registry.company.local:5000"
+spec:
+  # Air-gapped specific configuration
+  airgapped:
+    enabled: true
+    
+    # Internal container registry
+    registry:
+      url: internal-registry.company.local:5000
+      pullSecret: internal-registry-creds
+      
+      # Image mirrors
+      imageMirrors:
+        "docker.io/prom/prometheus": "internal-registry.company.local:5000/prometheus"
+        "docker.io/grafana/grafana": "internal-registry.company.local:5000/grafana"
+        "docker.io/grafana/loki": "internal-registry.company.local:5000/loki"
+        "docker.io/grafana/tempo": "internal-registry.company.local:5000/tempo"
+        
+    # Internal package repository
+    packageRepository:
+      type: nexus
+      url: https://nexus.company.local
+      credentials: nexus-creds
+      
+  # Security hardening
+  security:
+    # FIPS 140-2 compliance
+    fips:
+      enabled: true
+      mode: strict
+      
+    # Pod security standards
+    podSecurity:
+      enforce: restricted
+      audit: restricted
+      warn: restricted
+      
+      # Security contexts
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+        capabilities:
+          drop:
+          - ALL
+          
+    # Network policies
+    networkPolicy:
+      enabled: true
+      mode: strict
+      
+      # Deny all by default
+      defaultDeny: true
+      
+      # Explicit allow rules
+      allowedConnections:
+      - from:
+          namespaceSelector:
+            matchLabels:
+              name: secure-monitoring
+        ports:
+        - protocol: TCP
+          port: 9090  # Prometheus
+        - protocol: TCP
+          port: 3000  # Grafana
+          
+    # Encryption
+    encryption:
+      # Encryption at rest
+      atRest:
+        enabled: true
+        provider: vault
+        keyRotation:
+          enabled: true
+          schedule: "0 0 1 * *"  # Monthly
+          
+      # Encryption in transit
+      inTransit:
+        enabled: true
+        mtls:
+          enabled: true
+          caSecret: internal-ca
+          autoRotate: true
+          
+  # Components with security hardening
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0-fips  # FIPS-compliant build
+      replicas: 3
+      
+      # Use internal images
+      image:
+        repository: internal-registry.company.local:5000/prometheus
+        tag: v2.48.0-fips
+        pullPolicy: Always
+        
+      # Disable features that require internet
+      features:
+        remoteWrite: false
+        remoteRead: false
+        exemplarStorage: false
+        
+      # Local storage only
+      storage:
+        size: 200Gi
+        storageClassName: local-storage
+        hostPath:
+          enabled: true
+          path: /data/prometheus
+          type: DirectoryOrCreate
+          
+      # Internal service discovery only
+      serviceDiscovery:
+        kubernetes:
+          enabled: true
+        dns:
+          enabled: true
+          servers:
+          - 10.0.0.10  # Internal DNS
+        file:
+          enabled: true
+          files:
+          - /etc/prometheus/targets/*.yaml
+          
+      # Security hardening
+      security:
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        
+    grafana:
+      enabled: true
+      version: "10.2.0-fips"
+      replicas: 2
+      
+      image:
+        repository: internal-registry.company.local:5000/grafana
+        tag: "10.2.0-fips"
+        
+      # Disable external features
+      features:
+        # No plugin downloads
+        pluginInstall: false
+        # No external image rendering
+        imageRendering: false
+        # No update checks
+        updateChecker: false
+        # No analytics
+        analytics: false
+        
+      # Pre-installed plugins only
+      plugins:
+        useLocalOnly: true
+        localPath: /var/lib/grafana/plugins
+        
+      # Internal authentication only
+      auth:
+        anonymous:
+          enabled: false
+        basic:
+          enabled: false
+        ldap:
+          enabled: true
+          configSecret: ldap-config
+          servers:
+          - host: ldap.company.local
+            port: 636
+            useSSL: true
+            startTLS: false
+            skipVerifySSL: false
+            
+    loki:
+      enabled: true
+      version: "2.9.0-fips"
+      
+      image:
+        repository: internal-registry.company.local:5000/loki
+        tag: "2.9.0-fips"
+        
+      # Local storage only
+      storage:
+        type: filesystem
+        filesystem:
+          directory: /data/loki
+          
+      # Disable cloud features
+      features:
+        s3: false
+        gcs: false
+        azure: false
+        
+    tempo:
+      enabled: true
+      version: "2.3.0-fips"
+      
+      image:
+        repository: internal-registry.company.local:5000/tempo
+        tag: "2.3.0-fips"
+        
+      storage:
+        type: filesystem
+        
+  # Compliance and audit
+  compliance:
+    enabled: true
+    
+    # Audit logging
+    auditLogging:
+      enabled: true
+      level: RequestResponse  # Log all requests and responses
+      
+      # Local audit log storage
+      storage:
+        type: filesystem
+        path: /audit/logs
+        retention: 365d  # 1 year retention
+        
+      # Audit events to capture
+      events:
+      - level: Metadata
+        omitStages:
+        - RequestReceived
+      - level: RequestResponse
+        users:
+        - system:*
+        omitStages:
+        - RequestReceived
+        
+    # Compliance scanning
+    scanning:
+      enabled: true
+      schedule: "0 0 * * *"  # Daily
+      
+      scanners:
+      - name: cis-benchmark
+        image: internal-registry.company.local:5000/cis-scanner:latest
+      - name: stig
+        image: internal-registry.company.local:5000/stig-scanner:latest
+        
+  # Monitoring without external dependencies
+  monitoring:
+    # Self-contained monitoring
+    selfMonitoring:
+      enabled: true
+      isolated: true  # No external dependencies
+      
+    # Local alerting only
+    alerting:
+      alertmanager:
+        enabled: true
+        
+        # Internal SMTP only
+        config:
+          global:
+            smtp_smarthost: 'smtp.company.local:25'
+            smtp_from: 'alertmanager@company.local'
+            smtp_require_tls: false
+            
+          route:
+            receiver: 'internal-email'
+            
+          receivers:
+          - name: 'internal-email'
+            email_configs:
+            - to: 'oncall@company.local'
+              require_tls: false
+              
+  # Backup to internal systems only
+  backup:
+    enabled: true
+    
+    destination:
+      type: nfs
+      nfs:
+        server: backup.company.local
+        path: /backups/observability
+        
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retention: 90d
+    
+  # Update strategy for air-gapped environments
+  updates:
+    strategy: manual
+    
+    # Offline updates
+    offline:
+      enabled: true
+      bundlePath: /updates/observability
+      
+    # Pre-download verification
+    verification:
+      enabled: true
+      checksums: true
+      signatures: true
+      signatureKey: company-signing-key

@@ -1,0 +1,297 @@
+# Example: Resource Synchronization
+# This example shows how to sync resources across clusters
+---
+# Sync ConfigMaps from hub to all spoke clusters
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sync-global-configs
+  namespace: gunj-multicluster
+data:
+  sync.yaml: |
+    name: global-configs
+    sourceCluster: hub-cluster
+    targetClusters:
+    - us-east-1
+    - eu-west-1
+    - ap-south-1
+    resourceType: configmaps
+    namespace: observability
+    selector:
+      matchLabels:
+        sync: global
+    conflictResolution: update
+    bidirectional: false
+---
+# Sync Secrets for cross-cluster authentication
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sync-auth-secrets
+  namespace: gunj-multicluster
+data:
+  sync.yaml: |
+    name: auth-secrets
+    sourceCluster: hub-cluster
+    targetClusters:
+    - us-east-1
+    - eu-west-1
+    - ap-south-1
+    resourceType: secrets
+    namespace: observability
+    selector:
+      matchLabels:
+        type: auth
+        sync: enabled
+    transform:
+    - type: remove
+      path: metadata.resourceVersion
+    - type: remove
+      path: metadata.uid
+    - type: add
+      path: metadata.annotations.synced-from
+      value: hub-cluster
+    conflictResolution: skip
+    bidirectional: false
+---
+# Sync Prometheus Rules
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sync-prometheus-rules
+  namespace: gunj-multicluster
+data:
+  sync.yaml: |
+    name: prometheus-rules
+    sourceCluster: hub-cluster
+    targetClusters:
+    - us-east-1
+    - eu-west-1
+    - ap-south-1
+    resourceType: prometheusrules.monitoring.coreos.com
+    namespace: monitoring
+    selector:
+      matchLabels:
+        prometheus: kube-prometheus
+    conflictResolution: update
+    bidirectional: false
+---
+# Sync Grafana Dashboards
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sync-grafana-dashboards
+  namespace: gunj-multicluster
+data:
+  sync.yaml: |
+    name: grafana-dashboards
+    sourceCluster: hub-cluster
+    targetClusters:
+    - us-east-1
+    - eu-west-1
+    - ap-south-1
+    - dev-cluster
+    - staging-cluster
+    resourceType: configmaps
+    namespace: monitoring
+    selector:
+      matchLabels:
+        grafana_dashboard: "1"
+    transform:
+    - type: add
+      path: metadata.labels.synced
+      value: "true"
+    - type: regex
+      path: metadata.name
+      pattern: "-hub$"
+      replacement: ""
+    conflictResolution: update
+    bidirectional: false
+---
+# Bidirectional sync for development configs
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sync-dev-configs
+  namespace: gunj-multicluster
+data:
+  sync.yaml: |
+    name: dev-configs
+    sourceCluster: dev-cluster
+    targetClusters:
+    - staging-cluster
+    resourceType: configmaps
+    namespace: development
+    selector:
+      matchLabels:
+        environment: development
+        promote: staging
+    transform:
+    - type: replace
+      path: metadata.labels.environment
+      value: staging
+    conflictResolution: newer
+    bidirectional: true
+---
+# Sync ServiceMonitors for Prometheus federation
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sync-service-monitors
+  namespace: gunj-multicluster
+data:
+  sync.yaml: |
+    name: service-monitors
+    sourceCluster: hub-cluster
+    targetClusters:
+    - us-east-1
+    - eu-west-1
+    - ap-south-1
+    resourceType: servicemonitors.monitoring.coreos.com
+    namespace: monitoring
+    selector:
+      matchLabels:
+        team: platform
+    conflictResolution: update
+    bidirectional: false
+---
+# Job to create resource syncs
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-resource-syncs
+  namespace: gunj-multicluster
+spec:
+  template:
+    spec:
+      serviceAccountName: gunj-resource-sync
+      containers:
+      - name: create-syncs
+        image: docker.io/gunjanjp/gunj-cli:v2.0.0
+        command:
+        - /gunj-cli
+        - sync
+        - create
+        - --config-dir=/configs
+        volumeMounts:
+        - name: configs
+          mountPath: /configs
+      volumes:
+      - name: configs
+        projected:
+          sources:
+          - configMap:
+              name: sync-global-configs
+          - configMap:
+              name: sync-auth-secrets
+          - configMap:
+              name: sync-prometheus-rules
+          - configMap:
+              name: sync-grafana-dashboards
+          - configMap:
+              name: sync-dev-configs
+          - configMap:
+              name: sync-service-monitors
+      restartPolicy: OnFailure
+---
+# ServiceAccount for resource sync
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gunj-resource-sync
+  namespace: gunj-multicluster
+---
+# Role for resource sync management
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gunj-resource-sync
+  namespace: gunj-multicluster
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gunj-resource-sync
+  namespace: gunj-multicluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gunj-resource-sync
+subjects:
+- kind: ServiceAccount
+  name: gunj-resource-sync
+  namespace: gunj-multicluster
+---
+# Example ConfigMap to be synced
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: global-alerting-config
+  namespace: observability
+  labels:
+    sync: global
+data:
+  alerting.yaml: |
+    global:
+      resolve_timeout: 5m
+      smtp_smarthost: 'smtp.example.com:587'
+      smtp_from: 'alerts@example.com'
+    
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 12h
+      receiver: 'team-notifications'
+      routes:
+      - match:
+          severity: critical
+        receiver: 'pagerduty'
+      - match:
+          severity: warning
+        receiver: 'slack'
+    
+    receivers:
+    - name: 'team-notifications'
+      email_configs:
+      - to: 'team@example.com'
+    
+    - name: 'pagerduty'
+      pagerduty_configs:
+      - service_key: '<pagerduty-service-key>'
+    
+    - name: 'slack'
+      slack_configs:
+      - api_url: '<slack-webhook-url>'
+        channel: '#alerts'
+---
+# Example Secret to be synced
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-datasources
+  namespace: observability
+  labels:
+    type: auth
+    sync: enabled
+type: Opaque
+stringData:
+  prometheus.yaml: |
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      access: proxy
+      url: http://prometheus:9090
+      isDefault: true
+    - name: Prometheus-Federation
+      type: prometheus
+      access: proxy
+      url: http://prometheus-federation:9090
+      jsonData:
+        httpMethod: POST

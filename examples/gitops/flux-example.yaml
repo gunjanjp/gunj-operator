@@ -1,0 +1,146 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-with-flux
+  namespace: observability
+spec:
+  # Component configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+      storage:
+        size: 50Gi
+      retention: 15d
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      storage:
+        size: 100Gi
+      retention: 7d
+  
+  # GitOps configuration with Flux
+  gitOps:
+    provider: flux
+    
+    repository:
+      url: https://github.com/your-org/platform-configs.git
+      branch: main
+      path: clusters/production
+      secretRef: flux-git-auth
+      interval: 5m  # How often to check for changes
+    
+    environments:
+      # Single cluster, multiple namespaces approach
+      - name: development
+        namespace: platform-dev
+        path: clusters/production/dev
+        
+      - name: staging
+        namespace: platform-staging  
+        path: clusters/production/staging
+        promotionPolicy:
+          autoPromotion: true
+          dependsOn: development  # Wait for dev to be ready
+          promoteAfter: 30m      # Wait 30 minutes before promoting
+      
+      - name: production
+        namespace: platform-prod
+        path: clusters/production/prod
+        promotionPolicy:
+          autoPromotion: false   # Manual promotion required
+          approvalRequired: true
+          dependsOn: staging
+    
+    # Enable automatic synchronization
+    autoSync: true
+    
+    # Image automation for automatic updates
+    imageAutomation:
+      enabled: true
+      interval: 10m
+      updateStrategy: semver
+      imagePolicies:
+        - name: prometheus
+          imageRepository: docker.io/prom/prometheus
+          policy: semver
+          policyValue: ">=2.48.0 <3.0.0"
+        
+        - name: grafana
+          imageRepository: docker.io/grafana/grafana
+          policy: semver
+          policyValue: ">=10.0.0 <11.0.0"
+        
+        - name: loki
+          imageRepository: docker.io/grafana/loki
+          policy: semver
+          policyValue: ">=2.9.0 <3.0.0"
+
+---
+# Secret for Flux Git repository access
+apiVersion: v1
+kind: Secret
+metadata:
+  name: flux-git-auth
+  namespace: observability
+type: Opaque
+stringData:
+  username: git-user
+  password: ghp_xxxxxxxxxxxxxxxxxxxx  # GitHub personal access token
+  # Or use SSH key instead:
+  # identity: |
+  #   -----BEGIN OPENSSH PRIVATE KEY-----
+  #   ...
+  #   -----END OPENSSH PRIVATE KEY-----
+  # known_hosts: |
+  #   github.com ssh-rsa AAAAB3NzaC1yc2E...
+
+---
+# Flux will create GitRepository and Kustomization resources automatically
+# Example of what will be created:
+#
+# apiVersion: source.toolkit.fluxcd.io/v1
+# kind: GitRepository
+# metadata:
+#   name: platform-with-flux-source
+#   namespace: observability
+# spec:
+#   interval: 5m
+#   url: https://github.com/your-org/platform-configs.git
+#   ref:
+#     branch: main
+#   secretRef:
+#     name: flux-git-auth
+#
+# ---
+# apiVersion: kustomize.toolkit.fluxcd.io/v1
+# kind: Kustomization
+# metadata:
+#   name: platform-with-flux-development
+#   namespace: observability
+# spec:
+#   interval: 5m
+#   path: clusters/production/dev
+#   prune: true
+#   sourceRef:
+#     kind: GitRepository
+#     name: platform-with-flux-source
+#   targetNamespace: platform-dev
+#   healthChecks:
+#     - kind: Deployment
+#       namespace: platform-dev
+#     - kind: StatefulSet
+#       namespace: platform-dev

@@ -1,0 +1,165 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: fault-injection-platform
+  namespace: monitoring
+spec:
+  # Enable service mesh with fault injection for chaos testing
+  serviceMesh:
+    enabled: true
+    type: auto
+    
+    # Traffic management with fault injection
+    trafficManagement:
+      # Fault injection configuration
+      faultInjection:
+        # Inject delays to test timeout handling
+        delay:
+          percentage: 10 # Affect 10% of requests
+          fixedDelay: "5s" # Add 5 second delay
+        
+        # Inject errors to test error handling
+        abort:
+          percentage: 5 # Affect 5% of requests
+          httpStatus: 503 # Return 503 Service Unavailable
+      
+      # Aggressive retry policy to test resilience
+      retry:
+        attempts: 5
+        perTryTimeout: "3s"
+        retryOn:
+          - "5xx"
+          - "reset"
+          - "connect-failure"
+          - "refused-stream"
+          - "retriable-4xx"
+        retryBackoff:
+          initialInterval: "500ms"
+          maxInterval: "10s"
+          multiplier: 2.0
+      
+      # Short timeouts to trigger failures
+      timeout:
+        requestTimeout: "10s" # Tight timeout
+        idleTimeout: "60s"
+    
+    # Circuit breaker to test failure detection
+    circuitBreaker:
+      enabled: true
+      consecutiveErrors: 3 # Low threshold
+      interval: "10s"
+      baseEjectionTime: "15s"
+      maxEjectionPercent: 33 # Eject up to 1/3 of endpoints
+    
+    # Observability to monitor chaos testing
+    observability:
+      metrics:
+        enabled: true
+        customMetrics:
+          - name: "fault_injection_delay_injected"
+            dimensions:
+              fault_type: "delay"
+              target: "prometheus"
+          - name: "fault_injection_error_injected"
+            dimensions:
+              fault_type: "abort"
+              target: "prometheus"
+          - name: "circuit_breaker_triggered"
+            dimensions:
+              component: "prometheus"
+      
+      tracing:
+        enabled: true
+        samplingRate: 100.0 # 100% sampling during chaos testing
+        customTags:
+          test_type: "chaos"
+          fault_injection: "enabled"
+      
+      accessLogging:
+        enabled: true
+        format: JSON
+        filters:
+          - type: "status_code"
+            condition: "gte"
+            value: "400" # Log all errors
+          - type: "duration"
+            condition: "gte"
+            value: "1000" # Log slow requests (>1s)
+  
+  # Components configured for chaos testing
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3 # Multiple replicas to test failover
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "250m"
+        limits:
+          memory: "2Gi"
+          cpu: "500m"
+      storage:
+        size: 25Gi
+      
+      # Short retention for test data
+      retention: "7d"
+      
+      # Additional scrape configs for chaos metrics
+      additionalScrapeConfigs: |
+        - job_name: 'chaos-metrics'
+          static_configs:
+          - targets: ['chaos-mesh-controller:10080']
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "100m"
+        limits:
+          memory: "512Mi"
+          cpu: "250m"
+      
+      # Chaos testing dashboards
+      dataSources:
+        - name: "prometheus-chaos"
+          type: prometheus
+          url: "http://prometheus:9090"
+          isDefault: true
+          access: proxy
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 1
+      storage:
+        size: 25Gi
+      
+      # Increased retention for error logs
+      retention:
+        days: 3
+        deletionEnabled: true
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 1
+      storage:
+        size: 25Gi
+  
+  # High availability disabled for chaos testing
+  highAvailability:
+    enabled: false # Test single instance failures
+  
+  # Global settings for chaos testing
+  global:
+    externalLabels:
+      cluster: "chaos-test"
+      environment: "test"
+      test_id: "chaos-2025-06-15"
+    logLevel: "debug"
+    nodeSelector:
+      chaos-testing: "enabled"

@@ -1,0 +1,352 @@
+# Multi-Cluster Service Mesh Configuration
+# This example demonstrates how to configure observability across multiple clusters
+# with service mesh federation for cross-cluster communication
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-multicluster
+  namespace: monitoring
+spec:
+  # Multi-cluster Service Mesh Configuration
+  serviceMesh:
+    enabled: true
+    type: auto  # Will detect Istio or Linkerd
+    
+    # mTLS across clusters
+    mtls:
+      enabled: true
+      mode: STRICT
+    
+    # Traffic management for cross-cluster communication
+    trafficManagement:
+      retry:
+        attempts: 5  # More retries for cross-cluster calls
+        perTryTimeout: "20s"
+        retryOn: "5xx,reset,connect-failure,refused-stream"
+      
+      circuitBreaker:
+        consecutiveErrors: 10
+        interval: "60s"
+        baseEjectionTime: "60s"
+        maxEjectionPercent: 30  # Lower ejection for cross-cluster
+        
+      timeout:
+        request: "60s"  # Longer timeout for cross-cluster
+        idle: "300s"
+      
+      loadBalancing:
+        algorithm: ROUND_ROBIN
+        # Prefer local cluster endpoints
+        consistentHash:
+          useSourceIP: true
+    
+    # Enhanced observability for multi-cluster
+    observability:
+      metrics:
+        enabled: true
+        providers:
+          - prometheus
+          - telemetry_v2
+      tracing:
+        enabled: true
+        samplingRate: 0.05  # Higher sampling for debugging
+      accessLogs:
+        enabled: true
+        format: JSON
+    
+    # Multi-cluster configuration
+    multiCluster:
+      enabled: true
+      clusterName: "cluster-1"  # This cluster's name
+      network: "network-1"      # Network identifier
+      remoteClusters:
+        - name: "cluster-2"
+          endpoint: "https://cluster-2-api.example.com:6443"
+          network: "network-2"
+        - name: "cluster-3"
+          endpoint: "https://cluster-3-api.example.com:6443"
+          network: "network-3"
+        - name: "cluster-4"
+          endpoint: "https://cluster-4-api.example.com:6443"
+          network: "network-1"  # Same network as cluster-1
+  
+  # Components with multi-cluster configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1"
+        limits:
+          memory: "8Gi"
+          cpu: "2"
+      storage:
+        size: 500Gi  # More storage for multi-cluster metrics
+        storageClassName: fast-ssd
+      
+      # Federated Prometheus configuration
+      federationConfig:
+        enabled: true
+        # Scrape other clusters' Prometheus instances
+        targets:
+          - cluster: cluster-2
+            endpoint: https://prometheus-cluster-2.example.com
+            labels:
+              cluster: cluster-2
+              region: us-west-1
+          - cluster: cluster-3
+            endpoint: https://prometheus-cluster-3.example.com
+            labels:
+              cluster: cluster-3
+              region: eu-west-1
+          - cluster: cluster-4
+            endpoint: https://prometheus-cluster-4.example.com
+            labels:
+              cluster: cluster-4
+              region: us-east-2
+      
+      # Remote write for global metrics storage
+      remoteWrite:
+        - url: https://thanos-receiver.example.com/api/v1/receive
+          writeRelabelConfigs:
+            - sourceLabels: [__name__]
+              regex: '(.*)'
+              targetLabel: cluster
+              replacement: cluster-1
+      
+      # Additional scrape configs for cross-cluster mesh
+      additionalScrapeConfigs: |
+        - job_name: 'federate'
+          scrape_interval: 30s
+          scrape_timeout: 30s
+          honor_labels: true
+          metrics_path: '/federate'
+          params:
+            'match[]':
+              - '{job=~"istio-mesh|linkerd-proxy"}'
+              - '{__name__=~"istio_request_total|linkerd_request_total"}'
+              - '{__name__=~"istio_request_duration_milliseconds_bucket|linkerd_response_latency_ms_bucket"}'
+          static_configs:
+            - targets:
+              - 'prometheus-cluster-2.example.com:9090'
+              labels:
+                cluster: 'cluster-2'
+            - targets:
+              - 'prometheus-cluster-3.example.com:9090'
+              labels:
+                cluster: 'cluster-3'
+            - targets:
+              - 'prometheus-cluster-4.example.com:9090'
+              labels:
+                cluster: 'cluster-4'
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      
+      # Multi-cluster data sources
+      datasources:
+        - name: prometheus-local
+          type: prometheus
+          url: http://prometheus:9090
+          isDefault: true
+        - name: prometheus-cluster-2
+          type: prometheus
+          url: https://prometheus-cluster-2.example.com
+        - name: prometheus-cluster-3
+          type: prometheus
+          url: https://prometheus-cluster-3.example.com
+        - name: prometheus-cluster-4
+          type: prometheus
+          url: https://prometheus-cluster-4.example.com
+        - name: prometheus-global
+          type: prometheus
+          url: https://thanos-query.example.com
+      
+      # Multi-cluster dashboards
+      dashboards:
+        - name: multi-cluster-overview
+          json: |
+            {
+              "dashboard": {
+                "title": "Multi-Cluster Overview",
+                "panels": [
+                  {
+                    "title": "Request Rate by Cluster",
+                    "targets": [
+                      {
+                        "expr": "sum by (cluster) (rate(istio_request_total[5m]))"
+                      }
+                    ]
+                  },
+                  {
+                    "title": "Cross-Cluster Traffic",
+                    "targets": [
+                      {
+                        "expr": "sum by (source_cluster, destination_cluster) (rate(istio_request_total{source_cluster!=destination_cluster}[5m]))"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 3
+      storage:
+        size: 1Ti  # Large storage for multi-cluster logs
+        storageClassName: fast-ssd
+      
+      # Multi-tenant configuration for cluster isolation
+      multiTenancy:
+        enabled: true
+        tenants:
+          - cluster-1
+          - cluster-2
+          - cluster-3
+          - cluster-4
+      
+      # Distributor for receiving logs from all clusters
+      distributor:
+        ringKvStore:
+          store: memberlist
+        ringInstanceAddr: 0.0.0.0
+        ringInstancePort: 7946
+        ringJoinMembers:
+          - loki-cluster-2.example.com:7946
+          - loki-cluster-3.example.com:7946
+          - loki-cluster-4.example.com:7946
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 3
+      storage:
+        size: 500Gi
+      
+      # Multi-cluster trace collection
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: "0.0.0.0:4317"
+            http:
+              endpoint: "0.0.0.0:4318"
+        zipkin:
+          endpoint: "0.0.0.0:9411"
+        jaeger:
+          protocols:
+            grpc:
+              endpoint: "0.0.0.0:14250"
+            thrift_http:
+              endpoint: "0.0.0.0:14268"
+      
+      # Trace aggregation from all clusters
+      processor:
+        batch:
+          timeout: 10s
+          send_batch_size: 1000
+        attributes:
+          actions:
+            - key: cluster
+              value: cluster-1
+              action: upsert
+  
+  # Global configuration for multi-cluster
+  global:
+    externalLabels:
+      cluster: cluster-1
+      region: us-east-1
+      environment: production
+      mesh_federation: enabled
+
+---
+# For Istio: Multi-cluster secret for cross-cluster discovery
+apiVersion: v1
+kind: Secret
+metadata:
+  name: istio-remote-secret-cluster-2
+  namespace: istio-system
+  labels:
+    istio/multiCluster: true
+type: Opaque
+data:
+  cluster-2: <base64-encoded-kubeconfig-for-cluster-2>
+
+---
+# For Linkerd: Multi-cluster Link
+apiVersion: multicluster.linkerd.io/v1alpha1
+kind: Link
+metadata:
+  name: cluster-2
+  namespace: linkerd-multicluster
+spec:
+  clusterName: cluster-2
+  gatewayName: linkerd-gateway
+  gatewayNamespace: linkerd-multicluster
+  gatewayPort: 4143
+  probeSpec:
+    path: /ready
+    period: 3s
+    port: 4191
+  selector:
+    matchLabels: {}
+  targetClusterDomain: cluster.local
+  targetClusterName: cluster-2
+
+---
+# Service for cross-cluster communication
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-multicluster
+  namespace: monitoring
+  annotations:
+    # For Istio
+    networking.istio.io/exportTo: "*"
+    # For Linkerd
+    mirror.linkerd.io/exported: "true"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9090
+    targetPort: 9090
+    name: http-metrics
+  selector:
+    app: prometheus
+    app.kubernetes.io/managed-by: gunj-operator
+
+---
+# After applying this configuration:
+# 1. Service mesh federation is configured across clusters
+# 2. Prometheus federates metrics from all clusters
+# 3. Grafana can query all clusters' data
+# 4. Loki aggregates logs from all clusters
+# 5. Tempo collects distributed traces across clusters
+# 6. mTLS is enforced for all cross-cluster communication
+#
+# Verify multi-cluster setup:
+# 
+# For Istio:
+# istioctl remote-clusters
+# istioctl proxy-config endpoint deployment/prometheus -n monitoring | grep cluster-2
+# 
+# For Linkerd:
+# linkerd multicluster gateways
+# linkerd multicluster link --cluster-name cluster-2
+# 
+# Check cross-cluster metrics:
+# curl http://prometheus:9090/api/v1/query?query=up{cluster!="cluster-1"}

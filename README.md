@@ -1,196 +1,375 @@
-# Gunj Operator 🚀
+# Gunj Operator
 
-[![CI Pipeline](https://github.com/gunjanjp/gunj-operator/actions/workflows/ci.yml/badge.svg)](https://github.com/gunjanjp/gunj-operator/actions/workflows/ci.yml)
-[![Security Scan](https://github.com/gunjanjp/gunj-operator/actions/workflows/security.yml/badge.svg)](https://github.com/gunjanjp/gunj-operator/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org)
+[![Kubernetes Version](https://img.shields.io/badge/Kubernetes-1.26+-blue.svg)](https://kubernetes.io)
+[![CNCF Status](https://img.shields.io/badge/CNCF-Sandbox%20Ready-brightgreen.svg)](https://www.cncf.io)
 
-Enterprise Observability Platform - Next-generation Kubernetes operator for deploying and managing Prometheus, Grafana, Loki, and Tempo.
+A next-generation Kubernetes operator for deploying and managing enterprise observability platforms. The Gunj Operator simplifies the deployment, configuration, and lifecycle management of observability stacks including Prometheus, Grafana, Loki, and Tempo.
 
-## 🎯 Features
+## 🚀 Features
 
-- **Kubernetes Native**: Built using the operator pattern
-- **Complete Observability**: Metrics, logs, traces, and dashboards
-- **API First**: RESTful and GraphQL APIs
-- **Modern UI**: React-based management interface
-- **GitOps Ready**: Seamless ArgoCD/Flux integration
-- **Multi-Cluster**: Manage observability across clusters
-- **Enterprise Ready**: RBAC, audit logging, and compliance
+- **🎯 Kubernetes Native**: Full operator pattern implementation following CNCF best practices
+- **📊 Complete Observability Stack**: Automated deployment of Prometheus, Grafana, Loki, and Tempo
+- **🔄 GitOps Integration**: Native support for ArgoCD and Flux with automatic rollback
+- **🌐 Multi-Environment Support**: Manage dev, staging, and production with automated promotion
+- **💻 Web UI**: Beautiful React-based management interface
+- **🔌 API First**: RESTful and GraphQL APIs for automation
+- **🔒 Enterprise Security**: OIDC, SAML, LDAP integration with RBAC
+- **📈 Auto-scaling**: Resource optimization and automatic scaling
+- **💾 Backup & Restore**: Automated backup with multiple storage backends
+- **🏥 Self-Healing**: Automatic failure detection and recovery
+
+## 📋 Table of Contents
+
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [GitOps Integration](#gitops-integration)
+- [API Reference](#api-reference)
+- [Web UI](#web-ui)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+
+## 🏗️ Architecture
+
+The Gunj Operator follows the Kubernetes operator pattern and consists of:
+
+- **Operator Core**: Manages the lifecycle of observability components
+- **CRDs**: Custom Resource Definitions for platform configuration
+- **API Server**: RESTful and GraphQL APIs for external integration
+- **Web UI**: React-based management interface
+- **GitOps Manager**: Integration with ArgoCD and Flux
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Kubernetes    │     │   Gunj API      │     │    Gunj UI      │
+│   API Server    │◄────┤     Server      │◄────┤   (React SPA)   │
+└────────┬────────┘     └─────────────────┘     └─────────────────┘
+         │                        ▲
+         ▼                        │
+┌─────────────────┐              │
+│  Gunj Operator  │──────────────┘
+│                 │
+│  ┌───────────┐  │     ┌─────────────────────────────────────────┐
+│  │Controller │  │     │         Observability Platform          │
+│  └─────┬─────┘  │     │                                         │
+│        │        │     │  ┌────────────┐    ┌────────────┐      │
+│  ┌─────▼─────┐  │     │  │ Prometheus │    │  Grafana   │      │
+│  │ Managers  │  │────▶│  └────────────┘    └────────────┘      │
+│  └───────────┘  │     │                                         │
+│                 │     │  ┌────────────┐    ┌────────────┐      │
+└─────────────────┘     │  │    Loki    │    │   Tempo    │      │
+                        │  └────────────┘    └────────────┘      │
+                        └─────────────────────────────────────────┘
+```
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Kubernetes 1.26+
-- Helm 3.14+
+- Kubernetes cluster (v1.26+)
 - kubectl configured
-- Docker Hub account (for development)
+- Helm 3.14+ (optional)
 
-### Installation
+### Install the Operator
 
 ```bash
-# Add Helm repository
-helm repo add gunj-operator https://gunjanjp.github.io/gunj-operator/charts
-helm repo update
+# Using kubectl
+kubectl apply -f https://github.com/gunjanjp/gunj-operator/releases/latest/download/install.yaml
 
-# Install operator
+# Or using Helm
+helm repo add gunj-operator https://gunjanjp.github.io/gunj-operator/charts
 helm install gunj-operator gunj-operator/gunj-operator \
   --namespace gunj-system \
   --create-namespace
-
-# Create your first observability platform
-kubectl apply -f examples/basic-platform.yaml
 ```
 
-## 🔧 Development Setup
+### Deploy Your First Platform
 
-### 1. Clone Repository
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: my-platform
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+    grafana:
+      enabled: true
+      version: "10.2.0"
+    loki:
+      enabled: true
+      version: "2.9.0"
+    tempo:
+      enabled: true
+      version: "2.3.0"
+```
 
 ```bash
+kubectl apply -f platform.yaml
+```
+
+## 📦 Installation
+
+### Production Installation
+
+For production deployments, see our [Installation Guide](docs/installation.md) which covers:
+
+- High availability configuration
+- Security hardening
+- Resource sizing
+- Network policies
+- Backup configuration
+
+## ⚙️ Configuration
+
+### Basic Configuration
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: production
+  namespace: monitoring
+spec:
+  # Component configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 100Gi
+      retention: 30d
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      ingress:
+        enabled: true
+        host: grafana.example.com
+  
+  # High Availability
+  highAvailability:
+    enabled: true
+    minReplicas: 3
+  
+  # Security
+  security:
+    tls:
+      enabled: true
+      autoTLS: true
+    authentication:
+      type: oidc
+      oidc:
+        issuer: https://auth.example.com
+        clientId: gunj-operator
+```
+
+For detailed configuration options, see [Configuration Guide](docs/configuration.md).
+
+## 🔄 GitOps Integration
+
+The Gunj Operator provides native GitOps integration with ArgoCD and Flux, enabling:
+
+- **Declarative Configuration**: Store platform configs in Git
+- **Multi-Environment Management**: Automated promotion between environments
+- **Automatic Rollback**: Detect failures and rollback automatically
+- **Drift Detection**: Ensure configuration matches desired state
+
+### ArgoCD Example
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: production
+  namespace: observability
+spec:
+  components:
+    # ... component configuration ...
+  
+  gitOps:
+    provider: argocd
+    repository:
+      url: https://github.com/your-org/observability-configs.git
+      branch: main
+      path: platforms
+    
+    environments:
+      - name: dev
+        namespace: observability-dev
+        branch: develop
+        
+      - name: staging
+        namespace: observability-staging
+        promotionPolicy:
+          autoPromotion: true
+          dependsOn: dev
+          promoteAfter: 1h
+      
+      - name: production
+        namespace: observability-prod
+        promotionPolicy:
+          approvalRequired: true
+          dependsOn: staging
+    
+    rollbackConfig:
+      autoRollback: true
+      failureThreshold: 3
+      window: 30m
+```
+
+See [GitOps Examples](examples/gitops/) for more detailed examples.
+
+## 🔌 API Reference
+
+### REST API
+
+The operator provides a comprehensive REST API:
+
+```bash
+# Get all platforms
+curl -H "Authorization: Bearer $TOKEN" \
+  https://api.gunj-operator.example.com/api/v1/platforms
+
+# Create a platform
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d @platform.json \
+  https://api.gunj-operator.example.com/api/v1/platforms
+
+# Trigger GitOps sync
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  https://api.gunj-operator.example.com/api/v1/platforms/production/sync
+```
+
+### GraphQL API
+
+```graphql
+query GetPlatforms {
+  platforms {
+    name
+    namespace
+    status {
+      phase
+      health
+      components {
+        name
+        ready
+      }
+    }
+  }
+}
+
+mutation PromoteEnvironment {
+  promoteEnvironment(
+    platform: "production",
+    from: "staging",
+    to: "production"
+  ) {
+    success
+    message
+  }
+}
+```
+
+Full API documentation: [API Reference](docs/api-reference.md)
+
+## 💻 Web UI
+
+The Gunj Operator includes a modern React-based web interface:
+
+- **Dashboard**: Real-time platform status and health
+- **Platform Management**: Create, update, and delete platforms
+- **GitOps Control**: Manage deployments and promotions
+- **Monitoring**: Built-in dashboards and metrics
+- **Configuration Editor**: Visual configuration with validation
+
+Access the UI at `https://gunj-operator.example.com` after installation.
+
+## 🛠️ Development
+
+### Prerequisites
+
+- Go 1.21+
+- Node.js 20+
+- Docker
+- kind or minikube
+- Make
+
+### Setup Development Environment
+
+```bash
+# Clone the repository
 git clone https://github.com/gunjanjp/gunj-operator.git
 cd gunj-operator
-```
 
-### 2. Set Up Secrets
+# Install dependencies
+make install-deps
 
-```bash
-# Run the interactive setup script
-./setup-local-secrets.sh
+# Run locally
+make run
 
-# Load secrets into your shell
-source ./load-secrets.sh
-
-# Verify Docker Hub access
-./test-docker-login.sh
-```
-
-### 3. Configure GitHub Secrets
-
-For CI/CD to work, configure these secrets in your GitHub repository:
-
-| Secret | Required | Description |
-|--------|----------|-------------|
-| `DOCKER_USERNAME` | ✅ | Docker Hub username |
-| `DOCKER_PASSWORD` | ✅ | Docker Hub access token |
-| `SLACK_WEBHOOK_URL` | ❌ | Slack notifications |
-| `GPG_PRIVATE_KEY` | ❌ | Code signing |
-| `SNYK_TOKEN` | ❌ | Security scanning |
-
-See [Secret Management Guide](docs/security/secret-management.md) for detailed instructions.
-
-### 4. Run Tests
-
-```bash
-# Verify secret configuration
-gh workflow run secret-test.yml
-
-# Run full CI pipeline
+# Run tests
 make test
+
+# Build images
+make docker-build
 ```
 
-## 🔒 Security
-
-Security is a top priority for the Gunj Operator project.
-
-### Security Features
-
-- **Secret Management**: Automated rotation reminders and secure storage
-- **Container Security**: Distroless images, non-root execution
-- **Supply Chain**: SBOM generation, image signing
-- **Vulnerability Scanning**: Integrated Snyk and Trivy scanning
-- **Compliance**: CNCF best practices, CIS benchmarks
-
-### Security Documentation
-
-- [Secret Management Guide](docs/security/secret-management.md)
-- [Security Checklist](docs/security/security-checklist.md)
-- [Security Policy](SECURITY.md)
-
-### Reporting Security Issues
-
-**DO NOT** create public issues for security vulnerabilities.
-
-Email: gunjanjp@gmail.com
-
-We will respond within 24 hours and work with you to resolve the issue.
-
-## 📚 Documentation
-
-- [Installation Guide](docs/installation.md)
-- [User Manual](docs/user-manual.md)
-- [API Reference](docs/api-reference.md)
-- [Development Guide](docs/development.md)
-- [Architecture](docs/architecture.md)
+See [Development Guide](docs/development.md) for detailed instructions.
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md).
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details on:
 
-### Development Workflow
+- Code of Conduct
+- Development workflow
+- Coding standards
+- Testing requirements
+- Pull request process
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests locally
-5. Submit a pull request
+## 📚 Documentation
 
-### Code of Conduct
+- [User Guide](docs/user-guide/)
+- [Administrator Guide](docs/admin-guide/)
+- [API Reference](docs/api-reference/)
+- [Architecture](docs/architecture/)
+- [Troubleshooting](docs/troubleshooting.md)
 
-This project follows the [CNCF Code of Conduct](CODE_OF_CONDUCT.md).
+## 🔒 Security
 
-## 🏗️ Project Structure
+For security issues, please email gunjanjp@gmail.com directly instead of using the issue tracker.
 
-```
-gunj-operator/
-├── .github/              # GitHub Actions workflows
-│   ├── workflows/       # CI/CD pipelines
-│   └── README.md        # Workflow documentation
-├── api/                 # CRD definitions
-├── cmd/                 # Entry points
-├── config/              # Kubernetes manifests
-├── controllers/         # Operator logic
-├── docs/               # Documentation
-│   └── security/       # Security documentation
-├── internal/           # Internal packages
-├── pkg/                # Public packages
-├── test/               # Test suites
-├── ui/                 # React UI
-└── setup-local-secrets.sh  # Local development setup
-```
-
-## 📊 Roadmap
-
-- [x] Phase 1: Foundation & Architecture
-- [ ] Phase 2: Operator Core Development
-- [ ] Phase 3: API Development
-- [ ] Phase 4: UI Development
-- [ ] Phase 5: Testing Framework
-- [ ] Phase 6: CI/CD Pipeline
-- [ ] Phase 7: Documentation
-- [ ] Phase 8: Migration & Rollout
-
-See [ROADMAP.md](ROADMAP.md) for details.
-
-## 📞 Support
-
-- **Documentation**: https://gunjanjp.github.io/gunj-operator
-- **Issues**: https://github.com/gunjanjp/gunj-operator/issues
-- **Discussions**: https://github.com/gunjanjp/gunj-operator/discussions
-- **Email**: gunjanjp@gmail.com
+See [SECURITY.md](SECURITY.md) for our security policy.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
-- CNCF for the cloud-native ecosystem
-- Kubernetes community for the operator pattern
-- All contributors and users
+- The Kubernetes community for the operator pattern
+- Prometheus, Grafana, Loki, and Tempo projects
+- CNCF for guidance and best practices
+- All our contributors and users
+
+## 📞 Contact
+
+- **Project Lead**: Gunjan Patil (gunjanjp@gmail.com)
+- **Slack**: #gunj-operator on CNCF Slack
+- **Website**: https://gunjanjp.github.io/gunj-operator
 
 ---
 
-**Current Phase**: Foundation & Architecture (Phase 1)  
-**Version**: v2.0.0-alpha  
-**Status**: In Development  
-
-Made with ❤️ by the Gunj Operator Team
+**Made with ❤️ by the Gunj Operator Community**

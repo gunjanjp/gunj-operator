@@ -1,0 +1,61 @@
+apiVersion: observability.io/v1beta1
+kind: PrometheusConfig
+metadata:
+  name: remote-write-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus-config
+    app.kubernetes.io/instance: remote-write
+spec:
+  targetPlatform:
+    name: production-platform
+  
+  # Remote write configuration for long-term storage
+  remoteWrite:
+  - url: "https://thanos-receiver.monitoring.svc.cluster.local:10908/api/v1/receive"
+    name: thanos-remote-write
+    remoteTimeout: "30s"
+    headers:
+      X-Scope-OrgID: "production"
+    tlsConfig:
+      insecureSkipVerify: false
+      ca: |
+        -----BEGIN CERTIFICATE-----
+        # Your CA certificate here
+        -----END CERTIFICATE-----
+    queueConfig:
+      capacity: 20000
+      maxShards: 200
+      minShards: 1
+      maxSamplesPerSend: 5000
+      batchSendDeadline: "5s"
+      minBackoff: "30ms"
+      maxBackoff: "5s"
+      retryOnRateLimit: 3
+    writeRelabelConfigs:
+    - sourceLabels: ["__name__"]
+      regex: "prometheus_.*"
+      action: drop
+  
+  - url: "https://grafana-cloud.example.com/api/prom/push"
+    name: grafana-cloud
+    basicAuth:
+      username: "12345"
+      password:
+        name: grafana-cloud-secret
+        key: password
+    sendExemplars: true
+    sendNativeHistograms: true
+    metadataConfig:
+      send: true
+      sendInterval: "1m"
+  
+  # Remote read configuration
+  remoteRead:
+  - url: "https://thanos-query.monitoring.svc.cluster.local:10901/api/v1/read"
+    name: thanos-remote-read
+    readRecent: true
+    requiredMatchers:
+      job: "prometheus"
+    tlsConfig:
+      insecureSkipVerify: false

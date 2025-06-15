@@ -1,71 +1,121 @@
-## ✨ New Feature
+## 🚀 Feature Description
 
-### 🎯 Feature Overview
-<!-- Brief description of the new feature -->
+<!-- Provide a clear and concise description of the new feature -->
 
-### 💡 Motivation & Context
-<!-- Why is this feature needed? What problem does it solve? -->
+## Motivation
 
-### 📐 Design Decisions
-<!-- Key architectural or design decisions made -->
+<!-- Why is this feature needed? What use case does it address? -->
 
-### 🔧 Implementation Details
-<!-- Technical details about the implementation -->
+## Design Decisions
 
-### 📚 Documentation
-- [ ] User documentation added/updated
+<!-- Describe any significant design decisions and trade-offs -->
+
+## Implementation Details
+
+<!-- Provide technical details about the implementation -->
+
+### Components Modified
+- [ ] Operator core
+- [ ] API server
+- [ ] UI
+- [ ] Controllers
+- [ ] CRDs
+- [ ] Webhooks
+- [ ] Helm charts
+- [ ] Documentation
+
+### New Dependencies
+<!-- List any new dependencies added -->
+
+## Testing Strategy
+
+### Unit Tests
+<!-- Describe unit test coverage -->
+
+### Integration Tests
+<!-- Describe integration test scenarios -->
+
+### E2E Tests
+<!-- Describe end-to-end test scenarios -->
+
+### Performance Tests
+<!-- Describe any performance testing done -->
+
+## Documentation
+
+### User Documentation
+- [ ] Feature documentation added to user guide
 - [ ] API documentation updated
-- [ ] Architecture diagrams updated
-- [ ] Configuration examples added
+- [ ] Examples provided
+- [ ] Migration guide (if needed)
 
-### 🧪 Testing Strategy
-- [ ] Unit tests (coverage: ___%)
-- [ ] Integration tests
-- [ ] E2E tests
-- [ ] Performance tests
-- [ ] Load tests (if applicable)
+### Developer Documentation
+- [ ] Architecture documentation updated
+- [ ] Code comments added
+- [ ] README updated
 
-### 🎨 UI/UX Changes
-<!-- If applicable, describe UI/UX changes -->
-- [ ] Mockups reviewed and approved
-- [ ] Accessibility requirements met
-- [ ] Mobile responsive
-- [ ] Cross-browser tested
+## Rollout Plan
 
-### 🔐 Security Considerations
-<!-- How does this feature handle security? -->
-- [ ] Authentication required
-- [ ] Authorization checks implemented
-- [ ] Input validation added
-- [ ] Security review completed
+<!-- How should this feature be rolled out? -->
 
-### 📊 Performance Impact
-<!-- Expected performance impact -->
-- [ ] Benchmarks run
-- [ ] No significant impact
-- [ ] Performance improvements noted
+- [ ] Feature flag added (if applicable)
+- [ ] Gradual rollout plan defined
+- [ ] Rollback procedure documented
+- [ ] Monitoring/metrics added
 
-### 🚦 Feature Flag
-- [ ] Feature flag implemented
-- [ ] Flag name: `_____________`
-- [ ] Default state: enabled/disabled
+## Breaking Changes
 
-### 📈 Metrics & Monitoring
-- [ ] Metrics added
-- [ ] Alerts configured
-- [ ] Dashboard updated
+<!-- List any breaking changes and migration path -->
 
-### 🔄 Migration Required?
-- [ ] No migration needed
-- [ ] Migration script included
-- [ ] Backward compatible
+## Security Considerations
 
-### 📋 Definition of Done
-- [ ] Code complete
-- [ ] Tests passing
-- [ ] Documentation updated
-- [ ] Code reviewed
-- [ ] Demo prepared
+<!-- Describe security implications and mitigations -->
 
-Implements: #
-Epic: #
+## Performance Impact
+
+<!-- Describe performance implications -->
+
+## Checklist
+
+### Feature Requirements
+- [ ] Feature matches the original requirements
+- [ ] Edge cases have been considered
+- [ ] Error handling is comprehensive
+- [ ] Feature is configurable (if applicable)
+
+### Code Quality
+- [ ] Code follows project conventions
+- [ ] No code duplication
+- [ ] Proper abstractions used
+- [ ] Resource cleanup handled
+
+### Testing
+- [ ] Unit test coverage > 80%
+- [ ] Integration tests added
+- [ ] E2E tests added (if applicable)
+- [ ] Manual testing completed
+
+### Documentation
+- [ ] User documentation complete
+- [ ] API documentation updated
+- [ ] Examples provided
+- [ ] Changelog updated
+
+### Review Readiness
+- [ ] Self-review completed
+- [ ] PR is focused on a single feature
+- [ ] Commits are logical and well-described
+- [ ] No unrelated changes included
+
+## Related Issues
+
+Closes #
+Related to #
+
+## Screenshots/Demo
+
+<!-- Add screenshots or demo GIFs if applicable -->
+
+## Additional Notes
+
+<!-- Any additional information for reviewers -->

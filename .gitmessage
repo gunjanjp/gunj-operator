@@ -1,0 +1,60 @@
+# <type>(<scope>): <subject>
+# │       │         │
+# │       │         └─⫸ Summary in present tense. Not capitalized. No period at the end.
+# │       │
+# │       └─⫸ Commit Scope: operator|api|ui|controllers|crd|webhooks|helm|docs|deps|security
+# │
+# └─⫸ Commit Type: feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# <body>
+# Explain the motivation for the change and contrast with previous behavior.
+# Use imperative mood: "change" not "changed" nor "changes"
+# Wrap at 72 characters
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# <footer>
+# List any breaking changes or issues closed by this commit
+# 
+# BREAKING CHANGE: <description>
+# Closes #<issue-number>
+# 
+# Signed-off-by: Your Name <your.email@example.com>
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# Remember to:
+#   - Use imperative mood in subject and body
+#   - Limit subject line to 72 characters
+#   - Reference issues and breaking changes
+#   - Sign-off your commits with DCO
+# 
+# Types:
+#   feat:     A new feature
+#   fix:      A bug fix
+#   docs:     Documentation only changes
+#   style:    Formatting, missing semi-colons, etc (no code change)
+#   refactor: Code change that neither fixes a bug nor adds a feature
+#   perf:     Code change that improves performance
+#   test:     Adding missing tests or correcting existing tests
+#   build:    Changes that affect the build system or dependencies
+#   ci:       Changes to CI configuration files and scripts
+#   chore:    Other changes that don't modify src or test files
+#   revert:   Reverts a previous commit
+#
+# Scopes:
+#   operator:    Changes to the operator core
+#   api:         Changes to the API server
+#   ui:          Changes to the React UI
+#   controllers: Changes to Kubernetes controllers
+#   crd:         Changes to Custom Resource Definitions
+#   webhooks:    Changes to admission/validation webhooks
+#   helm:        Changes to Helm charts
+#   docs:        Changes to documentation
+#   deps:        Dependency updates
+#   security:    Security-related changes
+#
+# Examples:
+#   feat(operator): add prometheus scrape interval configuration
+#   fix(api): correct platform status endpoint response
+#   docs(operator): update installation instructions for v2.0
+#   perf(controllers): optimize reconciliation loop for large clusters

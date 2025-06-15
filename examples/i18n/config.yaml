@@ -1,0 +1,285 @@
+# Example ObservabilityPlatform with i18n Metadata
+# This shows how platforms can include locale-specific information
+
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: global-platform
+  namespace: monitoring
+  labels:
+    # Standard labels
+    app.kubernetes.io/name: observability-platform
+    app.kubernetes.io/instance: global
+    app.kubernetes.io/version: "2.0.0"
+  annotations:
+    # Locale-specific descriptions
+    observability.io/description: "Global observability platform for all regions"
+    observability.io/description.ja: "全リージョン向けグローバル可観測性プラットフォーム"
+    observability.io/description.es: "Plataforma de observabilidad global para todas las regiones"
+    observability.io/description.zh-CN: "适用于所有区域的全球可观测性平台"
+    
+    # Support contact by region
+    observability.io/support-contact.americas: "support-americas@example.com"
+    observability.io/support-contact.emea: "support-emea@example.com"
+    observability.io/support-contact.apac: "support-apac@example.com"
+    
+    # Timezone for maintenance windows
+    observability.io/maintenance-timezone: "UTC"
+    observability.io/preferred-locale: "en"
+spec:
+  # Global configuration with regional overrides
+  global:
+    # External labels can include locale information
+    externalLabels:
+      region: "global"
+      environment: "production"
+      locale: "multi"
+    
+    # Time zone for data retention calculations
+    timezone: "UTC"
+    
+    # Default locale for dashboards and alerts
+    defaultLocale: "en"
+    
+    # Supported locales for this platform
+    supportedLocales:
+      - "en"
+      - "ja" 
+      - "es"
+      - "zh-CN"
+      - "de"
+      - "fr"
+  
+  # Component configurations
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      
+      # Prometheus configuration with locale-aware settings
+      config:
+        global:
+          # Evaluation interval uses duration format
+          evaluation_interval: 30s
+          
+          # External labels for federation
+          external_labels:
+            cluster: "global-cluster"
+            region: "{{ .Region }}"
+            locale: "{{ .Locale }}"
+        
+        # Alerting rules can include locale
+        rule_files:
+          - /etc/prometheus/rules/common/*.yaml
+          - /etc/prometheus/rules/locale-{{ .Locale }}/*.yaml
+        
+        # Remote write with regional endpoints
+        remote_write:
+          - url: https://metrics-us.example.com/api/v1/write
+            headers:
+              X-Locale: "en-US"
+          - url: https://metrics-eu.example.com/api/v1/write  
+            headers:
+              X-Locale: "en-GB"
+          - url: https://metrics-jp.example.com/api/v1/write
+            headers:
+              X-Locale: "ja-JP"
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      
+      # Grafana locale configuration
+      config:
+        # Default UI language
+        users:
+          default_language: "en-US"
+          
+        # Supported languages
+        languages:
+          - locale: "en-US"
+            name: "English"
+          - locale: "ja-JP"
+            name: "日本語"
+          - locale: "es-ES"
+            name: "Español"
+          - locale: "zh-CN"
+            name: "简体中文"
+          - locale: "de-DE"
+            name: "Deutsch"
+          - locale: "fr-FR"
+            name: "Français"
+        
+        # Date formats per locale
+        date_formats:
+          default_timezone: "browser"
+          full_date: "YYYY-MM-DD HH:mm:ss"
+          interval_second: "HH:mm:ss"
+          interval_minute: "HH:mm"
+          interval_hour: "MM/DD HH:mm"
+          interval_day: "MM/DD"
+          interval_month: "YYYY-MM"
+          interval_year: "YYYY"
+        
+        # Auth with locale detection
+        auth:
+          # Get locale from OAuth provider
+          oauth_auto_locale: true
+          
+          # Locale claim in JWT
+          jwt_locale_claim: "locale"
+      
+      # Pre-configured dashboards by locale
+      dashboards:
+        providers:
+          - name: "default"
+            folder: "General"
+            type: file
+            options:
+              path: /var/lib/grafana/dashboards/general
+          - name: "locale-specific"
+            folder: "Localized"
+            type: file
+            options:
+              path: "/var/lib/grafana/dashboards/{{ .Locale }}"
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+      # Loki configuration
+      config:
+        # Locale-aware log parsing
+        limits_config:
+          # Different limits based on locale (character counts vary)
+          max_line_size_mb: 5
+          max_entries_limit_per_query: 10000
+        
+        # Schema with timezone support
+        schema_config:
+          configs:
+            - from: 2024-01-01
+              store: boltdb-shipper
+              object_store: s3
+              schema: v11
+              index:
+                prefix: "loki_index_{{ .Locale }}_"
+                period: 24h
+    
+    tempo:
+      enabled: true 
+      version: "2.3.0"
+      
+      # Tempo configuration
+      config:
+        # Trace ingestion with locale metadata
+        distributor:
+          receivers:
+            otlp:
+              protocols:
+                http:
+                  # Include locale in trace metadata
+                  cors:
+                    allowed_headers:
+                      - "X-Locale"
+                      - "Accept-Language"
+  
+  # Alerting configuration with localized templates
+  alerting:
+    alertmanager:
+      enabled: true
+      
+      # Alert templates by locale
+      config:
+        global:
+          # SMTP configuration varies by region
+          smtp_from: "alerts@example.com"
+          smtp_smarthost: "smtp.example.com:587"
+          
+        # Templates with locale support
+        templates:
+          - '/etc/alertmanager/templates/common/*.tmpl'
+          - '/etc/alertmanager/templates/{{ .Locale }}/*.tmpl'
+        
+        # Route configuration
+        route:
+          group_by: ['alertname', 'cluster', 'service', 'locale']
+          group_wait: 10s
+          group_interval: 10s
+          repeat_interval: 12h
+          receiver: 'default'
+          
+          routes:
+            # Route based on locale
+            - match:
+                locale: "ja"
+              receiver: 'japan-team'
+              continue: true
+            
+            - match:
+                locale: "es"
+              receiver: 'latam-team'
+              continue: true
+        
+        # Receivers with locale-specific configuration
+        receivers:
+          - name: 'default'
+            webhook_configs:
+              - url: 'https://alerts.example.com/webhook'
+                http_config:
+                  headers:
+                    X-Locale: "{{ .GroupLabels.locale }}"
+          
+          - name: 'japan-team'
+            email_configs:
+              - to: 'alerts-japan@example.com'
+                headers:
+                  Subject: '【アラート】{{ .GroupLabels.alertname }}'
+          
+          - name: 'latam-team'
+            email_configs:
+              - to: 'alerts-latam@example.com'
+                headers:
+                  Subject: '[Alerta] {{ .GroupLabels.alertname }}'
+
+---
+# Example ConfigMap with localized alert templates
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-templates-ja
+  namespace: monitoring
+data:
+  japanese.tmpl: |
+    {{ define "japanese.title" }}
+    [{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .GroupLabels.alertname }}
+    {{ end }}
+    
+    {{ define "japanese.text" }}
+    {{ range .Alerts }}
+    *アラート:* {{ .Labels.alertname }}
+    *重要度:* {{ .Labels.severity }}
+    *詳細:*
+    {{ range .Labels.SortedPairs }} • *{{ .Name }}:* `{{ .Value }}`
+    {{ end }}
+    {{ end }}
+    {{ end }}
+
+---
+# Example Secret with locale-specific credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: regional-credentials
+  namespace: monitoring
+type: Opaque
+stringData:
+  # Region-specific S3 endpoints
+  s3-endpoint-us: "https://s3.us-east-1.amazonaws.com"
+  s3-endpoint-eu: "https://s3.eu-west-1.amazonaws.com"
+  s3-endpoint-jp: "https://s3.ap-northeast-1.amazonaws.com"
+  
+  # Region-specific API keys
+  metrics-api-key-us: "us-key-xxxxx"
+  metrics-api-key-eu: "eu-key-xxxxx"
+  metrics-api-key-jp: "jp-key-xxxxx"

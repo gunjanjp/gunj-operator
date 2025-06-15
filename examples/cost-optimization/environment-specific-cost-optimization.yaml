@@ -1,0 +1,210 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: dev-platform
+  namespace: monitoring-dev
+spec:
+  # Minimal cost optimization for development
+  costOptimization:
+    enabled: true
+    resourceOptimization: true
+    autoScaling: false  # No autoscaling in dev
+    
+    # Development budget
+    budget:
+      monthlyLimit: 200.0  # $200 USD per month for dev
+      alertThresholds: [90, 100]
+      alertChannels:
+        - type: email
+          target: dev-team@example.com
+    
+    # Cost allocation
+    costAllocation:
+      enabled: true
+      department: Engineering
+      costCenter: CC-DEV
+      team: Development
+      tags:
+        environment: development
+        project: observability-dev
+
+  # Minimal components for development
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 1  # Single instance for dev
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "250m"
+        limits:
+          memory: "2Gi"
+          cpu: "500m"
+      storage:
+        size: 20Gi
+        storageClassName: standard
+      retention: 7d  # Short retention for dev
+
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 1
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "100m"
+        limits:
+          memory: "512Mi"
+          cpu: "250m"
+
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 1
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      storage:
+        size: 10Gi
+        storageClassName: standard
+
+    tempo:
+      enabled: false  # Disabled in dev to save costs
+
+---
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: staging-platform
+  namespace: monitoring-staging
+spec:
+  # Balanced cost optimization for staging
+  costOptimization:
+    enabled: true
+    resourceOptimization: true
+    autoScaling: true
+    
+    # Use spot instances for all components in staging
+    spotInstances:
+      enabled: true
+      allowedComponents:
+        - prometheus
+        - grafana
+        - loki
+        - tempo
+      maxSpotPercentage: 100  # All spot in staging
+    
+    # Staging budget
+    budget:
+      monthlyLimit: 500.0  # $500 USD per month
+      alertThresholds: [80, 90, 100]
+      alertChannels:
+        - type: slack
+          target: https://hooks.slack.com/services/staging/alerts
+      actions:
+        - threshold: 90
+          action: alert
+        - threshold: 100
+          action: scaleDown
+
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 2
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 50Gi
+        storageClassName: standard
+      retention: 14d
+      
+      # Spot instance configuration
+      nodeSelector:
+        node.kubernetes.io/instance-type: spot
+      tolerations:
+        - key: spot
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      
+      autoscaling:
+        enabled: true
+        minReplicas: 1
+        maxReplicas: 3
+
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 1
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "250m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
+      
+      nodeSelector:
+        node.kubernetes.io/instance-type: spot
+      tolerations:
+        - key: spot
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "250m"
+        limits:
+          memory: "2Gi"
+          cpu: "500m"
+      storage:
+        size: 30Gi
+        storageClassName: standard
+      
+      nodeSelector:
+        node.kubernetes.io/instance-type: spot
+      tolerations:
+        - key: spot
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 1
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      storage:
+        size: 20Gi
+        storageClassName: standard
+      
+      nodeSelector:
+        node.kubernetes.io/instance-type: spot
+      tolerations:
+        - key: spot
+          operator: Equal
+          value: "true"
+          effect: NoSchedule

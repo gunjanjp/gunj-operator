@@ -1,0 +1,251 @@
+# Predictive Scaling Example
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-predictive-scaling
+  namespace: monitoring
+spec:
+  autoscaling:
+    enabled: true
+    # Enable predictive scaling
+    predictive:
+      enabled: true
+      # Model type: "linear", "exponential", "seasonal", "ml"
+      modelType: "seasonal"
+      # Historical data window for training
+      trainingWindow: "7d"
+      # Prediction horizon
+      predictionHorizon: "1h"
+      # Minimum confidence required to act on predictions
+      minConfidence: 0.85
+      # How often to retrain the model
+      retrainInterval: "6h"
+    
+    # Combine with HPA for reactive scaling
+    hpa:
+      enabled: true
+    
+    # Metrics retention for historical analysis
+    metricsRetention: "30d"
+    
+    # Evaluation interval
+    evaluationInterval: "5m"
+    
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      
+      autoscaling:
+        # Predictive scaling configuration
+        predictive:
+          enabled: true
+          
+          # Metrics to use for prediction
+          metrics:
+          - name: "cpu_usage"
+            query: |
+              avg(rate(container_cpu_usage_seconds_total{
+                namespace="${namespace}",
+                pod=~"prometheus-.*"
+              }[5m]))
+            weight: 0.4
+          
+          - name: "memory_usage"
+            query: |
+              avg(container_memory_working_set_bytes{
+                namespace="${namespace}",
+                pod=~"prometheus-.*"
+              })
+            weight: 0.3
+          
+          - name: "query_rate"
+            query: |
+              sum(rate(prometheus_http_requests_total{
+                namespace="${namespace}",
+                handler="/api/v1/query"
+              }[5m]))
+            weight: 0.3
+          
+          # Seasonal patterns to detect
+          seasonality:
+            # Daily pattern (business hours)
+            daily:
+              enabled: true
+              peakHours: ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00"]
+              lowHours: ["00:00", "01:00", "02:00", "03:00", "04:00", "05:00"]
+            
+            # Weekly pattern
+            weekly:
+              enabled: true
+              peakDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+              lowDays: ["Saturday", "Sunday"]
+            
+            # Monthly patterns (e.g., end of month reporting)
+            monthly:
+              enabled: true
+              peakDays: [28, 29, 30, 31, 1, 2, 3]  # End/start of month
+          
+          # Scale ahead of predicted load
+          scaleAheadMinutes: 15
+          
+          # Bounds for predictive scaling
+          minReplicas: 2
+          maxReplicas: 20
+          
+          # Safety constraints
+          maxScaleUpRate: 2.0    # Max 2x current replicas
+          maxScaleDownRate: 0.5  # Max 50% reduction
+        
+        # Fallback HPA configuration
+        minReplicas: 2
+        maxReplicas: 20
+        targetCPUUtilizationPercentage: 70
+      
+      resources:
+        requests:
+          cpu: "1"
+          memory: "4Gi"
+        limits:
+          cpu: "4"
+          memory: "16Gi"
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      
+      autoscaling:
+        predictive:
+          enabled: true
+          
+          # Predict based on user activity
+          metrics:
+          - name: "active_users"
+            query: |
+              sum(grafana_stat_totals_dashboard_viewers{
+                namespace="${namespace}"
+              })
+            weight: 0.5
+          
+          - name: "dashboard_queries"
+            query: |
+              sum(rate(grafana_api_dashboard_get_milliseconds_count[5m]))
+            weight: 0.3
+          
+          - name: "alert_evaluations"
+            query: |
+              sum(rate(grafana_alerting_rule_evaluations_total[5m]))
+            weight: 0.2
+          
+          # Business hours pattern
+          seasonality:
+            daily:
+              enabled: true
+              # Timezone aware
+              timezone: "America/New_York"
+              peakHours: ["08:00", "09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00"]
+              lowHours: ["22:00", "23:00", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00"]
+          
+          minReplicas: 1
+          maxReplicas: 10
+          scaleAheadMinutes: 10
+      
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+      autoscaling:
+        predictive:
+          enabled: true
+          
+          # Predict log ingestion patterns
+          metrics:
+          - name: "ingestion_rate"
+            query: |
+              sum(rate(loki_distributor_bytes_received_total[5m]))
+            weight: 0.6
+          
+          - name: "active_streams"
+            query: |
+              sum(loki_ingester_memory_streams)
+            weight: 0.4
+          
+          # Different pattern - batch job logs
+          seasonality:
+            daily:
+              enabled: true
+              # Peak during batch job windows
+              peakHours: ["02:00", "03:00", "04:00", "20:00", "21:00", "22:00"]
+            
+            # End of week batch processing
+            weekly:
+              enabled: true
+              peakDays: ["Friday", "Saturday"]
+          
+          # More aggressive scaling for logs
+          minReplicas: 3
+          maxReplicas: 50
+          scaleAheadMinutes: 20
+          maxScaleUpRate: 3.0  # Can triple for log storms
+      
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "2Gi"
+        limits:
+          cpu: "2"
+          memory: "8Gi"
+
+---
+# ConfigMap for ML model storage (if using ML-based prediction)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: predictive-scaling-models
+  namespace: monitoring
+data:
+  prometheus-model.json: |
+    {
+      "type": "seasonal",
+      "parameters": {
+        "daily_seasonality": true,
+        "weekly_seasonality": true,
+        "yearly_seasonality": false,
+        "seasonality_mode": "multiplicative",
+        "changepoint_prior_scale": 0.05
+      },
+      "trained_at": "2024-06-12T10:00:00Z",
+      "accuracy": 0.92
+    }
+
+---
+# CronJob to retrain predictive models
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: predictive-model-trainer
+  namespace: monitoring
+spec:
+  schedule: "0 */6 * * *"  # Every 6 hours
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: trainer
+            image: gunj-operator-trainer:latest
+            command:
+            - /trainer
+            - --platform=platform-predictive-scaling
+            - --namespace=monitoring
+            - --model-type=seasonal
+            - --training-window=7d
+          restartPolicy: OnFailure

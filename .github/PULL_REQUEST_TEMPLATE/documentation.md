@@ -1,47 +1,99 @@
-## 📚 Documentation Update
+## 📝 Documentation Update
 
-### 📝 Documentation Type
+<!-- Describe what documentation is being added or updated -->
+
+## Type of Documentation
+
 - [ ] User Guide
 - [ ] API Reference
 - [ ] Developer Guide
 - [ ] Architecture Documentation
-- [ ] Configuration Guide
-- [ ] Tutorial/How-to
+- [ ] Deployment Guide
 - [ ] Troubleshooting Guide
-- [ ] Release Notes
+- [ ] Tutorial
+- [ ] Example/Sample
+- [ ] README
+- [ ] Other: ___________
 
-### 🎯 Purpose
-<!-- Why is this documentation change needed? -->
+## Motivation
 
-### 📋 Changes Made
-<!-- List the documentation changes -->
-- 
-- 
-- 
+<!-- Why is this documentation needed? What gap does it fill? -->
 
-### ✅ Documentation Checklist
-- [ ] Grammar and spelling checked
-- [ ] Technical accuracy verified
-- [ ] Code examples tested
-- [ ] Links verified (no broken links)
-- [ ] Images/diagrams included where helpful
-- [ ] Follows documentation style guide
-- [ ] Table of contents updated
-- [ ] Search keywords added
+## Changes Made
 
-### 🔍 Review Focus Areas
-<!-- What should reviewers pay special attention to? -->
+### Added
+<!-- List new documentation added -->
 
-### 📊 Coverage
-- [ ] All new features documented
-- [ ] All breaking changes noted
-- [ ] Migration guides included (if needed)
-- [ ] Examples provided
+### Updated
+<!-- List existing documentation updated -->
 
-### 🌐 Localization
-- [ ] English documentation complete
-- [ ] Ready for translation
-- [ ] Translation keys added (if applicable)
+### Removed
+<!-- List any documentation removed -->
 
-Related to: #
-Addresses feedback from: #
+## Review Checklist
+
+### Content Quality
+- [ ] Information is accurate and up-to-date
+- [ ] Writing is clear and concise
+- [ ] Technical terms are explained
+- [ ] Examples are provided where helpful
+- [ ] No typos or grammatical errors
+
+### Structure
+- [ ] Follows project documentation structure
+- [ ] Proper headings and sections
+- [ ] Table of contents updated (if applicable)
+- [ ] Links are valid and working
+- [ ] Images/diagrams are clear and relevant
+
+### Technical Accuracy
+- [ ] Code examples are tested and working
+- [ ] Commands are accurate
+- [ ] Version numbers are correct
+- [ ] Configuration examples are valid
+- [ ] API endpoints/parameters are accurate
+
+### Completeness
+- [ ] Topic is fully covered
+- [ ] Prerequisites are listed
+- [ ] Step-by-step instructions provided
+- [ ] Common issues/troubleshooting covered
+- [ ] References/links to related docs included
+
+### Style Guide Compliance
+- [ ] Follows project style guide
+- [ ] Consistent formatting
+- [ ] Proper markdown syntax
+- [ ] Code blocks properly formatted
+- [ ] Consistent terminology used
+
+## Target Audience
+
+<!-- Who is this documentation for? -->
+
+- [ ] New users
+- [ ] Experienced users
+- [ ] Developers
+- [ ] System administrators
+- [ ] DevOps engineers
+
+## Related Documentation
+
+<!-- Link to related documentation that might need updates -->
+
+## Verification
+
+### How to Verify
+<!-- How can reviewers verify the documentation accuracy? -->
+
+### Screenshots (if applicable)
+<!-- Add screenshots for UI documentation -->
+
+## Related Issues
+
+Closes #
+Related to #
+
+## Additional Notes
+
+<!-- Any additional context for reviewers -->

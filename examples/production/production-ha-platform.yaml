@@ -1,0 +1,402 @@
+# Production-Grade ObservabilityPlatform with High Availability
+# This example demonstrates a production-ready configuration with:
+# - High availability for all components
+# - Security best practices
+# - Resource optimization
+# - Backup and disaster recovery
+# - Advanced monitoring features
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: production-platform
+  namespace: monitoring
+  labels:
+    environment: production
+    criticality: high
+    compliance: pci-dss
+    team: sre
+  annotations:
+    observability.io/description: "Production observability platform with HA"
+    observability.io/sla: "99.9"
+    observability.io/cost-center: "infrastructure"
+spec:
+  # High Availability Configuration
+  highAvailability:
+    enabled: true
+    replicationFactor: 3
+    
+  # Component Configurations
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3  # HA setup
+      shards: 3    # Horizontal sharding for scale
+      
+      # Production-grade resources
+      resources:
+        requests:
+          memory: "8Gi"
+          cpu: "2"
+        limits:
+          memory: "16Gi"
+          cpu: "4"
+          
+      # Storage configuration
+      storage:
+        size: 500Gi
+        storageClassName: fast-ssd
+        retention: 90d  # 3 months retention
+        
+      # Advanced Prometheus configuration
+      config:
+        scrapeInterval: 15s
+        evaluationInterval: 15s
+        queryTimeout: 2m
+        queryMaxConcurrency: 20
+        
+        # Remote write for long-term storage
+        remoteWrite:
+        - url: "https://cortex.internal.company.com/api/v1/push"
+          tlsConfig:
+            certFile: /etc/prometheus/certs/client.crt
+            keyFile: /etc/prometheus/certs/client.key
+          queueConfig:
+            capacity: 50000
+            maxShards: 200
+            minShards: 1
+            maxSamplesPerSend: 10000
+            
+        # Service discovery
+        serviceDiscoveryConfigs:
+          kubernetes:
+            enabled: true
+            namespaces: ["default", "production", "staging"]
+          consul:
+            enabled: true
+            server: "consul.service.consul:8500"
+            
+      # Security settings
+      security:
+        tls:
+          enabled: true
+          certSecret: prometheus-tls
+        authentication:
+          type: oauth2
+          oauth2:
+            clientId: prometheus-client
+            clientSecret: prometheus-oauth-secret
+            tokenURL: https://auth.company.com/oauth2/token
+            
+      # Anti-affinity for HA
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                - prometheus
+            topologyKey: kubernetes.io/hostname
+            
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 3  # HA deployment
+      
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+          
+      # Persistent storage for dashboards and settings
+      persistence:
+        enabled: true
+        size: 10Gi
+        storageClassName: fast-ssd
+        
+      # Database backend for HA
+      database:
+        type: postgres
+        host: postgres.monitoring.svc.cluster.local
+        port: 5432
+        name: grafana
+        user: grafana
+        passwordSecret: grafana-db-password
+        sslMode: require
+        
+      # Security configuration
+      security:
+        adminPasswordSecret: grafana-admin-password
+        secretKey: grafana-secret-key
+        
+      # LDAP/OAuth configuration
+      auth:
+        ldap:
+          enabled: true
+          configSecret: grafana-ldap-config
+        oauth:
+          enabled: true
+          providers:
+          - name: company-sso
+            type: oidc
+            clientId: grafana-client
+            clientSecret: grafana-oauth-secret
+            authUrl: https://auth.company.com/oauth2/authorize
+            tokenUrl: https://auth.company.com/oauth2/token
+            apiUrl: https://auth.company.com/userinfo
+            allowedDomains:
+            - company.com
+            roleAttributePath: contains(groups[*], 'sre') && 'Admin' || 'Viewer'
+            
+      # Ingress configuration
+      ingress:
+        enabled: true
+        className: nginx
+        host: grafana.monitoring.company.com
+        tls:
+          enabled: true
+          secretName: grafana-tls
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt-prod
+          nginx.ingress.kubernetes.io/ssl-redirect: "true"
+          
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+      # Distributed mode for production
+      deploymentMode: distributed
+      
+      # Component replicas
+      distributor:
+        replicas: 3
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+            
+      ingester:
+        replicas: 3
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1"
+          limits:
+            memory: "8Gi"
+            cpu: "2"
+            
+      querier:
+        replicas: 3
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "1"
+            
+      # Storage backend
+      storage:
+        type: s3
+        s3:
+          endpoint: s3.amazonaws.com
+          region: us-east-1
+          bucketNames:
+            chunks: company-loki-chunks
+            ruler: company-loki-ruler
+            admin: company-loki-admin
+          accessKeyId: loki-s3-access-key
+          secretAccessKey: loki-s3-secret-key
+          
+      # Retention policies
+      limits:
+        retentionPeriod: 720h  # 30 days
+        ingestionRate: 50MB
+        ingestionBurstSize: 100MB
+        maxStreamsPerUser: 10000
+        maxEntriesLimitPerQuery: 5000
+        
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      
+      # Distributed deployment
+      deploymentMode: distributed
+      
+      distributor:
+        replicas: 3
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+            
+      ingester:
+        replicas: 3
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+            
+      querier:
+        replicas: 3
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+            
+      # Storage configuration
+      storage:
+        type: s3
+        s3:
+          endpoint: s3.amazonaws.com
+          region: us-east-1
+          bucket: company-tempo-traces
+          accessKeyId: tempo-s3-access-key
+          secretAccessKey: tempo-s3-secret-key
+          
+      retention: 168h  # 7 days
+      
+  # Global settings
+  global:
+    logLevel: info
+    externalLabels:
+      environment: production
+      cluster: prod-us-east-1
+      region: us-east-1
+      provider: aws
+      
+  # Advanced alerting configuration
+  alerting:
+    alertmanager:
+      enabled: true
+      replicas: 3  # HA setup
+      
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+          
+      storage:
+        size: 10Gi
+        storageClassName: fast-ssd
+        
+      config:
+        global:
+          smtp_from: 'alertmanager@company.com'
+          smtp_smarthost: 'smtp.company.com:587'
+          smtp_auth_username: 'alertmanager@company.com'
+          smtp_auth_password: 'smtp-password'
+          slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+          pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+          
+        route:
+          receiver: 'default'
+          group_by: ['alertname', 'cluster', 'service']
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 12h
+          routes:
+          - match:
+              severity: critical
+            receiver: pagerduty-critical
+            continue: true
+          - match:
+              severity: warning
+            receiver: slack-warnings
+            
+        receivers:
+        - name: 'default'
+          email_configs:
+          - to: 'sre-team@company.com'
+            
+        - name: 'pagerduty-critical'
+          pagerduty_configs:
+          - service_key: 'pagerduty-service-key'
+            severity: critical
+            
+        - name: 'slack-warnings'
+          slack_configs:
+          - channel: '#alerts-warning'
+            title: 'Warning Alert'
+            
+    # Alert rules
+    rules:
+      enabled: true
+      configMaps:
+      - name: prometheus-rules
+      - name: custom-rules
+        
+  # Backup configuration
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retention: 30  # Keep 30 days of backups
+    destination:
+      type: s3
+      s3:
+        endpoint: s3.amazonaws.com
+        region: us-east-1
+        bucket: company-observability-backups
+        prefix: production/
+        
+  # Security policies
+  security:
+    podSecurityPolicy:
+      enabled: true
+    networkPolicy:
+      enabled: true
+      allowedNamespaces:
+      - monitoring
+      - production
+      - kube-system
+    rbac:
+      create: true
+      
+  # Resource quotas
+  resourceQuota:
+    enabled: true
+    limits:
+      requests.cpu: "50"
+      requests.memory: "100Gi"
+      persistentvolumeclaims: "20"
+      
+  # Monitoring the monitoring stack
+  monitoring:
+    selfMonitoring:
+      enabled: true
+      prometheusEndpoint: http://prometheus-meta:9090
+      
+  # Cost optimization
+  costOptimization:
+    enabled: true
+    recommendations:
+      enabled: true
+      schedule: "0 6 * * 1"  # Weekly on Monday at 6 AM
+      
+  # Maintenance windows
+  maintenanceWindow:
+    enabled: true
+    schedule:
+      dayOfWeek: Sunday
+      hour: 2
+      duration: 4h

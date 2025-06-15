@@ -1,0 +1,85 @@
+{
+  "platform": {
+    "title": "Observability Platform",
+    "description": "Enterprise-grade observability for Kubernetes",
+    "create": "Create Platform",
+    "edit": "Edit Platform",
+    "delete": "Delete Platform",
+    "status": {
+      "ready": "Ready",
+      "installing": "Installing",
+      "failed": "Failed",
+      "upgrading": "Upgrading",
+      "unknown": "Unknown"
+    },
+    "component_count_one": "{{count}} component",
+    "component_count_other": "{{count}} components",
+    "messages": {
+      "created": "Platform '{{name}}' created successfully",
+      "updated": "Platform '{{name}}' updated",
+      "deleted": "Platform '{{name}}' deleted",
+      "error": "Failed to {{action}} platform: {{error}}"
+    },
+    "confirmDelete": "Are you sure you want to delete '{{name}}'? This action cannot be undone and will remove all associated resources."
+  },
+  "components": {
+    "prometheus": {
+      "name": "Prometheus",
+      "description": "Metrics collection and storage"
+    },
+    "grafana": {
+      "name": "Grafana", 
+      "description": "Metrics visualization and dashboards"
+    },
+    "loki": {
+      "name": "Loki",
+      "description": "Log aggregation system"
+    },
+    "tempo": {
+      "name": "Tempo",
+      "description": "Distributed tracing backend"
+    }
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "warning": "Warning",
+    "info": "Information",
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "retry": "Retry",
+    "refresh": "Refresh",
+    "search": "Search",
+    "filter": "Filter",
+    "sort": "Sort",
+    "actions": "Actions",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "time": {
+    "just_now": "just now",
+    "minute_ago": "1 minute ago",
+    "minutes_ago": "{{count}} minutes ago",
+    "hour_ago": "1 hour ago", 
+    "hours_ago": "{{count}} hours ago",
+    "day_ago": "1 day ago",
+    "days_ago": "{{count}} days ago",
+    "duration": {
+      "seconds": "{{count}}s",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}h",
+      "days": "{{count}}d"
+    }
+  },
+  "validation": {
+    "required": "This field is required",
+    "minLength": "Must be at least {{min}} characters",
+    "maxLength": "Must be no more than {{max}} characters",
+    "pattern": "Invalid format",
+    "email": "Invalid email address",
+    "url": "Invalid URL",
+    "platformName": "Must be lowercase alphanumeric, max 63 characters"
+  }
+}

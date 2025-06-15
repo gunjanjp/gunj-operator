@@ -1,0 +1,328 @@
+# Example GrafanaConfig resource demonstrating advanced Grafana configuration
+apiVersion: observability.io/v1beta1
+kind: GrafanaConfig
+metadata:
+  name: production-grafana-config
+  namespace: monitoring
+spec:
+  # Enable this configuration
+  enabled: true
+  
+  # Target ObservabilityPlatform
+  targetRef:
+    name: production
+    namespace: monitoring
+  
+  # Server configuration
+  server:
+    httpPort: 3000
+    protocol: http
+    domain: grafana.example.com
+    rootUrl: https://grafana.example.com
+    enableGzip: true
+  
+  # Security configuration
+  security:
+    adminUser: admin
+    adminPasswordSecret:
+      name: grafana-admin-credentials
+      key: password
+    secretKeySecret:
+      name: grafana-security
+      key: secret-key
+    disableGravatar: false
+    cookieSecure: true
+    cookieSameSite: strict
+    strictTransportSecurity: true
+    strictTransportSecurityMaxAge: 86400
+  
+  # Authentication configuration
+  auth:
+    disableLoginForm: false
+    disableSignoutMenu: false
+    anonymous:
+      enabled: true
+      orgName: "Main Org."
+      orgRole: Viewer
+    basic:
+      enabled: true
+    oauth:
+      providers:
+      - name: github
+        enabled: true
+        clientId: "your-github-client-id"
+        clientSecretRef:
+          name: grafana-oauth
+          key: github-client-secret
+        scopes:
+        - user:email
+        - read:org
+        allowSignUp: true
+        roleAttributePath: "contains(groups[*], '@example-org/devops') && 'Admin' || contains(groups[*], '@example-org/developers') && 'Editor' || 'Viewer'"
+      - name: google
+        enabled: true
+        clientId: "your-google-client-id"
+        clientSecretRef:
+          name: grafana-oauth
+          key: google-client-secret
+        scopes:
+        - openid
+        - email
+        - profile
+        allowSignUp: true
+  
+  # Data sources configuration
+  dataSources:
+  # Prometheus data source
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      timeInterval: 30s
+      queryTimeout: 60s
+      customQueryParameters: ""
+    editable: false
+  
+  # Loki data source
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+      - datasourceUid: tempo
+        matcherRegex: "traceID=(\\w+)"
+        name: TraceID
+        url: "$${__value.raw}"
+  
+  # Tempo data source
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      tracesToLogs:
+        datasourceUid: loki
+        filterByTraceID: true
+        filterBySpanID: false
+        lokiSearch: true
+  
+  # PostgreSQL for business metrics
+  - name: BusinessMetrics
+    type: postgres
+    url: postgres.example.com:5432
+    database: metrics
+    user: grafana_reader
+    passwordSecret:
+      name: postgres-credentials
+      key: password
+    jsonData:
+      sslmode: require
+      postgresVersion: 1400
+      timescaledb: true
+  
+  # Dashboard provisioning
+  dashboards:
+    providers:
+    # File-based provider for built-in dashboards
+    - name: default
+      orgId: 1
+      folder: "System"
+      folderUid: system
+      type: file
+      disableDeletion: true
+      updateIntervalSeconds: 10
+      options:
+        path: /var/lib/grafana/dashboards/default
+    
+    # ConfigMap-based provider for custom dashboards
+    - name: custom
+      orgId: 1
+      folder: "Custom"
+      folderUid: custom
+      type: configmap
+      disableDeletion: false
+      allowUiUpdates: true
+      configMapRef:
+        namespace: monitoring
+        labelSelector:
+          matchLabels:
+            grafana_dashboard: "1"
+  
+  # Plugin configuration
+  plugins:
+    installPlugins:
+    - grafana-clock-panel
+    - grafana-simple-json-datasource
+    - grafana-piechart-panel
+    - alexanderzobnin-zabbix-app
+    - vonage-status-panel
+    - btplc-peak-report-panel
+    - natel-plotly-panel
+    - grafana-github-datasource
+    allowLoadingUnsignedPlugins:
+    - custom-datasource
+    - custom-panel
+    pluginAdminEnabled: true
+  
+  # Notification channels
+  notifications:
+  # Slack notification
+  - name: slack-alerts
+    type: slack
+    isDefault: true
+    sendReminder: true
+    frequency: "4h"
+    settings:
+      url: https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+      recipient: "#alerts"
+      username: "Grafana"
+      icon_emoji: ":grafana:"
+      mention_channel: "channel"
+    secureSettingsSecret:
+      name: grafana-notifications
+      key: slack-webhook-url
+  
+  # PagerDuty notification
+  - name: pagerduty-critical
+    type: pagerduty
+    sendReminder: false
+    settings:
+      integrationKey: "YOUR-PAGERDUTY-INTEGRATION-KEY"
+      severity: critical
+      class: "grafana_alerts"
+      component: "observability"
+      group: "production"
+  
+  # Email notification
+  - name: email-ops
+    type: email
+    settings:
+      addresses: "ops-team@example.com;on-call@example.com"
+      singleEmail: false
+  
+  # Organizations configuration
+  organizations:
+  - name: "Main Organization"
+    id: 1
+    users:
+    - loginOrEmail: "admin@example.com"
+      role: Admin
+    - loginOrEmail: "developer@example.com"
+      role: Editor
+    - loginOrEmail: "viewer@example.com"
+      role: Viewer
+    preferences:
+      theme: dark
+      timezone: "UTC"
+      weekStart: "monday"
+  
+  - name: "Development Team"
+    id: 2
+    users:
+    - loginOrEmail: "dev-lead@example.com"
+      role: Admin
+    - loginOrEmail: "developer1@example.com"
+      role: Editor
+    - loginOrEmail: "developer2@example.com"
+      role: Editor
+  
+  # SMTP configuration
+  smtp:
+    enabled: true
+    host: "smtp.gmail.com:587"
+    user: "grafana@example.com"
+    passwordSecret:
+      name: grafana-smtp
+      key: password
+    skipVerify: false
+    fromAddress: "grafana@example.com"
+    fromName: "Grafana"
+    startTlsPolicy: "MandatoryStartTLS"
+  
+  # Analytics configuration
+  analytics:
+    reportingEnabled: false
+    googleAnalyticsId: ""
+    googleTagManagerId: ""
+  
+  # External image storage (for sharing dashboard snapshots)
+  externalImageStorage:
+    provider: s3
+    s3:
+      bucket: "grafana-images"
+      region: "us-east-1"
+      path: "dashboard-images"
+      accessKeySecret:
+        name: aws-credentials
+        key: access-key-id
+      secretKeySecret:
+        name: aws-credentials
+        key: secret-access-key
+
+---
+# Example secrets referenced in the GrafanaConfig
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-admin-credentials
+  namespace: monitoring
+type: Opaque
+stringData:
+  password: "StrongAdminPassword123!"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-security
+  namespace: monitoring
+type: Opaque
+stringData:
+  secret-key: "SW2YcwTIb9zpOOhoPsMm8rgKfZrQfSmPMfgTPJmfPLmLlRQdEW6dBCrQPZPd"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-oauth
+  namespace: monitoring
+type: Opaque
+stringData:
+  github-client-secret: "your-github-client-secret"
+  google-client-secret: "your-google-client-secret"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-credentials
+  namespace: monitoring
+type: Opaque
+stringData:
+  password: "postgres-reader-password"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-smtp
+  namespace: monitoring
+type: Opaque
+stringData:
+  password: "smtp-password"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-credentials
+  namespace: monitoring
+type: Opaque
+stringData:
+  access-key-id: "AKIAIOSFODNN7EXAMPLE"
+  secret-access-key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"

@@ -1,0 +1,308 @@
+# ArgoCD GitOps Integration Example
+
+This example demonstrates how to integrate the Gunj Operator with ArgoCD for GitOps-based deployments.
+
+## Prerequisites
+
+1. ArgoCD installed in the cluster
+2. Git repository with observability platform configurations
+3. Credentials for accessing the Git repository
+
+## Basic ArgoCD Integration
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: production-argocd
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1"
+    grafana:
+      enabled: true
+      version: "10.2.0"
+  
+  # GitOps configuration
+  gitOps:
+    type: ArgoCD
+    repository:
+      url: https://github.com/myorg/observability-configs
+      branch: main
+      path: environments/production
+      credentialsSecret:
+        name: git-credentials
+        namespace: argocd
+    
+    # Sync policy
+    syncPolicy:
+      automated:
+        prune: true
+        selfHeal: true
+        allowEmpty: false
+      syncOptions:
+        - CreateNamespace=true
+        - PrunePropagationPolicy=foreground
+      retry:
+        limit: 5
+        backoff:
+          duration: "5s"
+          factor: 2
+          maxDuration: "3m"
+    
+    # Rollback configuration
+    rollback:
+      enabled: true
+      failureThreshold: 3
+      window: "10m"
+      revisionHistoryLimit: 10
+```
+
+## Multi-Environment Setup with ApplicationSet
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: multi-env-platform
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+    grafana:
+      enabled: true
+    loki:
+      enabled: true
+    tempo:
+      enabled: true
+  
+  gitOps:
+    type: ArgoCD
+    repository:
+      url: https://github.com/myorg/observability-configs
+      branch: main
+      path: platforms/gunj-platform
+    
+    # Multiple environments
+    environments:
+      - name: dev
+        branch: develop
+        path: environments/dev
+        autoSync: true
+        promotionGates:
+          - type: Time
+            config:
+              minAge: "1h"
+      
+      - name: staging
+        branch: staging
+        path: environments/staging
+        autoSync: true
+        promotionGates:
+          - type: Test
+            config:
+              suite: integration
+          - type: Metric
+            config:
+              metric: error_rate
+              threshold: "0.01"
+      
+      - name: production
+        branch: main
+        path: environments/production
+        autoSync: false
+        promotionGates:
+          - type: Manual
+            config:
+              approvers: "platform-team"
+          - type: Time
+            config:
+              minAge: "24h"
+    
+    # Promotion configuration
+    promotion:
+      strategy: Progressive
+      autoPromotion: false
+      promotionPolicy:
+        - from: dev
+          to: staging
+          requiredApprovals: 0
+          autoPromoteAfter: "2h"
+        
+        - from: staging
+          to: production
+          requiredApprovals: 2
+          autoPromoteAfter: "24h"
+```
+
+## Git Repository Structure
+
+```
+observability-configs/
+├── environments/
+│   ├── dev/
+│   │   ├── kustomization.yaml
+│   │   ├── prometheus-values.yaml
+│   │   └── grafana-values.yaml
+│   ├── staging/
+│   │   ├── kustomization.yaml
+│   │   ├── prometheus-values.yaml
+│   │   └── grafana-values.yaml
+│   └── production/
+│       ├── kustomization.yaml
+│       ├── prometheus-values.yaml
+│       └── grafana-values.yaml
+├── base/
+│   ├── kustomization.yaml
+│   ├── prometheus/
+│   │   ├── deployment.yaml
+│   │   ├── service.yaml
+│   │   └── configmap.yaml
+│   └── grafana/
+│       ├── deployment.yaml
+│       ├── service.yaml
+│       └── configmap.yaml
+└── overlays/
+    ├── small/
+    ├── medium/
+    └── large/
+```
+
+## Creating Git Credentials Secret
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-credentials
+  namespace: argocd
+type: Opaque
+data:
+  username: <base64-encoded-username>
+  password: <base64-encoded-token>
+---
+# For SSH authentication
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-ssh-credentials
+  namespace: argocd
+type: Opaque
+data:
+  ssh-privatekey: <base64-encoded-private-key>
+  known_hosts: <base64-encoded-known-hosts>
+```
+
+## Webhook Configuration
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: webhook-secret
+  namespace: gunj-system
+type: Opaque
+data:
+  secret: <base64-encoded-webhook-secret>
+```
+
+Configure your Git provider webhook:
+- URL: `https://your-cluster/gitops/webhook/github?platform=production-argocd`
+- Content type: `application/json`
+- Secret: Use the value from the secret above
+- Events: Push, Pull Request, Create (tags)
+
+## Drift Detection Configuration
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: drift-detection-example
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+  
+  gitOps:
+    type: ArgoCD
+    repository:
+      url: https://github.com/myorg/observability-configs
+      branch: main
+      path: production
+    
+    # Drift detection
+    driftDetection:
+      enabled: true
+      interval: "5m"
+      autoRemediate: true
+      notificationPolicy:
+        channels:
+          - type: Slack
+            config:
+              webhook: https://hooks.slack.com/services/xxx
+              channel: "#platform-alerts"
+          - type: Email
+            config:
+              to: "platform-team@company.com"
+              from: "alerts@gunj-operator.io"
+        severity: Warning
+```
+
+## Monitoring GitOps Status
+
+```bash
+# Check platform GitOps status
+kubectl get observabilityplatform production-argocd -o yaml
+
+# Check ArgoCD application
+kubectl get application -n argocd production-argocd-app -o yaml
+
+# View sync history
+kubectl get cm production-argocd-gitops-history -n monitoring -o yaml
+
+# Check drift detection results
+kubectl get cm production-argocd-drift-history -n monitoring -o yaml
+```
+
+## Troubleshooting
+
+1. **Application not syncing**
+   ```bash
+   # Check ArgoCD application status
+   argocd app get production-argocd-app
+   
+   # Force sync
+   kubectl patch observabilityplatform production-argocd -n monitoring \
+     --type merge -p '{"metadata":{"annotations":{"argocd.argoproj.io/sync":"true"}}}'
+   ```
+
+2. **Drift detection not working**
+   ```bash
+   # Check operator logs
+   kubectl logs -n gunj-system -l app=gunj-operator | grep drift
+   
+   # Manually trigger drift check
+   kubectl annotate observabilityplatform production-argocd \
+     gitops.observability.io/check-drift=now
+   ```
+
+3. **Webhook not triggering**
+   ```bash
+   # Check webhook handler logs
+   kubectl logs -n gunj-system -l app=gunj-operator | grep webhook
+   
+   # Test webhook manually
+   curl -X POST https://your-cluster/gitops/webhook/github?platform=production-argocd \
+     -H "Content-Type: application/json" \
+     -H "X-GitHub-Event: push" \
+     -d @test-payload.json
+   ```

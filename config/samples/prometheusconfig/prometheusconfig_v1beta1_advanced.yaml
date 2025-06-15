@@ -1,0 +1,177 @@
+apiVersion: observability.io/v1beta1
+kind: PrometheusConfig
+metadata:
+  name: advanced-prometheus-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus-config
+    app.kubernetes.io/instance: advanced
+spec:
+  targetPlatform:
+    name: production-platform
+  
+  # Global configuration with advanced settings
+  globalConfig:
+    scrapeInterval: "15s"
+    scrapeTimeout: "10s"
+    evaluationInterval: "15s"
+    externalLabels:
+      cluster: "production-us-east-1"
+      region: "us-east-1"
+      environment: "production"
+      prometheus_replica: "$(POD_NAME)"
+    queryLogFile: "/prometheus/query.log"
+    # Resource limits
+    sampleLimit: 50000
+    targetLimit: 100
+    labelLimit: 30
+    labelNameLengthLimit: 200
+    labelValueLengthLimit: 200
+    bodySizeLimit: "10MB"
+    # Query settings
+    queryConcurrency: 20
+    queryTimeout: "2m"
+  
+  # Storage configuration
+  storageConfig:
+    tsdbConfig:
+      retention: "30d"
+      retentionSize: "500GB"
+      noLockfile: false
+      allowOverlappingBlocks: false
+      walCompression: true
+      walCompressionType: "zstd"
+      walSegmentSize: "256MB"
+      minBlockDuration: "2h"
+      maxBlockDuration: "36h"
+      maxBlockChunkSegmentSize: 160
+      enableNativeHistograms: true
+      # Out-of-order sample handling
+      outOfOrderTimeWindow: "30m"
+      outOfOrderCapacity: 100
+    exemplarsConfig:
+      maxExemplars: 1000000
+    remoteFlushDeadline: "2m"
+  
+  # Distributed tracing configuration
+  tracingConfig:
+    enabled: true
+    endpoint: "tempo-distributor.tracing.svc.cluster.local:4317"
+    clientType: "grpc"
+    samplingFraction: 0.1
+    insecure: false
+    tlsConfig:
+      ca: |
+        -----BEGIN CERTIFICATE-----
+        # Your CA certificate for tracing endpoint
+        -----END CERTIFICATE-----
+    headers:
+      X-Scope-OrgID: "production"
+    compression: "gzip"
+    timeout: "10s"
+  
+  # Exemplar configuration
+  exemplarConfig:
+    enabled: true
+    maxExemplars: 500000
+  
+  # Query configuration
+  queryConfig:
+    maxSamples: 100000000
+    timeout: "2m"
+    maxConcurrency: 30
+    lookbackDelta: "5m"
+  
+  # WAL configuration
+  walConfig:
+    compression: true
+    compressionType: "zstd"
+    segmentSize: "256MB"
+    truncateFrequency: "2h"
+    minTime: "2h"
+    maxTime: "31h"
+    noLockfile: false
+  
+  # Complex remote write configuration
+  remoteWrite:
+  - url: "https://cortex-distributor.cortex.svc.cluster.local/api/v1/push"
+    name: "cortex-long-term"
+    remoteTimeout: "1m"
+    headers:
+      X-Scope-OrgID: "production"
+    basicAuth:
+      username: "prometheus"
+      password:
+        name: cortex-credentials
+        key: password
+    tlsConfig:
+      ca: |
+        -----BEGIN CERTIFICATE-----
+        # CA certificate content
+        -----END CERTIFICATE-----
+      insecureSkipVerify: false
+      minVersion: "TLS12"
+    queueConfig:
+      capacity: 30000
+      maxShards: 300
+      minShards: 10
+      maxSamplesPerSend: 10000
+      batchSendDeadline: "5s"
+      minBackoff: "30ms"
+      maxBackoff: "10s"
+      retryOnRateLimit: 5
+      sampleAgeLimit: "1h"
+    metadataConfig:
+      send: true
+      sendInterval: "1m"
+      maxSamplesPerSend: 1000
+    writeRelabelConfigs:
+    # Drop high cardinality metrics
+    - sourceLabels: ["__name__"]
+      regex: "apiserver_request_duration_seconds_bucket"
+      action: drop
+    # Keep only important metrics for long-term storage
+    - sourceLabels: ["__name__"]
+      regex: "up|node_.*|container_.*|kube_.*|prometheus_.*"
+      action: keep
+    sendExemplars: true
+    sendNativeHistograms: true
+  
+  - url: "https://victoria-metrics.monitoring.svc.cluster.local:8428/api/v1/write"
+    name: "victoria-metrics-ha"
+    remoteTimeout: "30s"
+    queueConfig:
+      capacity: 20000
+      maxShards: 100
+      minShards: 5
+      maxSamplesPerSend: 5000
+    writeRelabelConfigs:
+    # Only send aggregated metrics to Victoria Metrics
+    - sourceLabels: ["__name__"]
+      regex: ".*:.*"  # Matches recording rules
+      action: keep
+  
+  # Remote read configuration for federated queries
+  remoteRead:
+  - url: "https://cortex-query-frontend.cortex.svc.cluster.local/api/v1/read"
+    name: "cortex-long-term-read"
+    readRecent: false  # Only for historical data
+    requiredMatchers:
+      __name__: ".*"
+    remoteTimeout: "5m"
+    basicAuth:
+      username: "prometheus"
+      password:
+        name: cortex-credentials
+        key: password
+    filterExternalLabels: true
+  
+  - url: "https://thanos-query.monitoring.svc.cluster.local:10901/api/v1/read"
+    name: "thanos-global-view"
+    readRecent: true
+    remoteTimeout: "2m"
+    tlsConfig:
+      ca: |
+        -----BEGIN CERTIFICATE-----
+        # Thanos CA certificate
+        -----END CERTIFICATE-----

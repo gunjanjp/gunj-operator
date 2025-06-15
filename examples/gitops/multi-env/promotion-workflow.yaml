@@ -1,0 +1,558 @@
+# Multi-Environment GitOps Promotion Example
+
+This example demonstrates how to set up multi-environment deployments with automated promotion workflows using the Gunj Operator's GitOps integration.
+
+## Overview
+
+This setup includes:
+- Three environments: Development, Staging, and Production
+- Automated promotions with gates
+- Manual approval requirements
+- Drift detection and remediation
+- Rollback capabilities
+
+## Complete Multi-Environment Configuration
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: ecommerce-platform
+  namespace: observability
+spec:
+  # Component configuration (same for all environments)
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      adminPassword:
+        secretRef:
+          name: grafana-admin
+          key: password
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      storage:
+        size: 100Gi
+        
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      storage:
+        size: 50Gi
+    
+    opentelemetry:
+      enabled: true
+      version: "0.88.0"
+  
+  # GitOps configuration
+  gitOps:
+    type: ArgoCD  # Can also use Flux
+    
+    # Repository configuration
+    repository:
+      url: https://github.com/mycompany/ecommerce-observability
+      branch: main
+      path: platforms/ecommerce
+      credentialsSecret:
+        name: github-credentials
+        namespace: argocd
+      webhookSecret:
+        name: github-webhook
+        namespace: gunj-system
+    
+    # Environment definitions
+    environments:
+      # Development environment
+      - name: dev
+        branch: develop
+        path: environments/dev
+        targetRevision: HEAD
+        autoSync: true
+        promotionGates:
+          - type: Time
+            config:
+              minAge: "30m"  # Must be stable for 30 minutes
+          - type: Test
+            config:
+              suite: "unit"
+              minCoverage: "80"
+      
+      # Staging environment
+      - name: staging
+        branch: staging
+        path: environments/staging
+        targetRevision: HEAD
+        autoSync: true
+        promotionGates:
+          - type: Time
+            config:
+              minAge: "2h"  # Must be stable for 2 hours
+          - type: Test
+            config:
+              suite: "integration"
+              endpoint: "https://staging.tests.company.com"
+          - type: Metric
+            config:
+              metric: "platform_error_rate"
+              query: "rate(http_requests_failed_total[5m])"
+              threshold: "0.01"  # Less than 1% error rate
+              duration: "10m"    # Sustained for 10 minutes
+      
+      # Production environment
+      - name: production
+        branch: main
+        path: environments/production
+        targetRevision: HEAD
+        autoSync: false  # Manual sync for production
+        promotionGates:
+          - type: Manual
+            config:
+              approvers: "3"  # Requires 3 approvals
+              groups: "sre-team,platform-team"
+          - type: Time
+            config:
+              minAge: "24h"  # Must be stable in staging for 24 hours
+              businessHours: "true"  # Only during business hours
+              timezone: "America/New_York"
+          - type: Test
+            config:
+              suite: "smoke"
+              endpoint: "https://staging.tests.company.com"
+              timeout: "5m"
+          - type: Metric
+            config:
+              metric: "platform_slo_compliance"
+              query: "avg_over_time(slo_compliance[24h])"
+              threshold: "0.999"  # 99.9% SLO compliance
+    
+    # Promotion configuration
+    promotion:
+      strategy: Progressive
+      autoPromotion: true  # Enable automatic promotions when gates pass
+      
+      promotionPolicy:
+        # Dev to Staging promotion
+        - from: dev
+          to: staging
+          requiredApprovals: 0  # Fully automated
+          autoPromoteAfter: "1h"  # Promote after 1 hour if gates pass
+          schedule:
+            days: ["Mon", "Tue", "Wed", "Thu", "Fri"]
+            hours: ["09-17"]  # 9 AM to 5 PM
+            timezone: "America/New_York"
+        
+        # Staging to Production promotion
+        - from: staging
+          to: production
+          requiredApprovals: 3
+          autoPromoteAfter: "48h"  # Promote after 48 hours if approved
+          schedule:
+            days: ["Tue", "Wed", "Thu"]  # No Monday/Friday deployments
+            hours: ["10-15"]  # 10 AM to 3 PM
+            timezone: "America/New_York"
+          notifications:
+            - type: Slack
+              config:
+                channel: "#deployments"
+                mentions: "@sre-team"
+            - type: Email
+              config:
+                to: "platform-team@company.com"
+                template: "promotion-request"
+    
+    # Drift detection configuration
+    driftDetection:
+      enabled: true
+      interval: "5m"
+      autoRemediate: true
+      notificationPolicy:
+        channels:
+          - type: Slack
+            config:
+              webhook: "${SLACK_WEBHOOK_URL}"
+              channel: "#platform-alerts"
+              username: "Drift Detector"
+          - type: Webhook
+            config:
+              url: "https://incidents.company.com/webhook"
+              method: "POST"
+              headers:
+                Authorization: "Bearer ${INCIDENT_TOKEN}"
+        severity: Warning
+      
+      # Exclude certain resources from drift detection
+      excludeResources:
+        - apiVersion: v1
+          kind: ConfigMap
+          name: prometheus-recording-rules
+        - apiVersion: v1
+          kind: Secret
+          labelSelector: "temporary=true"
+    
+    # Rollback configuration
+    rollback:
+      enabled: true
+      failureThreshold: 3      # Rollback after 3 failures
+      window: "10m"            # Within 10 minute window
+      revisionHistoryLimit: 20 # Keep last 20 revisions
+      
+      # Automatic rollback triggers
+      triggers:
+        - type: HealthCheck
+          config:
+            services:
+              - prometheus-server
+              - grafana
+              - loki-distributor
+            timeout: "5m"
+        
+        - type: Metric
+          config:
+            queries:
+              - name: "error_rate_spike"
+                query: "rate(http_requests_failed_total[5m]) > 0.1"
+              - name: "latency_spike"
+                query: "histogram_quantile(0.99, http_request_duration_seconds) > 1"
+            checkInterval: "1m"
+            
+        - type: Alert
+          config:
+            alertnames:
+              - "PlatformDown"
+              - "DataIngestionFailed"
+              - "StorageCapacityExceeded"
+```
+
+## Git Repository Structure
+
+```
+ecommerce-observability/
+├── README.md
+├── platforms/
+│   └── ecommerce/
+│       ├── kustomization.yaml
+│       └── base/
+│           ├── namespace.yaml
+│           ├── prometheus/
+│           ├── grafana/
+│           ├── loki/
+│           └── tempo/
+├── environments/
+│   ├── dev/
+│   │   ├── kustomization.yaml
+│   │   ├── namespace-patch.yaml
+│   │   ├── resource-patches/
+│   │   │   ├── prometheus-resources.yaml
+│   │   │   └── grafana-resources.yaml
+│   │   └── config/
+│   │       ├── prometheus-values.yaml
+│   │       └── grafana-dashboards/
+│   ├── staging/
+│   │   ├── kustomization.yaml
+│   │   ├── namespace-patch.yaml
+│   │   ├── resource-patches/
+│   │   ├── config/
+│   │   └── certificates/
+│   └── production/
+│       ├── kustomization.yaml
+│       ├── namespace-patch.yaml
+│       ├── resource-patches/
+│       ├── config/
+│       ├── certificates/
+│       └── backup-config/
+├── .github/
+│   └── workflows/
+│       ├── validate.yaml
+│       ├── test.yaml
+│       └── promote.yaml
+└── scripts/
+    ├── validate-manifests.sh
+    ├── run-tests.sh
+    └── check-promotion-gates.sh
+```
+
+## Environment-Specific Kustomization
+
+### Development Environment
+
+```yaml
+# environments/dev/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: observability-dev
+
+resources:
+  - ../../platforms/ecommerce
+
+replicas:
+  - name: prometheus-server
+    count: 1
+  - name: grafana
+    count: 1
+
+patches:
+  - path: resource-patches/prometheus-resources.yaml
+    target:
+      kind: Deployment
+      name: prometheus-server
+  - path: resource-patches/grafana-resources.yaml
+    target:
+      kind: Deployment
+      name: grafana
+
+configMapGenerator:
+  - name: environment-config
+    literals:
+      - environment=development
+      - log_level=debug
+      - retention_days=7
+
+patchesStrategicMerge:
+  - |-
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: grafana
+    spec:
+      type: NodePort
+```
+
+### Production Environment
+
+```yaml
+# environments/production/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: observability-prod
+
+resources:
+  - ../../platforms/ecommerce
+
+replicas:
+  - name: prometheus-server
+    count: 3
+  - name: grafana
+    count: 2
+  - name: loki-distributor
+    count: 3
+
+patches:
+  - path: resource-patches/prometheus-resources.yaml
+    target:
+      kind: StatefulSet
+      name: prometheus-server
+  - path: resource-patches/grafana-resources.yaml
+    target:
+      kind: Deployment
+      name: grafana
+  - path: resource-patches/ha-config.yaml
+    target:
+      kind: ConfigMap
+      name: prometheus-config
+
+configMapGenerator:
+  - name: environment-config
+    literals:
+      - environment=production
+      - log_level=info
+      - retention_days=90
+      - backup_enabled=true
+
+secretGenerator:
+  - name: backup-credentials
+    files:
+      - credentials=backup-config/s3-credentials
+
+transformers:
+  - labels.yaml  # Add production-specific labels
+```
+
+## Promotion Workflow
+
+### Manual Promotion
+
+```bash
+# Check promotion eligibility
+kubectl get observabilityplatform ecommerce-platform -o jsonpath='{.status.promotions}'
+
+# Approve promotion from staging to production
+kubectl annotate observabilityplatform ecommerce-platform \
+  promotion.gitops.observability.io/approve-staging-production="approved-by:john.doe@company.com"
+
+# Track promotion progress
+kubectl get events --field-selector involvedObject.name=ecommerce-platform \
+  --field-selector reason=Promotion
+
+# View promotion history
+kubectl get configmap ecommerce-platform-promotion-history -o yaml
+```
+
+### Automated Promotion Script
+
+```yaml
+# .github/workflows/promote.yaml
+name: Promote Observability Platform
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_env:
+        description: 'Source environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+      to_env:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Check promotion gates
+        run: |
+          ./scripts/check-promotion-gates.sh \
+            --from ${{ inputs.from_env }} \
+            --to ${{ inputs.to_env }}
+      
+      - name: Run promotion tests
+        run: |
+          ./scripts/run-tests.sh \
+            --environment ${{ inputs.from_env }} \
+            --suite promotion
+      
+      - name: Create promotion PR
+        uses: peter-evans/create-pull-request@v5
+        with:
+          title: "Promote from ${{ inputs.from_env }} to ${{ inputs.to_env }}"
+          branch: "promote-${{ inputs.from_env }}-to-${{ inputs.to_env }}-${{ github.run_id }}"
+          body: |
+            ## Promotion Request
+            
+            - **From**: ${{ inputs.from_env }}
+            - **To**: ${{ inputs.to_env }}
+            - **Triggered by**: ${{ github.actor }}
+            
+            ### Promotion Gates Status
+            - [ ] Minimum age requirement met
+            - [ ] All tests passed
+            - [ ] Metrics within threshold
+            - [ ] Required approvals obtained
+            
+            ### Changes
+            See commits for detailed changes.
+```
+
+## Monitoring Promotions
+
+```yaml
+# Grafana Dashboard for Promotion Metrics
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promotion-dashboard
+  namespace: observability
+data:
+  dashboard.json: |
+    {
+      "dashboard": {
+        "title": "GitOps Promotions",
+        "panels": [
+          {
+            "title": "Promotion Success Rate",
+            "targets": [{
+              "expr": "rate(gitops_promotion_completed_total[1h])"
+            }]
+          },
+          {
+            "title": "Average Promotion Duration",
+            "targets": [{
+              "expr": "histogram_quantile(0.95, gitops_promotion_duration_seconds)"
+            }]
+          },
+          {
+            "title": "Failed Promotion Gates",
+            "targets": [{
+              "expr": "sum by (gate_type) (rate(gitops_promotion_gate_failed_total[1h]))"
+            }]
+          }
+        ]
+      }
+    }
+```
+
+## Rollback Scenarios
+
+```bash
+# Manual rollback to previous version
+kubectl patch observabilityplatform ecommerce-platform --type merge -p '
+{
+  "spec": {
+    "gitOps": {
+      "rollback": {
+        "targetRevision": "abc123def456"
+      }
+    }
+  }
+}'
+
+# Emergency rollback with bypass
+kubectl annotate observabilityplatform ecommerce-platform \
+  gitops.observability.io/emergency-rollback="true" \
+  gitops.observability.io/rollback-reason="Critical production issue" \
+  gitops.observability.io/rollback-authorized-by="oncall@company.com"
+
+# Check rollback status
+kubectl get observabilityplatform ecommerce-platform \
+  -o jsonpath='{.status.rollback}'
+```
+
+## Best Practices
+
+1. **Environment Isolation**
+   - Use separate namespaces for each environment
+   - Implement network policies between environments
+   - Use different credentials per environment
+
+2. **Promotion Gates**
+   - Start with time-based gates for stability
+   - Add metric-based gates for quality
+   - Require manual approval for production
+
+3. **Rollback Strategy**
+   - Keep sufficient revision history
+   - Test rollback procedures regularly
+   - Document rollback decision criteria
+
+4. **Monitoring**
+   - Track promotion metrics
+   - Alert on failed promotions
+   - Monitor drift between environments
+
+5. **Security**
+   - Rotate credentials regularly
+   - Use least-privilege access
+   - Audit all promotion activities

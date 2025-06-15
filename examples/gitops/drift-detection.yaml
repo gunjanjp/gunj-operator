@@ -1,0 +1,475 @@
+# Advanced Drift Detection and Remediation Example
+# This example demonstrates comprehensive drift detection with auto-remediation strategies
+apiVersion: observability.io/v1beta1
+kind: GitOpsDeployment
+metadata:
+  name: observability-platform-drift-detection
+  namespace: monitoring
+spec:
+  # Repository configuration
+  repository:
+    url: https://github.com/your-org/observability-configs.git
+    branch: main
+    path: /platforms/production
+    pollInterval: "1m"
+    secretRef:
+      name: git-credentials
+
+  # GitOps engine
+  gitOpsEngine: argocd
+  
+  argocd:
+    applicationName: observability-drift-detection
+    project: default
+    # Specific sync options for drift handling
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - Replace=true  # Replace resources that have drifted
+      - ServerSideApply=true  # Use server-side apply for better drift detection
+
+  # Production environment with strict drift controls
+  environments:
+    - name: production
+      namespace: monitoring-prod
+      values:
+        prometheus.replicas: "3"
+        grafana.replicas: "2"
+        loki.replicas: "3"
+
+  # Sync configuration
+  autoSync: true
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true  # Automatically fix drift
+    retry:
+      limit: 5
+      backoff:
+        duration: "10s"
+        factor: 2
+        maxDuration: "5m"
+
+  # Comprehensive drift detection configuration
+  driftDetection:
+    enabled: true
+    checkInterval: "30s"  # Frequent checks for production
+    autoRemediate: true   # Automatically fix drift
+    
+    # Fields to ignore during drift detection
+    ignoreFields:
+      # Kubernetes managed fields
+      - metadata.uid
+      - metadata.resourceVersion
+      - metadata.generation
+      - metadata.creationTimestamp
+      - metadata.managedFields
+      - metadata.finalizers
+      - metadata.ownerReferences
+      - metadata.selfLink
+      
+      # Annotations that change frequently
+      - metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
+      - metadata.annotations["deployment.kubernetes.io/revision"]
+      - metadata.annotations["prometheus.io/scrape"]
+      - metadata.annotations["fluxcd.io/sync-checksum"]
+      
+      # Status fields (always ignored)
+      - status
+      
+      # Pod-specific fields that change
+      - spec.nodeName
+      - spec.nodeSelector
+      - spec.schedulerName
+      - spec.hostname
+      - spec.subdomain
+      
+      # Service account tokens
+      - spec.containers[*].volumeMounts.name=kube-api-access-*
+      - spec.volumes[*].secret.secretName=*-token-*
+      
+      # Dynamic fields in specific resources
+      - spec.clusterIP  # Services
+      - spec.clusterIPs  # Services
+      - spec.ipFamilies  # Services
+      - spec.ipFamilyPolicy  # Services
+      - spec.sessionAffinity  # Services
+      
+      # PVC dynamic provisioning
+      - spec.storageClassName  # If using default
+      - spec.volumeName  # PVCs
+      - spec.volumeMode  # PVCs
+      
+      # HPA managed fields
+      - spec.replicas  # Deployments/StatefulSets when HPA is active
+
+    # Resource-specific drift policies
+    resourcePolicies:
+      # ConfigMaps - Very strict, any drift is significant
+      - apiVersion: v1
+        kind: ConfigMap
+        autoRemediate: true
+        checkInterval: "10s"
+        severity: "critical"
+        
+      # Secrets - Even stricter
+      - apiVersion: v1
+        kind: Secret
+        autoRemediate: true
+        checkInterval: "5s"
+        severity: "critical"
+        notifyOnDrift: true
+        
+      # Deployments - Standard monitoring
+      - apiVersion: apps/v1
+        kind: Deployment
+        autoRemediate: true
+        checkInterval: "30s"
+        severity: "high"
+        # Deployment-specific ignores
+        additionalIgnoreFields:
+          - spec.progressDeadlineSeconds
+          - spec.revisionHistoryLimit
+          
+      # StatefulSets - Careful with remediation
+      - apiVersion: apps/v1
+        kind: StatefulSet
+        autoRemediate: false  # Manual remediation for StatefulSets
+        checkInterval: "1m"
+        severity: "high"
+        notifyOnDrift: true
+        
+      # Services - Monitor but don't auto-fix
+      - apiVersion: v1
+        kind: Service
+        autoRemediate: false
+        checkInterval: "5m"
+        severity: "medium"
+        
+      # PVCs - Never auto-remediate
+      - apiVersion: v1
+        kind: PersistentVolumeClaim
+        autoRemediate: false
+        checkInterval: "10m"
+        severity: "low"
+        notifyOnDrift: true
+
+    # Drift notification settings
+    notifications:
+      slack:
+        webhook: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+        channel: "#ops-alerts"
+        severity: ["critical", "high"]
+      
+      pagerduty:
+        integrationKey: "YOUR_PAGERDUTY_KEY"
+        severity: ["critical"]
+      
+      email:
+        smtp:
+          host: "smtp.gmail.com"
+          port: 587
+          from: "alerts@your-org.com"
+        recipients:
+          - "ops-team@your-org.com"
+        severity: ["critical", "high", "medium"]
+
+    # Remediation strategies
+    remediationStrategies:
+      # Strategy 1: Immediate sync (default)
+      - name: immediate-sync
+        type: sync
+        delay: "0s"
+        
+      # Strategy 2: Delayed sync (for batching)
+      - name: delayed-sync
+        type: sync
+        delay: "30s"
+        batchWindow: "1m"
+        
+      # Strategy 3: Rollback to last known good
+      - name: rollback
+        type: rollback
+        conditions:
+          - driftPercentage: ">50"  # If more than 50% resources drifted
+          - severity: "critical"
+          
+      # Strategy 4: Alert only (no auto-fix)
+      - name: alert-only
+        type: notify
+        escalationPolicy:
+          - after: "5m"
+            notify: ["slack"]
+          - after: "15m"
+            notify: ["pagerduty"]
+          - after: "30m"
+            notify: ["email", "phone"]
+
+    # Drift patterns to detect specific issues
+    driftPatterns:
+      # Detect manual scaling
+      - name: manual-scaling
+        description: "Detect when someone manually scales a deployment"
+        pattern: |
+          kind: Deployment
+          fieldPath: spec.replicas
+          condition: changed
+        severity: high
+        remediation: immediate-sync
+        
+      # Detect security policy violations
+      - name: security-violation
+        description: "Detect containers running as root"
+        pattern: |
+          kind: Pod
+          fieldPath: spec.containers[*].securityContext.runAsUser
+          condition: equals(0)
+        severity: critical
+        remediation: immediate-sync
+        notification: immediate
+        
+      # Detect resource limit changes
+      - name: resource-drift
+        description: "Detect changes to resource requests/limits"
+        pattern: |
+          kind: Deployment
+          fieldPath: spec.template.spec.containers[*].resources
+          condition: changed
+        severity: medium
+        remediation: delayed-sync
+        
+      # Detect image tag changes
+      - name: image-drift
+        description: "Detect unauthorized image changes"
+        pattern: |
+          kind: Deployment
+          fieldPath: spec.template.spec.containers[*].image
+          condition: changed
+        severity: critical
+        remediation: rollback
+        notification: immediate
+
+  # Rollback configuration for drift scenarios
+  rollback:
+    enabled: true
+    maxRetries: 3
+    failureThreshold: 20
+    revisionHistoryLimit: 10
+    # Automatic rollback on critical drift
+    triggers:
+      - type: driftDetected
+        severity: critical
+        threshold: 1  # Any critical drift triggers rollback
+      - type: driftPercentage
+        threshold: 30  # 30% of resources drifted
+      - type: consecutiveFailures
+        threshold: 3  # 3 consecutive sync failures
+
+---
+# RBAC for drift detection service account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: drift-detector
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: drift-detector
+rules:
+  # Read all resources
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  # Update resources for remediation
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["update", "patch"]
+  # Create events
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: drift-detector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: drift-detector
+subjects:
+  - kind: ServiceAccount
+    name: drift-detector
+    namespace: monitoring
+
+---
+# ConfigMap for drift detection rules
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drift-detection-rules
+  namespace: monitoring
+data:
+  rules.yaml: |
+    # Critical drift patterns that require immediate action
+    criticalPatterns:
+      - name: security-context-drift
+        description: "Security context was modified"
+        fields:
+          - spec.securityContext
+          - spec.template.spec.securityContext
+          - spec.template.spec.containers[*].securityContext
+        action: immediate-remediation
+        
+      - name: rbac-drift
+        description: "RBAC resources were modified"
+        kinds:
+          - Role
+          - RoleBinding
+          - ClusterRole
+          - ClusterRoleBinding
+        action: immediate-remediation
+        notification: all-channels
+        
+      - name: network-policy-drift
+        description: "Network policies were modified"
+        kinds:
+          - NetworkPolicy
+        action: immediate-remediation
+        notification: security-team
+    
+    # Warning patterns that need investigation
+    warningPatterns:
+      - name: replica-drift
+        description: "Replica count differs from desired"
+        fields:
+          - spec.replicas
+        condition: "current != desired"
+        action: investigate
+        threshold: 2  # Allow up to 2 replica difference
+        
+      - name: label-drift
+        description: "Labels were modified"
+        fields:
+          - metadata.labels
+        excludeLabels:
+          - app.kubernetes.io/version
+          - gitops/sync-time
+        action: delayed-remediation
+    
+    # Ignore patterns (known safe drifts)
+    ignorePatterns:
+      - name: hpa-managed-replicas
+        description: "HPA is managing replicas"
+        condition: "hasHPA == true"
+        fields:
+          - spec.replicas
+          
+      - name: operator-managed-resources
+        description: "Resources managed by other operators"
+        labelSelector:
+          app.kubernetes.io/managed-by: "!= gunj-operator"
+
+---
+# Example drift report ConfigMap (generated by the operator)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drift-report-example
+  namespace: monitoring
+data:
+  report.json: |
+    {
+      "timestamp": "2025-06-15T10:30:00Z",
+      "deployment": "observability-platform-drift-detection",
+      "summary": {
+        "totalResources": 45,
+        "driftedResources": 3,
+        "driftPercentage": 6.67,
+        "criticalDrifts": 1,
+        "highDrifts": 1,
+        "mediumDrifts": 1,
+        "lowDrifts": 0
+      },
+      "drifts": [
+        {
+          "resource": {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "name": "prometheus-server",
+            "namespace": "monitoring-prod"
+          },
+          "driftType": "Modified",
+          "severity": "critical",
+          "fields": [
+            {
+              "path": "spec.template.spec.containers[0].image",
+              "expected": "prom/prometheus:v2.48.0",
+              "actual": "prom/prometheus:v2.47.0",
+              "action": "rollback"
+            }
+          ],
+          "detectedAt": "2025-06-15T10:29:45Z",
+          "remediatedAt": "2025-06-15T10:30:00Z",
+          "remediationStatus": "success"
+        },
+        {
+          "resource": {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "name": "prometheus-config",
+            "namespace": "monitoring-prod"
+          },
+          "driftType": "Modified",
+          "severity": "high",
+          "fields": [
+            {
+              "path": "data['prometheus.yml']",
+              "expected": "[hash:abc123]",
+              "actual": "[hash:def456]",
+              "action": "sync"
+            }
+          ],
+          "detectedAt": "2025-06-15T10:29:50Z",
+          "remediatedAt": "2025-06-15T10:29:55Z",
+          "remediationStatus": "success"
+        },
+        {
+          "resource": {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "name": "grafana",
+            "namespace": "monitoring-prod"
+          },
+          "driftType": "Modified",
+          "severity": "medium",
+          "fields": [
+            {
+              "path": "spec.replicas",
+              "expected": "2",
+              "actual": "3",
+              "action": "investigate",
+              "note": "Possibly scaled manually for high load"
+            }
+          ],
+          "detectedAt": "2025-06-15T10:29:55Z",
+          "remediatedAt": null,
+          "remediationStatus": "pending-investigation"
+        }
+      ],
+      "actions": {
+        "automated": 2,
+        "manual": 1,
+        "rollbacks": 1,
+        "syncs": 1,
+        "investigations": 1
+      },
+      "notifications": {
+        "slack": 2,
+        "pagerduty": 1,
+        "email": 3
+      }
+    }

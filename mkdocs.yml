@@ -1,0 +1,234 @@
+# MkDocs configuration for Gunj Operator documentation
+
+site_name: Gunj Operator Documentation
+site_description: Enterprise Observability Platform for Kubernetes
+site_author: Gunjan Patel
+site_url: https://docs.gunj-operator.io
+repo_name: gunjanjp/gunj-operator
+repo_url: https://github.com/gunjanjp/gunj-operator
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2025 Gunjan Patel
+
+# Theme configuration
+theme:
+  name: material
+  custom_dir: docs/overrides
+  logo: assets/logo.png
+  favicon: assets/favicon.png
+  language: en
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.prune
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - toc.integrate
+    - search.suggest
+    - search.highlight
+    - search.share
+    - header.autohide
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+    - content.action.view
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  icon:
+    repo: fontawesome/brands/github
+    edit: material/pencil
+    view: material/eye
+
+# Plugins
+plugins:
+  - search:
+      separator: '[\s\-\.]+'
+      lang:
+        - en
+  - minify:
+      minify_html: true
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+  - macros
+  - mermaid2:
+      arguments:
+        theme: |
+          ^(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'
+  - redirects:
+      redirect_maps:
+        'getting-started.md': 'getting-started/installation.md'
+  - tags:
+      tags_file: tags.md
+
+# Markdown extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Extra CSS and JavaScript
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/extra.js
+  - https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js
+
+# Extra configuration
+extra:
+  version:
+    provider: mike
+    default: latest
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/gunjanjp
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com/gunjanjp
+    - icon: fontawesome/brands/linkedin
+      link: https://linkedin.com/in/gunjanjp
+    - icon: fontawesome/brands/slack
+      link: https://gunjanjp.slack.com
+  analytics:
+    provider: google
+    property: G-XXXXXXXXXX
+  consent:
+    title: Cookie consent
+    description: >-
+      We use cookies to recognize your repeated visits and preferences, as well
+      as to measure the effectiveness of our documentation and whether users
+      find what they're searching for. With your consent, you're helping us to
+      make our documentation better.
+
+# Navigation
+nav:
+  - Home:
+    - Welcome: index.md
+    - Quick Start: quick-start.md
+    - What's New: changelog.md
+    - Roadmap: roadmap.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start Guide: getting-started/quick-start.md
+    - Core Concepts: getting-started/concepts.md
+    - First Platform: getting-started/first-platform.md
+  - User Guide:
+    - Overview: user-guide/index.md
+    - Configuration: user-guide/configuration.md
+    - Platform Management: user-guide/platforms.md
+    - Components:
+      - Prometheus: user-guide/components/prometheus.md
+      - Grafana: user-guide/components/grafana.md
+      - Loki: user-guide/components/loki.md
+      - Tempo: user-guide/components/tempo.md
+    - Monitoring: user-guide/monitoring.md
+    - Alerting: user-guide/alerting.md
+    - Backup & Restore: user-guide/backup-restore.md
+    - Upgrades: user-guide/upgrades.md
+    - Troubleshooting: user-guide/troubleshooting.md
+    - FAQ: user-guide/faq.md
+  - API:
+    - Overview: api/index.md
+    - REST API: api/rest-api.md
+    - GraphQL API: api/graphql-api.md
+    - CRD Reference: api/crd-reference.md
+    - Webhooks: api/webhooks.md
+    - SDKs:
+      - Go SDK: api/sdks/go.md
+      - Python SDK: api/sdks/python.md
+      - JavaScript SDK: api/sdks/javascript.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - Operator Design: architecture/operator-design.md
+    - API Design: architecture/api-design.md
+    - Security: architecture/security.md
+    - Scalability: architecture/scalability.md
+    - Decision Records: architecture/decisions/index.md
+  - Operations:
+    - Deployment Options: operations/deployment.md
+    - Production Setup: operations/production.md
+    - Monitoring: operations/monitoring.md
+    - Security Hardening: operations/security.md
+    - Disaster Recovery: operations/disaster-recovery.md
+    - Performance Tuning: operations/performance.md
+  - Development:
+    - Development Setup: development/setup.md
+    - Contributing: development/contributing.md
+    - Development Guidelines: development/guidelines.md
+    - Testing: development/testing.md
+    - Debugging: development/debugging.md
+    - Release Process: development/releasing.md
+    - Documentation: development/documentation-standards.md
+  - Tutorials:
+    - Overview: tutorials/index.md
+    - Multi-Cluster Setup: tutorials/multi-cluster.md
+    - GitOps Integration: tutorials/gitops-integration.md
+    - Custom Dashboards: tutorials/custom-dashboards.md
+    - Advanced Alerting: tutorials/advanced-alerting.md
+    - Cost Optimization: tutorials/cost-optimization.md
+  - Reference:
+    - CLI Reference: reference/cli.md
+    - Metrics Reference: reference/metrics.md
+    - Events Reference: reference/events.md
+    - Configuration: reference/configuration.md
+    - Glossary: reference/glossary.md
+    - Resources: reference/resources.md
+  - Community:
+    - Support: community/support.md
+    - Contributing: community/contributing.md
+    - Code of Conduct: community/code-of-conduct.md
+    - Roadmap: community/roadmap.md
+    - Blog: community/blog/index.md

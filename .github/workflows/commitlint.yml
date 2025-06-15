@@ -1,0 +1,69 @@
+name: Commit Lint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install commitlint
+        run: |
+          npm install --save-dev @commitlint/{cli,config-conventional}
+
+      - name: Validate current commit (push)
+        if: github.event_name == 'push'
+        run: npx commitlint --from=HEAD~1 --to=HEAD
+
+      - name: Validate PR commits
+        if: github.event_name == 'pull_request'
+        run: npx commitlint --from=${{ github.event.pull_request.base.sha }} --to=${{ github.event.pull_request.head.sha }}
+
+      - name: Check DCO
+        uses: dco-action/action@v1.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Comment on PR (if failed)
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const message = `
+            ❌ **Commit Message Validation Failed**
+            
+            Your commit messages do not follow our conventions. Please read our [Contributing Guide](https://github.com/gunjanjp/gunj-operator/blob/main/CONTRIBUTING.md#commit-message-conventions) for details.
+            
+            **Quick Examples:**
+            - \`feat(operator): add new reconciliation logic\`
+            - \`fix(api): correct authentication flow\`
+            - \`docs(ui): update component documentation\`
+            
+            **Requirements:**
+            - Use conventional commit format: \`type(scope): subject\`
+            - Sign-off commits with DCO: \`git commit -s\`
+            - Keep subject line under 72 characters
+            - Use imperative mood ("add" not "added")
+            
+            Run \`scripts/commit-helper.sh\` for assistance with commit messages.
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });

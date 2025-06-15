@@ -1,0 +1,337 @@
+# Advanced Promotion Workflow Example
+# This example demonstrates sophisticated environment promotion with gates and conditions
+apiVersion: observability.io/v1beta1
+kind: GitOpsDeployment
+metadata:
+  name: observability-platform-promotion
+  namespace: monitoring
+spec:
+  # Repository configuration
+  repository:
+    url: https://github.com/your-org/observability-configs.git
+    branch: main
+    path: /platforms
+    pollInterval: "30s"
+    secretRef:
+      name: git-credentials
+
+  # Can use either ArgoCD or Flux
+  gitOpsEngine: argocd
+  
+  argocd:
+    applicationName: observability-promotion
+    project: default
+
+  # Sophisticated multi-stage environment pipeline
+  environments:
+    # Development - Continuous deployment from main branch
+    - name: dev
+      namespace: monitoring-dev
+      branch: main
+      path: /environments/dev
+      values:
+        replicas: "1"
+        resources: "minimal"
+        monitoring: "basic"
+      # No promotion policy - this is the entry point
+
+    # Integration Testing - Auto-promote from dev after tests
+    - name: integration
+      namespace: monitoring-int
+      branch: main
+      path: /environments/integration
+      values:
+        replicas: "2"
+        resources: "standard"
+        monitoring: "enhanced"
+        testing: "enabled"
+      promotionPolicy:
+        autoPromotion: true
+        fromEnvironment: dev
+        approvalRequired: false
+        conditions:
+          # Must be healthy in dev
+          - type: HealthCheck
+            status: "Healthy"
+            reason: "All components must be running"
+          # Must be stable for 30 minutes
+          - type: TimeSinceDeployment
+            status: "Met"
+            reason: "30m"
+      # Run integration tests after deployment
+      postSync:
+        - name: integration-tests
+          type: Job
+          config:
+            image: "test-runner:latest"
+            command: ["pytest", "/tests/integration/"]
+            timeout: "30m"
+
+    # Performance Testing - Auto-promote after integration tests pass
+    - name: performance
+      namespace: monitoring-perf
+      branch: main
+      path: /environments/performance
+      values:
+        replicas: "3"
+        resources: "performance"
+        monitoring: "full"
+        loadTesting: "enabled"
+      promotionPolicy:
+        autoPromotion: true
+        fromEnvironment: integration
+        approvalRequired: false
+        conditions:
+          - type: TestsPassed
+            status: "Passed"
+            reason: "Integration tests must pass"
+          - type: HealthCheck
+            status: "Healthy"
+          - type: TimeSinceDeployment
+            status: "Met"
+            reason: "1h"
+      # Run performance tests
+      postSync:
+        - name: load-tests
+          type: Job
+          config:
+            image: "k6:latest"
+            command: ["k6", "run", "/scripts/load-test.js"]
+            env:
+              VUS: "100"
+              DURATION: "30m"
+        - name: chaos-tests
+          type: Job
+          config:
+            image: "chaos-mesh:latest"
+            command: ["chaos", "run", "/scenarios/basic.yaml"]
+
+    # Staging - Manual approval required
+    - name: staging
+      namespace: monitoring-staging
+      branch: release/staging
+      path: /environments/staging
+      values:
+        replicas: "3"
+        resources: "production"
+        monitoring: "full"
+        backup: "enabled"
+      promotionPolicy:
+        autoPromotion: true
+        fromEnvironment: performance
+        approvalRequired: true  # Manual gate
+        conditions:
+          - type: TestsPassed
+            status: "Passed"
+            reason: "Performance tests must pass"
+          - type: MetricsThreshold
+            status: "Met"
+            reason: "Error rate < 0.1%, P99 latency < 100ms"
+          - type: HealthCheck
+            status: "Healthy"
+          - type: TimeSinceDeployment
+            status: "Met"
+            reason: "2h"
+      # Pre-deployment checks
+      preSync:
+        - name: backup-check
+          type: Job
+          config:
+            command: ["verify-backup.sh"]
+        - name: dependency-check
+          type: Job
+          config:
+            command: ["check-dependencies.sh"]
+      # Post-deployment validation
+      postSync:
+        - name: smoke-tests
+          type: Job
+          config:
+            image: "test-runner:latest"
+            command: ["pytest", "/tests/smoke/"]
+        - name: security-scan
+          type: Job
+          config:
+            image: "trivy:latest"
+            command: ["trivy", "k8s", "--namespace", "monitoring-staging"]
+
+    # Production - Multiple approval gates and extensive checks
+    - name: production
+      namespace: monitoring-prod
+      branch: release/production
+      path: /environments/production
+      values:
+        replicas: "5"
+        resources: "production-ha"
+        monitoring: "full"
+        backup: "enabled"
+        disaster_recovery: "enabled"
+      promotionPolicy:
+        autoPromotion: false  # Fully manual
+        fromEnvironment: staging
+        approvalRequired: true
+        conditions:
+          # All previous conditions plus:
+          - type: TestsPassed
+            status: "Passed"
+            reason: "All test suites must pass"
+          - type: MetricsThreshold
+            status: "Met"
+            reason: "Error rate < 0.01%, P99 latency < 50ms"
+          - type: HealthCheck
+            status: "Healthy"
+            reason: "All components healthy for 24h"
+          - type: TimeSinceDeployment
+            status: "Met"
+            reason: "7d"  # 1 week in staging
+          # Custom business conditions
+          - type: BusinessApproval
+            status: "Approved"
+            reason: "Product owner approval required"
+          - type: ChangeWindow
+            status: "Open"
+            reason: "Deployment only during approved change windows"
+      # Extensive pre-deployment checks
+      preSync:
+        - name: full-backup
+          type: Job
+          config:
+            command: ["backup-all.sh", "--verify"]
+            timeout: "1h"
+        - name: rollback-test
+          type: Job
+          config:
+            command: ["test-rollback.sh", "--dry-run"]
+        - name: capacity-check
+          type: Job
+          config:
+            command: ["verify-capacity.sh", "--headroom", "50%"]
+      # Production deployment validation
+      postSync:
+        - name: production-validation
+          type: Job
+          config:
+            image: "validator:latest"
+            command: ["validate-production.sh"]
+            timeout: "2h"
+        - name: notify-stakeholders
+          type: Webhook
+          config:
+            urls:
+              - "https://slack.webhook.url"
+              - "https://pagerduty.webhook.url"
+              - "https://teams.webhook.url"
+
+  # Sync settings
+  autoSync: true
+  syncPolicy:
+    automated:
+      prune: false  # Never auto-prune in this workflow
+      selfHeal: true
+
+  # Rollback configuration with environment-specific settings
+  rollback:
+    enabled: true
+    environmentOverrides:
+      dev:
+        maxRetries: 10
+        failureThreshold: 80
+      integration:
+        maxRetries: 5
+        failureThreshold: 50
+      performance:
+        maxRetries: 3
+        failureThreshold: 30
+      staging:
+        maxRetries: 2
+        failureThreshold: 20
+      production:
+        maxRetries: 1
+        failureThreshold: 5  # Very sensitive in production
+
+  # Drift detection
+  driftDetection:
+    enabled: true
+    checkInterval: "1m"
+    environmentOverrides:
+      production:
+        checkInterval: "30s"  # More frequent in production
+        autoRemediate: false  # Never auto-remediate in production
+
+---
+# Example approval request for production promotion
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promotion-approval-template
+  namespace: monitoring
+data:
+  approval-required.md: |
+    # Production Promotion Approval Required
+    
+    ## Deployment Details
+    - From Environment: staging
+    - To Environment: production
+    - Revision: ${REVISION}
+    - Requested At: ${TIMESTAMP}
+    - Requested By: ${REQUESTER}
+    
+    ## Validation Checklist
+    - [ ] All staging tests passed
+    - [ ] Performance metrics within SLA
+    - [ ] Security scan completed
+    - [ ] Change advisory board approval
+    - [ ] Customer communication sent
+    - [ ] Rollback plan documented
+    - [ ] On-call team notified
+    
+    ## Approval
+    To approve this promotion, run:
+    ```
+    kubectl patch configmap promotion-approval-${ID} \
+      -n monitoring \
+      --type merge \
+      -p '{"data":{"status":"approved","approvedBy":"YOUR_NAME"}}'
+    ```
+    
+    To reject this promotion, run:
+    ```
+    kubectl patch configmap promotion-approval-${ID} \
+      -n monitoring \
+      --type merge \
+      -p '{"data":{"status":"rejected","rejectedBy":"YOUR_NAME","reason":"REJECTION_REASON"}}'
+    ```
+
+---
+# Custom resource for tracking test results
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-results-template
+  namespace: monitoring
+data:
+  results.yaml: |
+    environment: ${ENVIRONMENT}
+    timestamp: ${TIMESTAMP}
+    revision: ${REVISION}
+    tests:
+      unit:
+        passed: ${UNIT_PASSED}
+        failed: ${UNIT_FAILED}
+        coverage: ${UNIT_COVERAGE}
+      integration:
+        passed: ${INT_PASSED}
+        failed: ${INT_FAILED}
+        duration: ${INT_DURATION}
+      performance:
+        p50_latency: ${P50_LATENCY}
+        p99_latency: ${P99_LATENCY}
+        error_rate: ${ERROR_RATE}
+        throughput: ${THROUGHPUT}
+      security:
+        vulnerabilities:
+          critical: ${VULN_CRITICAL}
+          high: ${VULN_HIGH}
+          medium: ${VULN_MEDIUM}
+          low: ${VULN_LOW}
+    overall_status: ${OVERALL_STATUS}

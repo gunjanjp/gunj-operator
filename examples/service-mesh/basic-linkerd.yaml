@@ -1,0 +1,91 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: linkerd-platform
+  namespace: monitoring
+spec:
+  # Enable service mesh integration with Linkerd
+  serviceMesh:
+    enabled: true
+    type: linkerd # Explicitly use Linkerd
+    
+    # mTLS configuration (Linkerd provides automatic mTLS)
+    mtls:
+      enabled: true
+      mode: STRICT
+    
+    # Health check configuration
+    healthCheck:
+      enabled: true
+      interval: "30s"
+      timeout: "5s"
+      unhealthyThreshold: 2
+      healthyThreshold: 3
+    
+    # Sidecar injection configuration
+    sidecarInjection:
+      autoInject: true
+      resourceLimits:
+        requests:
+          cpu: "100m"
+          memory: "64Mi"
+        limits:
+          cpu: "200m"
+          memory: "128Mi"
+    
+    # Basic observability configuration
+    observability:
+      metrics:
+        enabled: true
+      tracing:
+        enabled: true
+        samplingRate: 1.0 # 1% sampling
+        provider: tempo # Use our Tempo instance
+  
+  # Standard component configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 1
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "250m"
+        limits:
+          memory: "2Gi"
+          cpu: "500m"
+      storage:
+        size: 25Gi
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 1
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "100m"
+        limits:
+          memory: "512Mi"
+          cpu: "250m"
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 1
+      storage:
+        size: 50Gi
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 1
+      storage:
+        size: 25Gi
+  
+  # Global settings
+  global:
+    externalLabels:
+      cluster: "development"
+      region: "us-west-2"

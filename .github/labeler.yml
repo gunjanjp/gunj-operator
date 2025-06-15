@@ -1,61 +1,79 @@
-# Labeler configuration for automatic PR labeling
+# Configuration for PR labeler
+# https://github.com/actions/labeler
 
 # Component labels
 component/operator:
-  - api/**/*
-  - controllers/**/*
-  - internal/managers/**/*
-  - internal/webhooks/**/*
-  - config/**/*
+  - 'cmd/operator/**'
+  - 'controllers/**'
+  - 'internal/operator/**'
+  - 'pkg/operator/**'
 
 component/api:
-  - internal/api/**/*
-  - cmd/api-server/**/*
+  - 'cmd/api-server/**'
+  - 'internal/api/**'
+  - 'pkg/api/**'
+  - 'api/**'
 
 component/ui:
-  - ui/**/*
+  - 'ui/**'
+  - '*.js'
+  - '*.ts'
+  - '*.tsx'
+  - '*.css'
+  - '*.scss'
 
-component/cli:
-  - cmd/cli/**/*
+component/crd:
+  - 'api/v*/**.go'
+  - 'config/crd/**'
+
+component/webhooks:
+  - 'internal/webhooks/**'
+  - 'pkg/webhooks/**'
+  - 'config/webhook/**'
 
 component/helm:
-  - charts/**/*
+  - 'charts/**'
+  - 'deploy/helm/**'
 
 # Type labels
 type/docs:
-  - docs/**/*
   - '**/*.md'
+  - 'docs/**'
+  - 'examples/**'
 
 type/test:
-  - test/**/*
   - '**/*_test.go'
-  - '**/testdata/**/*'
+  - 'test/**'
+  - '**/*.test.ts'
+  - '**/*.test.tsx'
+  - '**/*.spec.ts'
+  - '**/*.spec.tsx'
 
 type/ci:
-  - .github/**/*
-  - .gitlab-ci.yml
-  - .circleci/**/*
+  - '.github/**'
+  - '.gitlab-ci.yml'
+  - 'Jenkinsfile'
+  - '.circleci/**'
 
 type/build:
-  - Dockerfile*
-  - Makefile
-  - go.mod
-  - go.sum
-  - package.json
-  - package-lock.json
+  - 'Dockerfile*'
+  - 'Makefile'
+  - 'go.mod'
+  - 'go.sum'
+  - 'package.json'
+  - 'package-lock.json'
+  - 'yarn.lock'
 
 type/config:
-  - config/**/*
-  - '**/*.yaml'
-  - '**/*.yml'
-  - '**/*.json'
-  - '**/*.toml'
+  - 'config/**'
+  - '*.yaml'
+  - '*.yml'
+  - '*.json'
+  - '*.toml'
 
 # Language labels
 lang/go:
   - '**/*.go'
-  - go.mod
-  - go.sum
 
 lang/typescript:
   - '**/*.ts'
@@ -71,26 +89,25 @@ lang/yaml:
 
 # Area labels
 area/security:
-  - SECURITY.md
-  - internal/api/middleware/auth.go
-  - internal/api/middleware/rbac.go
+  - 'internal/auth/**'
+  - 'internal/security/**'
+  - 'config/rbac/**'
+  - '**/security/**'
 
 area/performance:
+  - '**/bench/**'
   - '**/*_bench_test.go'
-  - test/performance/**/*
+  - '**/performance/**'
 
 area/observability:
-  - internal/metrics/**/*
-  - config/prometheus/**/*
+  - 'internal/metrics/**'
+  - 'internal/tracing/**'
+  - 'internal/logging/**'
 
-# Priority labels (manual)
-# priority/critical
-# priority/high
-# priority/medium
-# priority/low
-
-# Status labels (manual)
-# status/blocked
-# status/in-progress
-# status/needs-review
-# status/ready-to-merge
+area/dependencies:
+  - 'go.mod'
+  - 'go.sum'
+  - 'package.json'
+  - 'package-lock.json'
+  - 'yarn.lock'
+  - 'requirements.txt'

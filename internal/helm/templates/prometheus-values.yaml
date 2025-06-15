@@ -1,0 +1,222 @@
+# Default Helm values for Prometheus deployment
+# These values can be overridden by the operator based on the ObservabilityPlatform spec
+
+# Prometheus server configuration
+server:
+  # Enable/disable the Prometheus server
+  enabled: true
+  
+  # Container image
+  image:
+    repository: prom/prometheus
+    tag: v2.48.0
+    pullPolicy: IfNotPresent
+  
+  # Number of replicas
+  replicaCount: 1
+  
+  # Resources
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  
+  # Persistent storage
+  persistentVolume:
+    enabled: true
+    size: 8Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  
+  # Data retention
+  retention: 15d
+  
+  # Global configuration
+  global:
+    scrape_interval: 15s
+    evaluation_interval: 15s
+    external_labels: {}
+  
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 9090
+    targetPort: 9090
+    annotations: {}
+    labels: {}
+  
+  # Service monitor for self-monitoring
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    labels: {}
+  
+  # Pod annotations
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+  
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    fsGroup: 65534
+  
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /-/healthy
+      port: 9090
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  
+  readinessProbe:
+    httpGet:
+      path: /-/ready
+      port: 9090
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  
+  # Node selector
+  nodeSelector: {}
+  
+  # Tolerations
+  tolerations: []
+  
+  # Affinity
+  affinity: {}
+  
+  # Extra volumes
+  extraVolumes: []
+  
+  # Extra volume mounts
+  extraVolumeMounts: []
+  
+  # Extra arguments
+  extraArgs: []
+  
+  # Extra environment variables
+  extraEnv: []
+  
+  # Remote write configuration
+  remoteWrite: []
+  
+  # Remote read configuration
+  remoteRead: []
+  
+  # Alerting rules
+  alertingRules: {}
+  
+  # Recording rules
+  recordingRules: {}
+  
+  # Scrape configurations
+  scrapeConfigs: |
+    - job_name: 'prometheus'
+      static_configs:
+        - targets: ['localhost:9090']
+    
+    - job_name: 'kubernetes-apiservers'
+      kubernetes_sd_configs:
+        - role: endpoints
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+          action: keep
+          regex: default;kubernetes;https
+    
+    - job_name: 'kubernetes-nodes'
+      kubernetes_sd_configs:
+        - role: node
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+        - action: labelmap
+          regex: __meta_kubernetes_node_label_(.+)
+    
+    - job_name: 'kubernetes-pods'
+      kubernetes_sd_configs:
+        - role: pod
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+          target_label: __address__
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: kubernetes_namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: kubernetes_pod_name
+  
+  # Extra scrape configs
+  extraScrapeConfigs: ""
+
+# Alertmanager configuration (disabled by default, managed separately)
+alertmanager:
+  enabled: false
+
+# Pushgateway configuration (disabled by default)
+pushgateway:
+  enabled: false
+
+# Node exporter configuration (disabled by default, typically deployed as DaemonSet)
+nodeExporter:
+  enabled: false
+
+# Kube state metrics configuration (optional, can be enabled)
+kubeStateMetrics:
+  enabled: false
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Service account
+serviceAccounts:
+  server:
+    create: true
+    name: ""
+    annotations: {}
+
+# Pod Security Policy (deprecated in newer K8s versions)
+podSecurityPolicy:
+  enabled: false
+
+# Network policy
+networkPolicy:
+  enabled: false
+
+# Config map reload sidecar
+configmapReload:
+  prometheus:
+    enabled: true
+    image:
+      repository: jimmidyson/configmap-reload
+      tag: v0.9.0
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi

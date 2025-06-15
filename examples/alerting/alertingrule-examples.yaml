@@ -1,0 +1,587 @@
+# Basic Prometheus Alerting Rules
+apiVersion: observability.io/v1beta1
+kind: AlertingRule
+metadata:
+  name: prometheus-basic-alerts
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: production-platform
+  
+  ruleType: prometheus
+  
+  globalLabels:
+    environment: production
+    team: platform
+  
+  globalAnnotations:
+    managed_by: gunj-operator
+    
+  prometheusRules:
+  - name: instance_monitoring
+    interval: 30s
+    rules:
+    - alert: InstanceDown
+      expr: up{job="prometheus"} == 0
+      for: 5m
+      severity: critical
+      labels:
+        component: infrastructure
+      annotations:
+        summary: "Instance {{ $labels.instance }} is down"
+        description: "{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 5 minutes."
+        runbook_url: "https://wiki.company.com/runbooks/instance-down"
+        
+    - alert: HighMemoryUsage
+      expr: |
+        (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.85
+      for: 10m
+      severity: warning
+      labels:
+        component: infrastructure
+      annotations:
+        summary: "High memory usage on {{ $labels.instance }}"
+        description: "Memory usage is above 85% (current value: {{ $value | humanizePercentage }})"
+        
+    - alert: HighCPUUsage
+      expr: |
+        100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+      for: 10m
+      severity: warning
+      labels:
+        component: infrastructure
+      annotations:
+        summary: "High CPU usage on {{ $labels.instance }}"
+        description: "CPU usage is above 80% (current value: {{ $value | humanize }}%)"
+        
+    - alert: DiskSpaceLow
+      expr: |
+        (node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs|vfat"} / 
+         node_filesystem_size_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs|vfat"}) < 0.15
+      for: 5m
+      severity: warning
+      labels:
+        component: infrastructure
+      annotations:
+        summary: "Low disk space on {{ $labels.instance }}"
+        description: "Disk space on {{ $labels.device }} is below 15% (current: {{ $value | humanizePercentage }})"
+        
+  - name: kubernetes_monitoring
+    interval: 1m
+    rules:
+    - alert: KubernetesPodNotHealthy
+      expr: |
+        sum by (namespace, pod) (kube_pod_status_phase{phase=~"Pending|Unknown|Failed"}) > 0
+      for: 15m
+      severity: warning
+      labels:
+        component: kubernetes
+      annotations:
+        summary: "Pod {{ $labels.pod }} is not healthy"
+        description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} has been in {{ $labels.phase }} state for more than 15 minutes."
+        
+    - alert: KubernetesPodCrashLooping
+      expr: |
+        rate(kube_pod_container_status_restarts_total[1h]) > 5
+      for: 5m
+      severity: critical
+      labels:
+        component: kubernetes
+      annotations:
+        summary: "Pod {{ $labels.pod }} is crash looping"
+        description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} container {{ $labels.container }} is crash looping"
+        
+    - alert: KubernetesNodeNotReady
+      expr: |
+        kube_node_status_condition{condition="Ready",status="true"} == 0
+      for: 10m
+      severity: critical
+      labels:
+        component: kubernetes
+      annotations:
+        summary: "Kubernetes Node {{ $labels.node }} is not ready"
+        description: "Node {{ $labels.node }} has been unready for more than 10 minutes"
+        
+    - alert: KubernetesPVCPending
+      expr: |
+        kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+      for: 15m
+      severity: warning
+      labels:
+        component: kubernetes
+      annotations:
+        summary: "PVC {{ $labels.persistentvolumeclaim }} is pending"
+        description: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} has been pending for more than 15 minutes"
+
+---
+# Loki Log-based Alerting Rules
+apiVersion: observability.io/v1beta1
+kind: AlertingRule
+metadata:
+  name: loki-log-alerts
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: production-platform
+    
+  ruleType: loki
+  
+  globalLabels:
+    source: logs
+    
+  lokiRules:
+  - name: application_errors
+    interval: 1m
+    rules:
+    - alert: HighErrorRate
+      expr: |
+        sum(rate({job="application"} |= "ERROR" [5m])) by (namespace, pod) > 10
+      for: 5m
+      severity: warning
+      labels:
+        component: application
+      annotations:
+        summary: "High error rate in {{ $labels.pod }}"
+        description: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is logging more than 10 errors per second"
+        
+    - alert: PanicDetected
+      expr: |
+        sum(rate({job="application"} |~ "panic:|PANIC" [1m])) by (namespace, pod) > 0
+      for: 1m
+      severity: critical
+      labels:
+        component: application
+      annotations:
+        summary: "Panic detected in {{ $labels.pod }}"
+        description: "Application panic detected in {{ $labels.namespace }}/{{ $labels.pod }}"
+        
+    - alert: SecurityEventDetected
+      expr: |
+        sum(rate({job="application"} |~ "unauthorized|forbidden|security.?breach" [5m])) by (namespace) > 5
+      for: 1m
+      severity: critical
+      labels:
+        component: security
+      annotations:
+        summary: "Security events detected in {{ $labels.namespace }}"
+        description: "Multiple security-related log entries detected in namespace {{ $labels.namespace }}"
+        
+  - name: system_logs
+    interval: 2m
+    rules:
+    - alert: SystemOOMKiller
+      expr: |
+        sum(rate({job="system"} |~ "Out of memory: Kill process" [5m])) > 0
+      for: 1m
+      severity: critical
+      labels:
+        component: system
+      annotations:
+        summary: "OOM Killer activated"
+        description: "System OOM killer has been triggered on one or more nodes"
+        
+    - alert: DiskIOErrors
+      expr: |
+        sum(rate({job="system"} |~ "I/O error|disk error" [5m])) by (node) > 1
+      for: 5m
+      severity: critical
+      labels:
+        component: storage
+      annotations:
+        summary: "Disk I/O errors on {{ $labels.node }}"
+        description: "Multiple disk I/O errors detected on node {{ $labels.node }}"
+
+---
+# Multi-type Alerting Rules with Advanced Features
+apiVersion: observability.io/v1beta1
+kind: AlertingRule
+metadata:
+  name: advanced-multi-alerts
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: production-platform
+    
+  ruleType: multi
+  
+  tenantId: tenant-123
+  
+  globalLabels:
+    datacenter: us-east-1
+    
+  routingConfig:
+    defaultReceiver: platform-team
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 4h
+    groupBy: [alertname, cluster, namespace]
+    routes:
+    - receiver: critical-alerts
+      match:
+        severity: critical
+      continue: true
+      routes:
+      - receiver: pagerduty-critical
+        match:
+          component: infrastructure
+    - receiver: security-team
+      match:
+        component: security
+      groupWait: 10s
+      groupInterval: 1m
+    - receiver: application-team
+      matchRe:
+        namespace: "app-.*"
+        
+  templates:
+  - name: cluster_info
+    type: annotation
+    template: |
+      Cluster: {{ .Labels.cluster }}
+      Namespace: {{ .Labels.namespace }}
+      Pod: {{ .Labels.pod }}
+      
+  - name: value_format
+    type: annotation
+    template: |
+      Current Value: {{ .Value | printf "%.2f" }}
+      
+  validationConfig:
+    validateOnCreate: true
+    validateOnUpdate: true
+    strictMode: false
+    validationTimeout: 5m
+    
+  prometheusRules:
+  - name: slo_monitoring
+    interval: 30s
+    rules:
+    - alert: SLOBudgetBurn
+      expr: |
+        (
+          1 - (
+            sum(rate(http_requests_total{code!~"5.."}[5m])) by (service) /
+            sum(rate(http_requests_total[5m])) by (service)
+          )
+        ) > 0.001
+      for: 5m
+      severity: warning
+      priority: 100
+      labels:
+        slo: availability
+      annotations:
+        summary: "SLO budget burn rate high for {{ $labels.service }}"
+        description: "Error rate is {{ $value | humanizePercentage }} which exceeds SLO budget burn"
+        dashboard: "https://grafana.company.com/d/slo-dashboard?var-service={{ $labels.service }}"
+      testData:
+        inputSeries:
+        - series: 'http_requests_total{service="api",code="200"}'
+          values: '0+10x10'
+        - series: 'http_requests_total{service="api",code="500"}'
+          values: '0+1x10'
+        expectedAlerts:
+        - expLabels:
+            alertname: SLOBudgetBurn
+            service: api
+            severity: warning
+          expAnnotations:
+            summary: "SLO budget burn rate high for api"
+          evalTime: 5m
+          
+  lokiRules:
+  - name: performance_monitoring
+    interval: 2m
+    rules:
+    - alert: SlowAPIRequests
+      expr: |
+        avg by (endpoint) (
+          avg_over_time({job="api"} 
+          | json 
+          | response_time > 1000 [5m])
+        ) > 0.1
+      for: 10m
+      severity: warning
+      labels:
+        component: api
+        slo: latency
+      annotations:
+        summary: "Slow API requests on {{ $labels.endpoint }}"
+        description: "More than 10% of requests to {{ $labels.endpoint }} are taking over 1 second"
+        
+  notificationConfig:
+    receivers:
+    - name: platform-team
+      emailConfigs:
+      - to: ["platform-oncall@company.com"]
+        from: alerts@company.com
+        smarthost: smtp.company.com:587
+        authUsername: alerts@company.com
+        authPassword:
+          name: smtp-password
+          key: password
+        headers:
+          X-Priority: "3"
+        html: |
+          <h2>Alert: {{ .GroupLabels.alertname }}</h2>
+          <p>{{ range .Alerts }}{{ .Annotations.description }}<br>{{ end }}</p>
+          
+    - name: critical-alerts
+      slackConfigs:
+      - apiUrl:
+          name: slack-webhook
+          key: url
+        channel: "#critical-alerts"
+        title: "🚨 Critical Alert"
+        text: "{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}"
+        color: "danger"
+        fields:
+        - title: "Severity"
+          value: "{{ .CommonLabels.severity }}"
+          short: true
+        - title: "Component"
+          value: "{{ .CommonLabels.component }}"
+          short: true
+          
+    - name: pagerduty-critical
+      pagerdutyConfigs:
+      - routingKey:
+          name: pagerduty-key
+          key: routing-key
+        description: "{{ .CommonAnnotations.summary }}"
+        client: "Gunj Operator"
+        clientUrl: "{{ .CommonAnnotations.dashboard }}"
+        severity: "critical"
+        details:
+          namespace: "{{ .CommonLabels.namespace }}"
+          pod: "{{ .CommonLabels.pod }}"
+          
+    - name: security-team
+      webhookConfigs:
+      - url: https://security-webhook.company.com/alerts
+        maxAlerts: 10
+        httpConfig:
+          bearerToken: "security-token-123"
+          tlsConfig:
+            insecureSkipVerify: false
+            
+    - name: application-team
+      opsgenieConfigs:
+      - apiKey:
+          name: opsgenie-key
+          key: api-key
+        message: "{{ .GroupLabels.alertname }}"
+        description: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
+        source: "gunj-operator"
+        priority: "P{{ .CommonLabels.priority }}"
+        tags: "{{ .CommonLabels.component }},{{ .CommonLabels.environment }}"
+        responders:
+        - id: "team-123"
+          type: team
+          
+    inhibitRules:
+    - sourceMatch:
+        alertname: KubernetesNodeNotReady
+      targetMatch:
+        component: kubernetes
+      equal: [node]
+      
+    - sourceMatch:
+        severity: critical
+      targetMatchRe:
+        severity: "warning|info"
+      equal: [namespace, pod]
+      
+    timeIntervals:
+    - name: business-hours
+      timeIntervals:
+      - times:
+        - startTime: "09:00"
+          endTime: "17:00"
+        weekdays: [monday, tuesday, wednesday, thursday, friday]
+        location: "America/New_York"
+        
+    - name: maintenance-window
+      timeIntervals:
+      - times:
+        - startTime: "02:00"
+          endTime: "04:00"
+        weekdays: [sunday]
+        location: "UTC"
+        
+    globalConfig:
+      resolveTimeout: 5m
+      httpConfig:
+        followRedirects: true
+      smtpFrom: alerts@company.com
+      smtpSmarthost: smtp.company.com:587
+      smtpRequireTls: true
+      
+  metadata:
+    team: platform-engineering
+    service: observability-platform
+    environment: production
+    version: "2.0"
+    tags: ["critical", "slo", "monitoring"]
+    description: "Comprehensive alerting rules for production platform"
+    owner: platform-oncall@company.com
+    repository: https://github.com/company/alerting-rules
+    documentationUrl: https://wiki.company.com/alerting
+    sloReferences: ["availability-99.9", "latency-p99-1s"]
+
+---
+# SRE Golden Signals Alerting
+apiVersion: observability.io/v1beta1
+kind: AlertingRule
+metadata:
+  name: sre-golden-signals
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: production-platform
+    
+  ruleType: prometheus
+  
+  globalLabels:
+    alert_type: golden_signals
+    
+  prometheusRules:
+  - name: latency
+    interval: 30s
+    rules:
+    - alert: HighLatencyP99
+      expr: |
+        histogram_quantile(0.99,
+          sum(rate(http_request_duration_seconds_bucket[5m])) by (service, le)
+        ) > 1
+      for: 5m
+      severity: warning
+      labels:
+        signal: latency
+      annotations:
+        summary: "High P99 latency for {{ $labels.service }}"
+        description: "99th percentile latency is {{ $value }}s (threshold: 1s)"
+        
+    - alert: HighLatencyP95
+      expr: |
+        histogram_quantile(0.95,
+          sum(rate(http_request_duration_seconds_bucket[5m])) by (service, le)
+        ) > 0.5
+      for: 10m
+      severity: info
+      labels:
+        signal: latency
+      annotations:
+        summary: "High P95 latency for {{ $labels.service }}"
+        description: "95th percentile latency is {{ $value }}s (threshold: 0.5s)"
+        
+  - name: traffic
+    interval: 1m
+    rules:
+    - alert: TrafficDropped
+      expr: |
+        (
+          sum(rate(http_requests_total[5m])) by (service) < 10
+          and
+          sum(rate(http_requests_total[1h] offset 1h)) by (service) > 100
+        )
+      for: 5m
+      severity: warning
+      labels:
+        signal: traffic
+      annotations:
+        summary: "Traffic dropped significantly for {{ $labels.service }}"
+        description: "Current traffic: {{ $value }} req/s (was > 100 req/s an hour ago)"
+        
+    - alert: TrafficSpike
+      expr: |
+        (
+          sum(rate(http_requests_total[5m])) by (service) /
+          sum(rate(http_requests_total[1h])) by (service)
+        ) > 2
+      for: 5m
+      severity: info
+      labels:
+        signal: traffic
+      annotations:
+        summary: "Traffic spike detected for {{ $labels.service }}"
+        description: "Traffic increased by {{ $value | humanizePercentage }}"
+        
+  - name: errors
+    interval: 30s
+    rules:
+    - alert: HighErrorRate
+      expr: |
+        (
+          sum(rate(http_requests_total{code=~"5.."}[5m])) by (service) /
+          sum(rate(http_requests_total[5m])) by (service)
+        ) > 0.05
+      for: 5m
+      severity: critical
+      labels:
+        signal: errors
+      annotations:
+        summary: "High error rate for {{ $labels.service }}"
+        description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+        
+    - alert: ErrorBudgetBurnRate
+      expr: |
+        (
+          1 - (
+            sum(rate(http_requests_total{code!~"5.."}[1h])) by (service) /
+            sum(rate(http_requests_total[1h])) by (service)
+          )
+        ) > (1 - 0.999) * 14.4
+      for: 5m
+      severity: warning
+      labels:
+        signal: errors
+        slo: "99.9"
+      annotations:
+        summary: "Error budget burn rate too high for {{ $labels.service }}"
+        description: "At this rate, the monthly error budget will be exhausted in {{ $value }} hours"
+        
+  - name: saturation
+    interval: 1m
+    rules:
+    - alert: CPUSaturation
+      expr: |
+        (
+          100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+        ) > 90
+      for: 10m
+      severity: warning
+      labels:
+        signal: saturation
+        resource: cpu
+      annotations:
+        summary: "CPU saturation on {{ $labels.instance }}"
+        description: "CPU usage is {{ $value | humanize }}%"
+        
+    - alert: MemorySaturation
+      expr: |
+        (
+          1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+        ) > 0.90
+      for: 10m
+      severity: warning
+      labels:
+        signal: saturation
+        resource: memory
+      annotations:
+        summary: "Memory saturation on {{ $labels.instance }}"
+        description: "Memory usage is {{ $value | humanizePercentage }}"
+        
+    - alert: DiskSaturation
+      expr: |
+        (
+          1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs|vfat"} /
+               node_filesystem_size_bytes{fstype!~"tmpfs|fuse.lxcfs|squashfs|vfat"})
+        ) > 0.85
+      for: 10m
+      severity: warning
+      labels:
+        signal: saturation
+        resource: disk
+      annotations:
+        summary: "Disk saturation on {{ $labels.instance }}:{{ $labels.device }}"
+        description: "Disk usage is {{ $value | humanizePercentage }}"

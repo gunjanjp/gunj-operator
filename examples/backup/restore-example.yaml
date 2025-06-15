@@ -1,0 +1,170 @@
+apiVersion: restore.observability.io/v1alpha1
+kind: Restore
+metadata:
+  name: platform-restore-1
+  namespace: gunj-system
+spec:
+  # Reference to the backup to restore from
+  backupName: manual-backup-1
+  
+  # Restore all namespaces from backup
+  # Leave empty to restore all backed-up namespaces
+  
+  # Restore all resource types
+  # Leave empty to restore all backed-up resources
+  
+  # Restore persistent volumes
+  restorePVs: true
+  
+  # Preserve node ports from backup
+  preserveNodePorts: true
+  
+  # Validation policy
+  validationPolicy:
+    verifyChecksums: true
+    verifyIntegrity: true
+    failOnWarning: false
+    maxRetries: 3
+  
+  # Basic restore hooks
+  hooks:
+    preRestore:
+      - name: prepare-cluster
+        command:
+          - /bin/sh
+          - -c
+          - |
+            echo "Preparing cluster for restore..."
+            # Add any cluster preparation commands
+        onError: Fail
+        timeout: 300s
+    
+    postRestore:
+      - name: verify-restore
+        command:
+          - /bin/sh
+          - -c
+          - |
+            echo "Verifying restored resources..."
+            kubectl get observabilityplatforms --all-namespaces
+        onError: Continue
+        timeout: 120s
+
+---
+apiVersion: restore.observability.io/v1alpha1
+kind: Restore
+metadata:
+  name: selective-restore-1
+  namespace: gunj-system
+spec:
+  # Restore from specific backup
+  backupName: selective-backup-1
+  
+  # Only restore specific namespaces
+  includedNamespaces:
+    - monitoring
+  
+  # Only restore specific resources
+  includedResources:
+    - ObservabilityPlatform
+    - ServiceMonitor
+    - PrometheusRule
+  
+  # Exclude certain resources from restore
+  excludedResources:
+    - Secret  # Secrets might be managed externally
+  
+  # Don't restore PVs (use existing ones)
+  restorePVs: false
+  
+  # Don't preserve node ports (let k8s assign new ones)
+  preserveNodePorts: false
+  
+  # Label selector for fine-grained control
+  labelSelector:
+    matchLabels:
+      restore: include
+    matchExpressions:
+      - key: tier
+        operator: In
+        values:
+          - critical
+          - production
+  
+  # Strict validation
+  validationPolicy:
+    verifyChecksums: true
+    verifyIntegrity: true
+    failOnWarning: true
+    maxRetries: 1
+
+---
+apiVersion: restore.observability.io/v1alpha1
+kind: Restore
+metadata:
+  name: point-in-time-restore
+  namespace: gunj-system
+spec:
+  # Restore from scheduled backup
+  backupName: daily-backup-20250612
+  
+  # Point-in-time restore (if backup supports it)
+  restorePointInTime: "2025-06-12T10:30:00Z"
+  
+  # Restore everything
+  includeClusterResources: true
+  restorePVs: true
+  preserveNodePorts: true
+  
+  # Validation with retries
+  validationPolicy:
+    verifyChecksums: true
+    verifyIntegrity: true
+    failOnWarning: false
+    maxRetries: 5
+  
+  # Complex restore hooks
+  hooks:
+    preRestore:
+      - name: scale-down-workloads
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Scale down existing workloads
+            kubectl scale deployment --all --replicas=0 -n monitoring
+            kubectl scale statefulset --all --replicas=0 -n monitoring
+        onError: Continue
+        timeout: 300s
+      
+      - name: backup-current-state
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Create a quick backup of current state
+            kubectl get all,pvc,configmap,secret -n monitoring -o yaml > /tmp/pre-restore-state.yaml
+        onError: Continue
+        timeout: 120s
+    
+    postRestore:
+      - name: wait-for-ready
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Wait for all pods to be ready
+            kubectl wait --for=condition=ready pod --all -n monitoring --timeout=600s
+        onError: Continue
+        timeout: 660s
+      
+      - name: run-smoke-tests
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Run basic smoke tests
+            curl -f http://prometheus.monitoring.svc:9090/-/healthy || exit 1
+            curl -f http://grafana.monitoring.svc:3000/api/health || exit 1
+        onError: Fail
+        timeout: 120s

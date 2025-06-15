@@ -1,0 +1,334 @@
+# Example: Automatic Rollback Configuration
+# This example demonstrates comprehensive rollback strategies
+
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-with-rollback
+  namespace: monitoring
+spec:
+  gitOps:
+    enabled: true
+    provider: flux
+    
+    repository:
+      url: https://github.com/example/observability-config.git
+      branch: main
+      path: platform
+      interval: 5m
+    
+    syncPolicy:
+      automated: true
+      prune: true
+      selfHeal: true
+    
+    # Comprehensive rollback configuration
+    rollback:
+      enabled: true
+      maxHistory: 20  # Keep last 20 successful deployments
+      
+      # Multiple rollback triggers
+      triggers:
+      # 1. Health check based rollback
+      - type: healthCheck
+        threshold: "unhealthy"
+        duration: 5m  # Platform must be unhealthy for 5 minutes
+        
+      # 2. Error rate based rollback
+      - type: error
+        threshold: "5%"  # 5% error rate threshold
+        duration: 10m    # Sustained for 10 minutes
+        
+      # 3. Metric-based rollback triggers
+      - type: metric
+        threshold: |
+          # High error rate
+          sum(rate(http_requests_total{status=~"5..",job="prometheus"}[5m])) / 
+          sum(rate(http_requests_total{job="prometheus"}[5m])) > 0.05
+        duration: 5m
+        
+      - type: metric
+        threshold: |
+          # Memory pressure
+          max(container_memory_usage_bytes{pod=~"prometheus-.*"} / 
+              container_spec_memory_limit_bytes{pod=~"prometheus-.*"}) > 0.95
+        duration: 15m
+        
+      - type: metric
+        threshold: |
+          # CPU throttling
+          rate(container_cpu_cfs_throttled_seconds_total{pod=~"prometheus-.*"}[5m]) > 1
+        duration: 10m
+        
+      - type: metric
+        threshold: |
+          # Disk space critical
+          predict_linear(prometheus_tsdb_storage_blocks_bytes[1h], 4 * 3600) > 
+          node_filesystem_size_bytes{mountpoint="/prometheus"}
+        duration: 5m
+        
+      - type: metric
+        threshold: |
+          # Component availability
+          avg_over_time(up{job=~"prometheus|grafana|loki|tempo"}[5m]) < 0.9
+        duration: 10m
+        
+      - type: metric
+        threshold: |
+          # Ingestion rate drop (possible data loss)
+          rate(prometheus_tsdb_head_samples_appended_total[5m]) < 1000 AND 
+          rate(prometheus_tsdb_head_samples_appended_total[5m] offset 1h) > 10000
+        duration: 15m
+  
+  # Components with specific health checks
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3
+      
+      # Health checks for rollback decisions
+      healthChecks:
+        startup:
+          httpGet:
+            path: /-/ready
+            port: 9090
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 10
+        
+        liveness:
+          httpGet:
+            path: /-/healthy
+            port: 9090
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readiness:
+          httpGet:
+            path: /-/ready
+            port: 9090
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      
+      # Resource configuration
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "2"
+        limits:
+          memory: "8Gi"
+          cpu: "4"
+      
+      storage:
+        size: 100Gi
+        storageClassName: fast-ssd
+      
+      # Monitoring configuration for rollback metrics
+      monitoring:
+        serviceMonitor:
+          enabled: true
+          interval: 15s
+          scrapeTimeout: 10s
+        
+        # Prometheus self-monitoring rules
+        rules:
+        - alert: PrometheusDown
+          expr: up{job="prometheus"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            component: prometheus
+          annotations:
+            summary: "Prometheus is down"
+            
+        - alert: PrometheusHighMemoryUsage
+          expr: |
+            process_resident_memory_bytes{job="prometheus"} / 
+            prometheus_local_storage_memory_chunks * 1024 > 0.9
+          for: 10m
+          labels:
+            severity: warning
+            component: prometheus
+          annotations:
+            summary: "Prometheus memory usage above 90%"
+            
+        - alert: PrometheusConfigReloadFailed
+          expr: prometheus_config_last_reload_successful{job="prometheus"} == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: prometheus
+          annotations:
+            summary: "Prometheus configuration reload failed"
+            
+        - alert: PrometheusTSDBReloadsFailing
+          expr: increase(prometheus_tsdb_reloads_failures_total{job="prometheus"}[5m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: prometheus
+          annotations:
+            summary: "Prometheus TSDB reloads are failing"
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      
+      # Grafana health checks
+      healthChecks:
+        liveness:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 30
+          failureThreshold: 10
+        
+        readiness:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 1
+          successThreshold: 1
+          failureThreshold: 3
+      
+      # Database for HA
+      database:
+        type: postgres
+        host: postgres.database.svc.cluster.local
+        name: grafana
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+      # Loki health monitoring
+      healthChecks:
+        readiness:
+          httpGet:
+            path: /ready
+            port: 3100
+          initialDelaySeconds: 15
+          timeoutSeconds: 1
+        
+        liveness:
+          httpGet:
+            path: /ready
+            port: 3100
+          initialDelaySeconds: 30
+          timeoutSeconds: 1
+          failureThreshold: 3
+      
+      storage:
+        size: 200Gi
+      retention: 7d
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      
+      # Tempo health checks
+      healthChecks:
+        readiness:
+          httpGet:
+            path: /ready
+            port: 3200
+          initialDelaySeconds: 15
+          timeoutSeconds: 1
+          periodSeconds: 10
+
+  # Global monitoring for rollback decisions
+  monitoring:
+    enabled: true
+    
+    # Platform-wide health rules
+    prometheusRule:
+      enabled: true
+      rules:
+      - alert: PlatformUnhealthy
+        expr: |
+          (count(up{namespace="monitoring"} == 0) / count(up{namespace="monitoring"})) > 0.2
+        for: 5m
+        labels:
+          severity: critical
+          trigger_rollback: "true"
+        annotations:
+          summary: "More than 20% of platform components are down"
+          
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5..",namespace="monitoring"}[5m])) / 
+          sum(rate(http_requests_total{namespace="monitoring"}[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          trigger_rollback: "true"
+        annotations:
+          summary: "Error rate exceeds 5%"
+          
+      - alert: DataIngestionStopped
+        expr: |
+          rate(prometheus_tsdb_head_samples_appended_total[5m]) == 0 AND 
+          up{job="prometheus"} == 1
+        for: 5m
+        labels:
+          severity: critical
+          trigger_rollback: "true"
+        annotations:
+          summary: "Prometheus data ingestion has stopped"
+
+  # Post-rollback actions
+  postRollback:
+    # Notification settings
+    notifications:
+      slack:
+        enabled: true
+        channel: "#platform-alerts"
+        webhookUrl: ${SLACK_WEBHOOK_URL}
+        message: |
+          🔄 *Rollback Executed*
+          Platform: {{ .Platform }}
+          From Version: {{ .FromVersion }}
+          To Version: {{ .ToVersion }}
+          Reason: {{ .Reason }}
+          Time: {{ .Timestamp }}
+      
+      email:
+        enabled: true
+        to:
+        - platform-team@example.com
+        - oncall@example.com
+        subject: "Platform Rollback: {{ .Platform }}"
+    
+    # Create incident
+    incident:
+      enabled: true
+      provider: pagerduty
+      severity: high
+      
+    # Disable further auto-updates
+    freezeUpdates:
+      enabled: true
+      duration: 2h
+      
+    # Run validation tests
+    validation:
+      enabled: true
+      tests:
+      - name: "Component Health"
+        command: "kubectl get pods -n monitoring -o json | jq '.items[].status.phase' | grep -v Running | wc -l"
+        expectedOutput: "0"
+      - name: "Metrics Ingestion"
+        command: "curl -s http://prometheus:9090/api/v1/query?query=up | jq '.data.result | length'"
+        minExpected: 10

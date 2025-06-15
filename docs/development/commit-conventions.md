@@ -1,348 +1,393 @@
-# Commit Message Conventions
+# Commit Message Conventions Guide
 
-**Version**: 1.0  
-**Last Updated**: June 12, 2025  
-**Project**: Gunj Operator  
-**Status**: Active  
+This guide provides detailed instructions and best practices for writing commit messages in the Gunj Operator project.
 
----
+## Table of Contents
 
-## 📋 Overview
+- [Overview](#overview)
+- [Quick Reference](#quick-reference)
+- [Detailed Format](#detailed-format)
+- [Types](#types)
+- [Scopes](#scopes)
+- [Examples](#examples)
+- [Tools and Automation](#tools-and-automation)
+- [FAQ](#faq)
 
-The Gunj Operator project follows the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification. This ensures consistent commit messages that can be parsed by automated tools for changelog generation, versioning, and release notes.
+## Overview
 
-## 🎯 Commit Message Format
+The Gunj Operator project follows the [Conventional Commits](https://www.conventionalcommits.org/) specification. This provides several benefits:
 
-Each commit message consists of a **header**, an optional **body**, and an optional **footer**.
+- **Automated Changelog Generation**: Commit messages are used to generate release notes
+- **Semantic Versioning**: Commit types determine version bumps
+- **Better History**: Consistent format makes git history more readable
+- **Team Communication**: Clear commits help team members understand changes
+- **CI/CD Integration**: Automated validation ensures consistency
+
+## Quick Reference
+
+### Basic Format
+
+```
+type(scope): subject
+
+body
+
+footer
+```
+
+### Quick Examples
+
+```bash
+# Feature
+git commit -m "feat(operator): add support for custom metrics"
+
+# Bug fix
+git commit -m "fix(api): correct authentication token validation"
+
+# Documentation
+git commit -m "docs(ui): update installation instructions"
+
+# With sign-off (required)
+git commit -s -m "feat(operator): add prometheus integration"
+```
+
+## Detailed Format
+
+### Structure
 
 ```
 <type>(<scope>): <subject>
-
+<BLANK LINE>
 <body>
-
+<BLANK LINE>
 <footer>
 ```
 
-### Example:
-```
-feat(operator): add reconciliation retry mechanism
+### Rules
 
-Implemented exponential backoff for failed reconciliation attempts.
-This improves reliability when temporary failures occur during
-resource creation or updates.
+1. **Header** (first line):
+   - Maximum 100 characters
+   - Type is mandatory
+   - Scope is optional but recommended
+   - Subject is mandatory
+
+2. **Body**:
+   - Separated from header by blank line
+   - Maximum 72 characters per line
+   - Explain what and why, not how
+   - Use imperative mood
+
+3. **Footer**:
+   - Separated from body by blank line
+   - Contains breaking changes and issue references
+   - Must include DCO sign-off
+
+## Types
+
+### Primary Types
+
+| Type | Description | Version Impact |
+|------|-------------|----------------|
+| `feat` | New feature | Minor |
+| `fix` | Bug fix | Patch |
+| `docs` | Documentation changes | None |
+| `style` | Code style changes (formatting, etc.) | None |
+| `refactor` | Code refactoring | None |
+| `perf` | Performance improvements | Patch |
+| `test` | Test additions or corrections | None |
+| `build` | Build system or dependencies | None |
+| `ci` | CI/CD configuration | None |
+| `chore` | Other changes | None |
+| `revert` | Revert a previous commit | Varies |
+
+### When to Use Each Type
+
+#### `feat` - Features
+```bash
+# Adding new functionality
+feat(operator): add multi-cluster support
+feat(ui): implement dark mode theme
+feat(api): add GraphQL endpoint for metrics
+```
+
+#### `fix` - Bug Fixes
+```bash
+# Fixing broken functionality
+fix(controllers): resolve memory leak in reconciliation loop
+fix(ui): correct dropdown selection behavior
+fix(webhooks): handle nil pointer in validation
+```
+
+#### `docs` - Documentation
+```bash
+# Documentation updates
+docs(operator): add troubleshooting guide
+docs(api): update REST API examples
+docs: fix typos in README
+```
+
+#### `refactor` - Code Refactoring
+```bash
+# Code restructuring without changing behavior
+refactor(controllers): extract common logic to utils
+refactor(ui): convert class components to hooks
+refactor: rename variables for clarity
+```
+
+## Scopes
+
+### Available Scopes
+
+| Scope | Description |
+|-------|-------------|
+| `operator` | Core operator functionality |
+| `api` | API server (REST/GraphQL) |
+| `ui` | React user interface |
+| `controllers` | Kubernetes controllers |
+| `crd` | Custom Resource Definitions |
+| `webhooks` | Admission/validation webhooks |
+| `helm` | Helm charts |
+| `docs` | Documentation |
+| `deps` | Dependencies |
+| `security` | Security-related changes |
+
+### Scope Guidelines
+
+- Use scope to indicate the area of change
+- Omit scope for changes affecting multiple areas
+- Be consistent with existing scopes
+- Keep scopes short and meaningful
+
+## Examples
+
+### Simple Examples
+
+```bash
+# Feature with scope
+feat(operator): add prometheus scrape interval configuration
+
+# Bug fix without body
+fix(ui): correct platform status display
+
+# Docs update
+docs: update kubernetes version requirements
+
+# Build changes
+build(deps): bump golang from 1.20 to 1.21
+
+# Style changes
+style(operator): format imports according to goimports
+```
+
+### Complete Examples
+
+#### Feature with Full Details
+```
+feat(operator): implement automated backup functionality
+
+Add automated backup capability for observability platforms. Backups can be 
+scheduled or triggered manually, with support for S3, GCS, and Azure Blob 
+storage backends.
+
+- Add backup CRD and controller
+- Implement storage backend abstraction  
+- Create backup scheduling logic
+- Add restoration functionality
+- Include progress tracking
+
+The backup data includes:
+- Prometheus data (compressed)
+- Grafana dashboards and settings
+- Loki logs (with retention)
+- Custom configurations
+
+Closes #234
+Closes #235
+
+Signed-off-by: Jane Developer <jane@example.com>
+```
+
+#### Bug Fix with Breaking Change
+```
+fix(api): standardize error response format
+
+Previously, API errors were returned in inconsistent formats depending on 
+the endpoint. This made client error handling difficult and error-prone.
+
+This change standardizes all error responses to follow the format:
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human readable message",
+    "details": {}
+  }
+}
+
+BREAKING CHANGE: API error responses now use a different JSON structure.
+Clients must update their error parsing logic to handle the new format.
+
+Fixes #567
+
+Signed-off-by: John Developer <john@example.com>
+```
+
+#### Performance Improvement
+```
+perf(controllers): optimize reconciliation for large clusters
+
+Improve reconciliation performance by implementing intelligent caching and
+reducing unnecessary API calls. This significantly improves operator 
+performance in clusters with 100+ platforms.
+
+Changes:
+- Add in-memory cache for frequently accessed resources
+- Implement batch processing for status updates  
+- Use pagination for large list operations
+- Add circuit breaker for failing API calls
+
+Benchmarks show:
+- 70% reduction in API calls during steady state
+- 50% improvement in reconciliation latency
+- 80% reduction in memory allocations
+
+Fixes #789
+
+Signed-off-by: Alice Engineer <alice@example.com>
+```
+
+## Tools and Automation
+
+### Commit Helper Script
+
+Use the provided commit helper for guided commit creation:
+
+```bash
+# Run the interactive commit helper
+./scripts/commit-helper.sh
+```
+
+### Git Configuration
+
+Set up git to use the commit template:
+
+```bash
+# Configure locally for this project
+git config commit.template .gitmessage
+
+# Sign commits automatically  
+git config user.signingkey YOUR_GPG_KEY
+git config commit.gpgsign true
+```
+
+### Validation
+
+Commits are automatically validated by:
+
+1. **Pre-commit hook**: Validates before commit
+2. **CI Pipeline**: Validates in pull requests
+3. **Manual validation**:
+   ```bash
+   # Validate last commit
+   npx commitlint --from=HEAD~1
+   
+   # Validate range
+   npx commitlint --from=origin/main --to=HEAD
+   ```
+
+### IDE Integration
+
+#### VS Code
+
+1. Install "Conventional Commits" extension
+2. Use Command Palette: `Conventional Commits`
+
+#### IntelliJ IDEA
+
+1. Install "Conventional Commit" plugin
+2. Use commit dialog with convention support
+
+## FAQ
+
+### Q: What if I make a mistake in a commit message?
+
+For the last commit:
+```bash
+git commit --amend
+```
+
+For older commits (use with caution):
+```bash
+git rebase -i HEAD~n  # n = number of commits back
+```
+
+### Q: How do I reference multiple issues?
+
+```
+feat(operator): add monitoring dashboard
+
+Implement comprehensive monitoring dashboard with real-time metrics,
+alerts, and resource usage visualization.
 
 Closes #123
+Closes #124
+Fixes #125
 ```
 
----
+### Q: What about work-in-progress commits?
 
-## 📝 Message Components
-
-### Type (Required)
-
-The type must be one of the following:
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `feat` | New feature | `feat(api): add GraphQL endpoint for metrics` |
-| `fix` | Bug fix | `fix(controller): resolve memory leak in reconciler` |
-| `docs` | Documentation changes | `docs(readme): update installation instructions` |
-| `style` | Code style changes (formatting, missing semicolons, etc.) | `style(ui): fix indentation in components` |
-| `refactor` | Code refactoring without feature changes | `refactor(api): simplify authentication middleware` |
-| `perf` | Performance improvements | `perf(operator): optimize resource caching` |
-| `test` | Adding or updating tests | `test(e2e): add platform creation tests` |
-| `build` | Build system or dependencies | `build(docker): optimize container image size` |
-| `ci` | CI/CD configuration changes | `ci(github): add security scanning workflow` |
-| `chore` | Maintenance tasks | `chore(deps): update Go dependencies` |
-| `revert` | Revert a previous commit | `revert: feat(api): add GraphQL endpoint` |
-| `wip` | Work in progress (for draft PRs only) | `wip(ui): dashboard redesign` |
-
-### Scope (Required)
-
-The scope indicates the component or area affected:
-
-#### Core Components
-- `operator` - Main operator logic
-- `api` - API server (REST/GraphQL)
-- `ui` - Web user interface
-- `cli` - Command-line interface
-
-#### Operator Specifics
-- `controller` - Controller logic
-- `webhook` - Admission/conversion webhooks
-- `crd` - Custom Resource Definitions
-- `rbac` - RBAC configurations
-
-#### API Specifics
-- `rest` - RESTful API endpoints
-- `graphql` - GraphQL schema/resolvers
-- `auth` - Authentication/authorization
-
-#### UI Specifics
-- `components` - React components
-- `pages` - Page components
-- `hooks` - Custom hooks
-- `store` - State management
-
-#### Infrastructure
-- `docker` - Dockerfile changes
-- `k8s` - Kubernetes manifests
-- `helm` - Helm chart changes
-- `ci` - CI/CD pipeline
-
-#### Other
-- `docs` - Documentation
-- `examples` - Example configurations
-- `test` - General testing
-- `e2e` - End-to-end tests
-- `deps` - Dependencies
-- `*` - Multiple scopes or general changes
-
-### Subject (Required)
-
-The subject is a short description of the change:
-
-- Use imperative, present tense: "add" not "added" or "adds"
-- Don't capitalize the first letter
-- No period (.) at the end
-- Maximum 50 characters
-
-✅ Good: `add prometheus service monitor creation`  
-❌ Bad: `Added Prometheus service monitor creation.`
-
-### Body (Optional)
-
-The body provides additional context:
-
-- Use imperative, present tense
-- Include motivation for the change
-- Contrast with previous behavior
-- Wrap at 72 characters
-- Separate from header with blank line
-
-Example:
-```
-Implement automatic service monitor creation for Prometheus
-to discover and scrape metrics from platform components.
-
-Previously, service monitors had to be created manually,
-which was error-prone and inconsistent across deployments.
-```
-
-### Footer (Optional)
-
-The footer contains:
-
-#### Breaking Changes
-```
-BREAKING CHANGE: The 'metrics' field in ObservabilityPlatform CRD
-has been renamed to 'monitoring'. Update all existing resources.
-```
-
-#### Issue References
-```
-Closes #123
-Fixes #456
-Related to #789
-```
-
-#### Co-authors
-```
-Co-authored-by: Jane Doe <jane@example.com>
-```
-
----
-
-## 🔧 Validation & Automation
-
-### Commitlint Setup
-
-The project uses `commitlint` to validate commit messages:
-
+For WIP commits in feature branches:
 ```bash
-# Install dependencies
-npm install --save-dev @commitlint/cli @commitlint/config-conventional
+# WIP commits are fine in feature branches
+git commit -m "WIP: implementing validation logic"
 
-# Test a commit message
-echo "feat(operator): add new feature" | npx commitlint
+# Squash before merging to main
+git rebase -i main
 ```
 
-### Husky Git Hooks
+### Q: Do I need to sign-off every commit?
 
-Commit messages are automatically validated using Husky:
-
+Yes, DCO (Developer Certificate of Origin) sign-off is required:
 ```bash
-# The hook is already configured in .husky/commit-msg
-# It runs commitlint on every commit
+# Automatic sign-off
+git commit -s
+
+# Add to existing commit
+git commit --amend -s
 ```
 
-### Making Commits
+### Q: What if my change doesn't fit any type?
 
+Use `chore` for changes that don't fit other categories:
 ```bash
-# Stage changes
-git add .
-
-# Commit with valid message
-git commit -m "feat(operator): add health check endpoint"
-
-# For multi-line commits
-git commit
-
-# Then write:
-# feat(api): implement rate limiting
-#
-# Add configurable rate limiting to prevent API abuse.
-# Supports both IP-based and token-based limiting.
-#
-# Closes #234
+chore: update git ignores
+chore: configure editor settings
 ```
 
----
+### Q: How detailed should the body be?
 
-## 📚 Examples
+Include enough detail so that:
+- Future developers understand why the change was made
+- The change can be reviewed without looking at code
+- Any special considerations are documented
 
-### Feature Addition
-```
-feat(ui): add dark mode support
+## Best Practices
 
-Implemented a theme toggle that allows users to switch
-between light and dark modes. The preference is saved
-in localStorage and applied on page load.
+1. **Write for your future self**: Will you understand this in 6 months?
+2. **Be specific**: "fix bug" vs "fix nil pointer in webhook validation"
+3. **Use present tense**: "add" not "added"
+4. **Reference issues**: Always link to related issues
+5. **Explain why**: Code shows what, commits explain why
+6. **Keep it atomic**: One logical change per commit
+7. **Test before committing**: Ensure tests pass
+8. **Review before pushing**: Read your commit message
 
-Closes #150
-```
-
-### Bug Fix
-```
-fix(controller): prevent duplicate resource creation
-
-Added mutex locking to ensure only one reconciliation
-process can create resources at a time. This fixes the
-race condition that caused duplicate StatefulSets.
-
-Fixes #201
-```
-
-### Breaking Change
-```
-refactor(api)!: change authentication to JWT
-
-Replaced session-based authentication with JWT tokens.
-This improves scalability and enables stateless API servers.
-
-BREAKING CHANGE: API clients must now include JWT tokens
-in the Authorization header instead of session cookies.
-
-Migration guide: docs/migration/v2-auth.md
-```
-
-### Documentation Update
-```
-docs(install): add production deployment guide
-
-Created comprehensive guide for deploying the operator
-in production environments, including:
-- Resource requirements
-- Security considerations
-- High availability setup
-- Monitoring configuration
-```
-
-### Performance Improvement
-```
-perf(operator): optimize reconciliation loop
-
-Reduced reconciliation time by 60% through:
-- Caching Kubernetes API responses
-- Parallel processing of independent resources
-- Skipping unchanged resources
-
-Benchmark results in test/performance/reconcile_bench.go
-```
-
----
-
-## 🚫 Common Mistakes
-
-### ❌ Wrong Type
-```
-update(api): add new endpoint     # Wrong: 'update' is not a valid type
-feat(api): add new endpoint       # Correct
-```
-
-### ❌ Missing Scope
-```
-feat: add new endpoint            # Wrong: missing scope
-feat(api): add new endpoint       # Correct
-```
-
-### ❌ Capitalized Subject
-```
-feat(api): Add new endpoint       # Wrong: capitalized
-feat(api): add new endpoint       # Correct
-```
-
-### ❌ Past Tense
-```
-feat(api): added new endpoint     # Wrong: past tense
-feat(api): add new endpoint       # Correct
-```
-
-### ❌ Period at End
-```
-feat(api): add new endpoint.      # Wrong: period at end
-feat(api): add new endpoint       # Correct
-```
-
----
-
-## 🤖 Tooling Integration
-
-### VS Code
-Install the "Conventional Commits" extension for commit message assistance.
-
-### IntelliJ IDEA
-Enable the Git Commit Template plugin and configure with our format.
-
-### Git Aliases
-```bash
-# Add to ~/.gitconfig
-[alias]
-    # Feature commit
-    cf = "!f() { git commit -m \"feat($1): $2\"; }; f"
-    # Fix commit
-    cx = "!f() { git commit -m \"fix($1): $2\"; }; f"
-    # Docs commit
-    cd = "!f() { git commit -m \"docs($1): $2\"; }; f"
-```
-
-Usage:
-```bash
-git cf operator "add retry logic"
-# Creates: feat(operator): add retry logic
-```
-
----
-
-## 📊 Benefits
-
-Following these conventions enables:
-
-1. **Automated Changelog Generation** - Tools can parse commits to generate changelogs
-2. **Semantic Versioning** - Determine version bumps based on commit types
-3. **Better History** - Easily understand what changed and why
-4. **CI/CD Integration** - Trigger different pipelines based on commit types
-5. **Team Communication** - Clear, consistent communication of changes
-
----
-
-## 🔗 Resources
+## Additional Resources
 
 - [Conventional Commits Specification](https://www.conventionalcommits.org/)
-- [Angular Commit Guidelines](https://github.com/angular/angular/blob/main/CONTRIBUTING.md#-commit-message-format)
-- [Commitlint Documentation](https://commitlint.js.org/)
+- [How to Write a Git Commit Message](https://chris.beams.io/posts/git-commit/)
+- [Angular Commit Guidelines](https://github.com/angular/angular/blob/main/CONTRIBUTING.md)
 - [Semantic Versioning](https://semver.org/)
 
 ---
 
-**Questions?** Reach out on our [Slack channel](https://gunj-operator.slack.com) or create a [discussion](https://github.com/gunjanjp/gunj-operator/discussions).
+For questions or clarifications, please refer to the main [CONTRIBUTING.md](../CONTRIBUTING.md) or contact the maintainers.

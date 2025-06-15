@@ -1,0 +1,355 @@
+# Example: Failover Configuration
+# This example shows how to configure automatic failover between clusters
+---
+# Failover Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: failover-config
+  namespace: gunj-multicluster
+data:
+  failover.yaml: |
+    # Enable automatic failover
+    enabled: true
+    
+    # Failover strategy: active-passive or active-active
+    strategy: active-passive
+    
+    # Maximum time a cluster can be unavailable before triggering failover
+    maxUnavailableTime: 5m
+    
+    # Priority groups define failover order
+    priorityGroups:
+    # Priority 1: Primary production clusters
+    - priority: 1
+      clusters:
+      - us-east-1
+      - eu-west-1
+      
+    # Priority 2: Secondary production clusters  
+    - priority: 2
+      clusters:
+      - ap-south-1
+      
+    # Priority 3: Disaster recovery clusters
+    - priority: 3
+      selector:
+        matchLabels:
+          tier: dr
+          
+    # Priority 4: Non-production clusters (last resort)
+    - priority: 4
+      selector:
+        matchLabels:
+          environment: staging
+---
+# Failover Policy for ObservabilityPlatforms
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: failover-policy
+  namespace: gunj-multicluster
+data:
+  policy.yaml: |
+    # Resources to include in failover
+    includedResources:
+    - group: observability.io
+      version: v1beta1
+      kind: ObservabilityPlatform
+      selector:
+        matchLabels:
+          failover: enabled
+    
+    # Resources to exclude from failover
+    excludedResources:
+    - namespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+    - labels:
+        failover.gunj.io/exclude: "true"
+    
+    # Pre-failover checks
+    preFailoverChecks:
+    - name: capacity-check
+      type: resource-capacity
+      parameters:
+        minAvailableCPU: 20%
+        minAvailableMemory: 20%
+        minAvailableStorage: 30%
+    
+    - name: connectivity-check
+      type: network-connectivity
+      parameters:
+        timeout: 30s
+        endpoints:
+        - prometheus:9090
+        - grafana:3000
+    
+    # Post-failover validation
+    postFailoverValidation:
+    - name: platform-ready
+      type: resource-status
+      parameters:
+        expectedPhase: Ready
+        timeout: 10m
+    
+    - name: endpoints-healthy
+      type: endpoint-health
+      parameters:
+        endpoints:
+        - prometheus
+        - grafana
+        - loki
+        - tempo
+---
+# Cluster DR Labels
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-dr-config
+  namespace: gunj-multicluster
+data:
+  dr-clusters.yaml: |
+    # Disaster Recovery cluster configurations
+    clusters:
+    - name: dr-us-west
+      labels:
+        tier: dr
+        region: us-west
+        capacity: high
+      reservedFor:
+      - us-east-1
+      
+    - name: dr-eu-central
+      labels:
+        tier: dr
+        region: eu-central
+        capacity: medium
+      reservedFor:
+      - eu-west-1
+      
+    - name: dr-ap-east
+      labels:
+        tier: dr
+        region: ap-east
+        capacity: medium
+      reservedFor:
+      - ap-south-1
+---
+# Failover Test Configuration
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: failover-test
+  namespace: gunj-multicluster
+spec:
+  template:
+    spec:
+      serviceAccountName: gunj-failover
+      containers:
+      - name: test
+        image: docker.io/gunjanjp/gunj-cli:v2.0.0
+        command:
+        - /gunj-cli
+        - failover
+        - test
+        - --scenario=primary-failure
+        - --dry-run=true
+        env:
+        - name: FAILOVER_CONFIG
+          value: /config/failover.yaml
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      volumes:
+      - name: config
+        configMap:
+          name: failover-config
+      restartPolicy: OnFailure
+---
+# Manual Failover Job Template
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: manual-failover-template
+  namespace: gunj-multicluster
+spec:
+  template:
+    spec:
+      serviceAccountName: gunj-failover
+      containers:
+      - name: failover
+        image: docker.io/gunjanjp/gunj-cli:v2.0.0
+        command:
+        - /gunj-cli
+        - failover
+        - trigger
+        - --from=$(FROM_CLUSTER)
+        - --to=$(TO_CLUSTER)
+        - --reason="$(REASON)"
+        env:
+        - name: FROM_CLUSTER
+          value: "us-east-1"  # Replace with actual source
+        - name: TO_CLUSTER
+          value: "eu-west-1"  # Replace with actual target
+        - name: REASON
+          value: "Planned maintenance"
+      restartPolicy: OnFailure
+---
+# ServiceAccount for failover operations
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gunj-failover
+  namespace: gunj-multicluster
+---
+# ClusterRole for failover operations
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gunj-failover
+rules:
+# Full access to ObservabilityPlatforms
+- apiGroups: ["observability.io"]
+  resources: ["observabilityplatforms", "observabilityplatforms/status"]
+  verbs: ["*"]
+# Read access to all resources for migration
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+# Write access to core resources
+- apiGroups: [""]
+  resources: ["configmaps", "secrets", "services", "persistentvolumeclaims"]
+  verbs: ["create", "update", "patch", "delete"]
+# Write access to workload resources
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+  verbs: ["create", "update", "patch", "delete"]
+# Events
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gunj-failover
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gunj-failover
+subjects:
+- kind: ServiceAccount
+  name: gunj-failover
+  namespace: gunj-multicluster
+---
+# Failover Status Monitor
+apiVersion: v1
+kind: Service
+metadata:
+  name: failover-monitor
+  namespace: gunj-multicluster
+spec:
+  ports:
+  - port: 8080
+    name: http
+  selector:
+    app: failover-monitor
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: failover-monitor
+  namespace: gunj-multicluster
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: failover-monitor
+  template:
+    metadata:
+      labels:
+        app: failover-monitor
+    spec:
+      serviceAccountName: gunj-failover
+      containers:
+      - name: monitor
+        image: docker.io/gunjanjp/gunj-operator:v2.0.0
+        command:
+        - /manager
+        - --failover-monitor
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 8081
+          name: metrics
+        env:
+        - name: FAILOVER_NAMESPACE
+          value: gunj-multicluster
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+---
+# PrometheusRule for Failover Alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: failover-alerts
+  namespace: gunj-multicluster
+  labels:
+    prometheus: kube-prometheus
+spec:
+  groups:
+  - name: failover
+    interval: 30s
+    rules:
+    - alert: ClusterUnavailable
+      expr: up{job="cluster-health"} == 0
+      for: 3m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Cluster {{ $labels.cluster }} is unavailable"
+        description: "Cluster {{ $labels.cluster }} has been unavailable for more than 3 minutes"
+    
+    - alert: FailoverTriggered
+      expr: increase(gunj_failover_triggered_total[5m]) > 0
+      labels:
+        severity: critical
+      annotations:
+        summary: "Failover triggered from {{ $labels.from_cluster }} to {{ $labels.to_cluster }}"
+        description: "Automatic failover has been triggered. Reason: {{ $labels.reason }}"
+    
+    - alert: FailoverFailed
+      expr: increase(gunj_failover_failed_total[5m]) > 0
+      labels:
+        severity: critical
+      annotations:
+        summary: "Failover failed from {{ $labels.from_cluster }} to {{ $labels.to_cluster }}"
+        description: "Failover operation failed. Error: {{ $labels.error }}"
+    
+    - alert: MultipleClusterFailures
+      expr: count(up{job="cluster-health"} == 0) > 1
+      labels:
+        severity: critical
+      annotations:
+        summary: "Multiple clusters are unavailable"
+        description: "{{ $value }} clusters are currently unavailable"

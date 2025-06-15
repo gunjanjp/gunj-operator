@@ -1,0 +1,113 @@
+apiVersion: backup.observability.io/v1alpha1
+kind: BackupSchedule
+metadata:
+  name: daily-backup
+  namespace: gunj-system
+spec:
+  # Cron schedule - Daily at 2 AM
+  schedule: "0 2 * * *"
+  
+  # Backup template
+  template:
+    type: Full
+    
+    # Target specific namespaces
+    includedNamespaces:
+      - monitoring
+      - production
+      - staging
+    
+    # Include all observability-related resources
+    includedResources:
+      - ObservabilityPlatform
+      - ConfigMap
+      - Secret
+      - PersistentVolumeClaim
+      - ServiceMonitor
+      - PrometheusRule
+      - Grafana
+      - GrafanaDashboard
+    
+    # Label selector for more granular selection
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/managed-by: gunj-operator
+    
+    # Storage configuration with GCS
+    storageLocation:
+      provider: GCS
+      bucket: gunj-operator-backups
+      prefix: scheduled/daily
+      region: us-central1
+      credential:
+        name: gcs-credentials
+        key: service-account.json
+      config:
+        storageClass: NEARLINE  # For data accessed once per month
+    
+    # Compression for storage efficiency
+    compressionConfig:
+      algorithm: gzip
+      level: 6  # Balanced compression
+    
+    # Volume snapshots
+    snapshotVolumes: true
+  
+  # Retention policy
+  retentionPolicy:
+    keepLast: 7          # Keep last 7 backups
+    keepDaily: 7         # Keep 7 daily backups
+    keepWeekly: 4        # Keep 4 weekly backups
+    keepMonthly: 6       # Keep 6 monthly backups
+    keepYearly: 2        # Keep 2 yearly backups
+  
+  # History limits
+  successfulBackupsHistoryLimit: 3
+  failedBackupsHistoryLimit: 3
+  
+  # Suspend schedule if needed
+  suspend: false
+
+---
+apiVersion: backup.observability.io/v1alpha1
+kind: BackupSchedule
+metadata:
+  name: hourly-incremental
+  namespace: gunj-system
+spec:
+  # Hourly incremental backups
+  schedule: "0 * * * *"
+  
+  template:
+    type: Incremental
+    
+    # Only backup critical namespaces
+    includedNamespaces:
+      - production
+    
+    # Focus on frequently changing resources
+    includedResources:
+      - ConfigMap
+      - Secret
+      - ObservabilityPlatform
+    
+    # Storage with local provider for fast access
+    storageLocation:
+      provider: Local
+      bucket: incremental
+      prefix: hourly
+    
+    # Light compression for speed
+    compressionConfig:
+      algorithm: gzip
+      level: 1  # Fast compression
+    
+    # No volume snapshots for incremental
+    snapshotVolumes: false
+  
+  # Keep only recent incremental backups
+  retentionPolicy:
+    keepLast: 24  # Keep last 24 hours
+  
+  successfulBackupsHistoryLimit: 5
+  failedBackupsHistoryLimit: 5

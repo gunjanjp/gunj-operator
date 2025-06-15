@@ -1,0 +1,248 @@
+# Chart Version Management Configuration Example
+# This file demonstrates all version management features
+
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: production
+  namespace: monitoring
+  annotations:
+    # Version management annotations
+    observability.io/auto-update: "true"
+    observability.io/update-schedule: "0 2 * * 0"  # Weekly at 2 AM on Sunday
+    observability.io/update-policy: "minor"        # auto-update minor versions only
+spec:
+  # Component configuration with version constraints
+  components:
+    prometheus:
+      enabled: true
+      # Version can be:
+      # - Specific version: "2.48.0"
+      # - Constraint: ">=2.45.0 <2.50.0"
+      # - Latest stable: "stable"
+      # - Pinned: will use pinned version if exists
+      version: ">=2.45.0 <2.50.0"
+      versionPolicy:
+        # Update policy for this component
+        autoUpdate: true
+        updateType: "minor"  # patch, minor, major
+        # Version constraints
+        constraints:
+          - ">=2.45.0"       # Minimum version
+          - "<3.0.0"         # Maximum version
+        # Exclude specific versions
+        excludeVersions:
+          - "2.46.0"         # Known issues
+          - "2.47.0-beta.*"  # No beta versions
+        
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      versionPolicy:
+        autoUpdate: false    # Manual updates only
+        requireApproval: true
+        approvers:
+          - "platform-team"
+          
+    loki:
+      enabled: true
+      version: "stable"      # Always use latest stable
+      versionPolicy:
+        autoUpdate: true
+        updateType: "patch"  # Conservative updates
+        
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      versionPolicy:
+        autoUpdate: true
+        updateType: "minor"
+        # Test updates before applying
+        testBeforeUpdate: true
+        testTimeout: "30m"
+  
+  # Global version management settings
+  versionManagement:
+    # Enable version management features
+    enabled: true
+    
+    # Notification settings
+    notifications:
+      enabled: true
+      channels:
+        - type: "webhook"
+          url: "https://hooks.slack.com/services/..."
+          events:
+            - "update-available"
+            - "update-completed"
+            - "update-failed"
+        - type: "email"
+          recipients:
+            - "platform-team@company.com"
+          events:
+            - "security-update"
+            - "breaking-change"
+    
+    # Update windows (when updates can be applied)
+    updateWindows:
+      - start: "02:00"
+        end: "06:00"
+        days: ["Sunday", "Wednesday"]
+        timezone: "UTC"
+    
+    # Rollback policy
+    rollback:
+      enabled: true
+      automatic: true
+      conditions:
+        - "health-check-failed"
+        - "startup-timeout"
+        - "crash-loop"
+      timeout: "10m"
+    
+    # Testing configuration
+    testing:
+      enabled: true
+      # Run tests before any update
+      preUpdateTests:
+        - name: "component-health"
+          timeout: "5m"
+        - name: "integration-test"
+          timeout: "15m"
+      # Run tests after update
+      postUpdateTests:
+        - name: "smoke-test"
+          timeout: "5m"
+        - name: "performance-baseline"
+          timeout: "20m"
+      # Fail update if tests fail
+      blockOnFailure: true
+    
+    # Version history settings
+    history:
+      enabled: true
+      retention: "90d"
+      storage:
+        type: "configmap"
+        name: "version-history"
+    
+    # Compatibility enforcement
+    compatibility:
+      enforceStrict: true
+      # Custom compatibility rules
+      customRules:
+        - component: "prometheus"
+          version: ">=2.45.0"
+          requires:
+            grafana: ">=9.0.0"
+            loki: ">=2.8.0"
+
+---
+# Version Pin Example
+apiVersion: observability.io/v1beta1
+kind: VersionPin
+metadata:
+  name: prometheus-pin
+  namespace: monitoring
+spec:
+  component: prometheus
+  version: "2.48.0"
+  reason: "Regression in 2.49.0 affecting our workload"
+  expiresAt: "2025-07-01T00:00:00Z"
+  pinnedBy: "john.doe@company.com"
+
+---
+# Version Override Example
+apiVersion: observability.io/v1beta1
+kind: VersionOverride
+metadata:
+  name: grafana-major-upgrade
+  namespace: monitoring
+spec:
+  component: grafana
+  fromVersion: "9.5.0"
+  toVersion: "10.2.0"
+  reason: "Approved major version upgrade with new features"
+  force: false
+  skipChecks:
+    - "breaking-changes"  # We've reviewed and accepted them
+  approvedBy: "platform-lead@company.com"
+  expiresAt: "2025-06-30T00:00:00Z"
+
+---
+# Update Schedule Example
+apiVersion: observability.io/v1beta1
+kind: UpdateSchedule
+metadata:
+  name: production-updates
+  namespace: monitoring
+spec:
+  platformRef:
+    name: production
+  schedule:
+    # Cron expression for update checks
+    checkSchedule: "0 */6 * * *"  # Every 6 hours
+    # Cron expression for applying updates
+    applySchedule: "0 2 * * 0"     # Sunday at 2 AM
+  policy:
+    # What types of updates to apply automatically
+    autoUpdate:
+      - "patch"    # Always apply patches
+      - "minor"    # Apply minor updates
+    # Require approval for
+    requireApproval:
+      - "major"    # Major version updates
+      - "security" # Security updates (for audit trail)
+  notifications:
+    beforeUpdate: "24h"
+    onSuccess: true
+    onFailure: true
+
+---
+# Compatibility Matrix ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: version-compatibility
+  namespace: monitoring
+data:
+  compatibility.json: |
+    {
+      "version": "1.0.0",
+      "rules": {
+        "prometheus": [
+          {
+            "version": ">=2.45.0",
+            "compatible": [
+              "grafana:>=9.0.0",
+              "loki:>=2.8.0",
+              "tempo:>=2.0.0"
+            ]
+          }
+        ],
+        "grafana": [
+          {
+            "version": ">=10.0.0",
+            "compatible": [
+              "prometheus:>=2.40.0",
+              "loki:>=2.8.0",
+              "tempo:>=2.0.0"
+            ],
+            "notes": "Grafana 10.x requires newer datasource plugins"
+          }
+        ]
+      },
+      "tested": [
+        {
+          "components": [
+            {"component": "prometheus", "version": "2.48.0"},
+            {"component": "grafana", "version": "10.2.0"},
+            {"component": "loki", "version": "2.9.0"},
+            {"component": "tempo", "version": "2.3.0"}
+          ],
+          "status": "verified",
+          "testedOn": "2025-06-01",
+          "notes": "Full integration test passed"
+        }
+      ]
+    }

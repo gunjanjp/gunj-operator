@@ -1,0 +1,139 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: canary-deployment-platform
+  namespace: monitoring
+spec:
+  # Enable service mesh with canary deployment configuration
+  serviceMesh:
+    enabled: true
+    type: auto
+    
+    # Traffic management for canary deployment
+    trafficManagement:
+      # Progressive traffic shifting
+      trafficSplitting:
+        enabled: true
+        splits:
+          - version: "v2.48.0" # Stable version
+            weight: 80
+          - version: "v2.49.0" # Canary version
+            weight: 20
+      
+      # Load balancing with session affinity
+      loadBalancing:
+        algorithm: ROUND_ROBIN
+        consistentHash:
+          httpHeaderName: "x-user-id" # Ensure users stick to same version
+      
+      # Conservative retry policy for canary
+      retry:
+        attempts: 2
+        perTryTimeout: "5s"
+        retryOn:
+          - "5xx"
+          - "reset"
+    
+    # Circuit breaker to protect canary
+    circuitBreaker:
+      enabled: true
+      consecutiveErrors: 3 # Lower threshold for canary
+      interval: "10s"
+      baseEjectionTime: "30s"
+      maxEjectionPercent: 10 # Only eject 10% max
+    
+    # Enhanced observability for canary analysis
+    observability:
+      metrics:
+        enabled: true
+        customMetrics:
+          - name: "canary_request_success_rate"
+            dimensions:
+              version: "canary"
+              component: "prometheus"
+            unit: "percent"
+          - name: "canary_latency_p99"
+            dimensions:
+              version: "canary"
+              component: "prometheus"
+            unit: "milliseconds"
+      
+      tracing:
+        enabled: true
+        samplingRate: 10.0 # 10% sampling for canary
+        customTags:
+          deployment: "canary"
+          version: "v2.49.0"
+      
+      accessLogging:
+        enabled: true
+        format: JSON
+        filters:
+          - type: "header"
+            condition: "exists"
+            value: "x-canary"
+  
+  # Components with canary versions
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0 # This will be overridden by traffic splitting
+      replicas: 3
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 50Gi
+      
+      # Canary-specific labels
+      externalLabels:
+        deployment_type: "canary"
+        canary_start: "2025-06-15"
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      
+      # Pre-configured dashboards for canary analysis
+      dataSources:
+        - name: "prometheus-stable"
+          type: prometheus
+          url: "http://prometheus-stable:9090"
+          isDefault: false
+        - name: "prometheus-canary"
+          type: prometheus
+          url: "http://prometheus-canary:9090"
+          isDefault: true
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 1
+      storage:
+        size: 50Gi
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 1
+      storage:
+        size: 25Gi
+  
+  # Global settings
+  global:
+    externalLabels:
+      cluster: "staging"
+      deployment_strategy: "canary"
+    logLevel: "debug" # More verbose for canary testing

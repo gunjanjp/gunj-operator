@@ -1,0 +1,55 @@
+# This is a valid ObservabilityPlatform configuration
+# The webhook will accept this configuration
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: valid-platform
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 2
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "2Gi"
+        limits:
+          cpu: "2"
+          memory: "4Gi"
+      storage:
+        size: 50Gi
+        retention: 30d
+      externalLabels:
+        cluster: production
+        region: us-east-1
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+      ingress:
+        enabled: true
+        host: grafana.example.com
+        tls:
+          enabled: true
+          secretName: grafana-tls
+  global:
+    logLevel: info
+    externalLabels:
+      environment: production
+  highAvailability:
+    enabled: true
+    antiAffinity: soft
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retention: 7
+    storageType: s3

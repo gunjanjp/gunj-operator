@@ -1,0 +1,57 @@
+# Basic TempoConfig with S3 Storage
+apiVersion: observability.io/v1beta1
+kind: TempoConfig
+metadata:
+  name: tempo-basic
+  namespace: observability
+spec:
+  targetPlatform:
+    name: production-platform
+  
+  # S3 Storage Configuration
+  storage:
+    trace:
+      backend: s3
+      s3:
+        bucket: tempo-traces-prod
+        region: us-east-1
+        accessKey: ${AWS_ACCESS_KEY_ID}
+        secretKey:
+          name: aws-credentials
+          key: secret-key
+      wal:
+        path: /var/tempo/wal
+      block:
+        version: v2
+        encoding: zstd
+        
+  # Basic Distributor Configuration
+  distributor:
+    receivers:
+      otlp:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+      jaeger:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:14250"
+          thriftHttp:
+            endpoint: "0.0.0.0:14268"
+    
+  # Ingester Configuration
+  ingester:
+    maxBlockDuration: "30m"
+    maxBlockBytes: "100MB"
+    
+  # Compactor Configuration
+  compactor:
+    blockRetention: "336h" # 14 days
+    compactionWindow: "1h"
+    
+  # Basic Server Configuration
+  server:
+    httpListenPort: 3200
+    logLevel: info
+    logFormat: logfmt

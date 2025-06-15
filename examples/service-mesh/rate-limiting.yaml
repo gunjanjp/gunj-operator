@@ -1,0 +1,197 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: rate-limiting-platform
+  namespace: monitoring
+spec:
+  # Enable service mesh with rate limiting
+  serviceMesh:
+    enabled: true
+    type: auto
+    
+    # Rate limiting configuration
+    rateLimiting:
+      enabled: true
+      
+      # Define rate limiting rules
+      rules:
+        # Global rate limit for all endpoints
+        - name: "global-limit"
+          limit:
+            requestsPerUnit: 1000
+            unit: MINUTE
+        
+        # Aggressive limit for metrics endpoint
+        - name: "metrics-endpoint-limit"
+          match:
+            paths:
+              - "/metrics"
+              - "/api/v1/query"
+              - "/api/v1/query_range"
+          limit:
+            requestsPerUnit: 100
+            unit: MINUTE
+        
+        # API rate limits by method
+        - name: "write-api-limit"
+          match:
+            methods:
+              - "POST"
+              - "PUT"
+              - "DELETE"
+            paths:
+              - "/api/v1/*"
+          limit:
+            requestsPerUnit: 50
+            unit: MINUTE
+        
+        # Header-based rate limiting
+        - name: "api-key-limit"
+          match:
+            headers:
+              x-api-key: "*"
+          limit:
+            requestsPerUnit: 5000
+            unit: HOUR
+        
+        # Premium tier rate limit
+        - name: "premium-tier-limit"
+          match:
+            headers:
+              x-tier: "premium"
+          limit:
+            requestsPerUnit: 10000
+            unit: HOUR
+      
+      # Global rate limit service configuration
+      globalRateLimit:
+        enabled: true
+        service: "ratelimit.gunj-system.svc.cluster.local:8081"
+        failureMode: ALLOW # Allow traffic if rate limit service is down
+    
+    # Traffic management
+    trafficManagement:
+      # Retry with backoff for rate limited requests
+      retry:
+        attempts: 3
+        perTryTimeout: "5s"
+        retryOn:
+          - "retriable-status-codes"
+        retryBackoff:
+          initialInterval: "2s"
+          maxInterval: "30s"
+          multiplier: 3.0
+      
+      timeout:
+        requestTimeout: "30s"
+        idleTimeout: "300s"
+    
+    # Enhanced observability for rate limiting
+    observability:
+      metrics:
+        enabled: true
+        customMetrics:
+          - name: "rate_limit_triggered_total"
+            dimensions:
+              rule: "rule_name"
+              action: "allowed|denied"
+          - name: "rate_limit_remaining"
+            dimensions:
+              rule: "rule_name"
+              client: "client_id"
+          - name: "rate_limit_reset_time"
+            dimensions:
+              rule: "rule_name"
+      
+      accessLogging:
+        enabled: true
+        format: JSON
+        filters:
+          - type: "header"
+            condition: "exists"
+            value: "x-ratelimit-limit"
+          - type: "status_code"
+            condition: "equals"
+            value: "429" # Too Many Requests
+  
+  # Components configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 2
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 50Gi
+      
+      # Rate limiting for Prometheus remote write
+      remoteWrite:
+        - url: "https://metrics-gateway.example.com/api/v1/write"
+          name: "rate-limited-endpoint"
+          queueConfig:
+            maxSamplesPerSend: 1000
+            maxShards: 5
+            minShards: 1
+          metadataConfig:
+            send: false # Reduce load
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      
+      ingress:
+        enabled: true
+        className: nginx
+        host: grafana.example.com
+        annotations:
+          # NGINX rate limiting annotations
+          nginx.ingress.kubernetes.io/limit-rps: "10"
+          nginx.ingress.kubernetes.io/limit-rpm: "300"
+          nginx.ingress.kubernetes.io/limit-connections: "20"
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 1
+      storage:
+        size: 50Gi
+      
+      # Loki-specific rate limits
+      limits:
+        ingestionRate: 4194304 # 4MB/s
+        ingestionBurstSize: 6291456 # 6MB
+        maxStreamsPerUser: 10000
+        maxEntriesLimitPerQuery: 5000
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 1
+      storage:
+        size: 25Gi
+      
+      # Tempo ingestion limits
+      limits:
+        maxBytesPerTrace: 5000000 # 5MB
+        maxTracesPerUser: 100000
+  
+  # Global settings
+  global:
+    externalLabels:
+      cluster: "production"
+      rate_limiting: "enabled"
+    logLevel: "info"

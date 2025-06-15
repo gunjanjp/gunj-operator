@@ -1,0 +1,193 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: cost-optimized-platform
+  namespace: monitoring
+spec:
+  # Cost optimization configuration
+  costOptimization:
+    enabled: true
+    resourceOptimization: true
+    autoScaling: true
+    
+    # Spot instances for non-critical components
+    spotInstances:
+      enabled: true
+      allowedComponents:
+        - grafana
+        - loki-querier
+        - tempo-querier
+      maxSpotPercentage: 70
+    
+    # Budget configuration
+    budget:
+      monthlyLimit: 1000.0  # $1000 USD per month
+      alertThresholds: [80, 90, 100]  # Alert at 80%, 90%, and 100%
+      alertChannels:
+        - type: email
+          target: platform-team@example.com
+        - type: slack
+          target: https://hooks.slack.com/services/xxx/yyy/zzz
+        - type: webhook
+          target: https://api.example.com/budget-alerts
+      actions:
+        - threshold: 80
+          action: alert
+        - threshold: 90
+          action: scaleDown
+        - threshold: 100
+          action: disableNonEssential
+    
+    # Cost allocation for chargeback
+    costAllocation:
+      enabled: true
+      department: Engineering
+      costCenter: CC-1234
+      team: Platform Team
+      tags:
+        environment: production
+        project: observability
+        owner: john.doe@example.com
+
+  # Component configuration with cost considerations
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 2  # HA but not excessive
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1"
+        limits:
+          memory: "8Gi"
+          cpu: "2"
+      storage:
+        size: 100Gi
+        storageClassName: standard  # Use standard storage instead of premium
+      retention: 30d
+      
+      # Autoscaling configuration
+      autoscaling:
+        enabled: true
+        minReplicas: 2
+        maxReplicas: 4
+        metrics:
+          - type: Resource
+            resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 70
+          - type: Resource
+            resource:
+              name: memory
+              target:
+                type: Utilization
+                averageUtilization: 80
+
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      
+      # Grafana can use spot instances
+      nodeSelector:
+        node.kubernetes.io/instance-type: spot
+      tolerations:
+        - key: spot
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      
+      # Autoscaling for Grafana
+      autoscaling:
+        enabled: true
+        minReplicas: 1
+        maxReplicas: 3
+        metrics:
+          - type: Resource
+            resource:
+              name: cpu
+              target:
+                type: Utilization
+                averageUtilization: 70
+
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 3
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 50Gi  # Smaller local storage since using S3
+        storageClassName: standard
+      
+      # Use S3 for cost-effective long-term storage
+      s3:
+        enabled: true
+        bucketName: my-loki-logs
+        region: us-east-1
+      
+      # Autoscaling configuration
+      autoscaling:
+        enabled: true
+        minReplicas: 3
+        maxReplicas: 10
+        metrics:
+          - type: Pods
+            pods:
+              metric:
+                name: loki_ingestion_rate
+              target:
+                type: AverageValue
+                averageValue: "100000"  # 100k logs/sec per pod
+
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      storage:
+        size: 30Gi  # Minimal local storage, use object storage
+        storageClassName: standard
+      
+      # Autoscaling for Tempo
+      autoscaling:
+        enabled: true
+        minReplicas: 2
+        maxReplicas: 6
+        metrics:
+          - type: Pods
+            pods:
+              metric:
+                name: tempo_ingestion_rate
+              target:
+                type: AverageValue
+                averageValue: "50000"  # 50k spans/sec per pod
+
+  # Global configuration
+  global:
+    externalLabels:
+      cluster: production
+      region: us-east-1
+    logLevel: info
+    storageClass: standard  # Use standard storage by default

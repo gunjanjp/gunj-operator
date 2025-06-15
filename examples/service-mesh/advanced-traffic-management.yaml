@@ -1,0 +1,148 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: advanced-traffic-platform
+  namespace: monitoring
+spec:
+  # Enable service mesh with advanced traffic management
+  serviceMesh:
+    enabled: true
+    type: auto # Auto-detect installed service mesh
+    
+    # mTLS configuration
+    mtls:
+      enabled: true
+      mode: PERMISSIVE # Allow both mTLS and plain text during migration
+    
+    # Advanced traffic management configuration
+    trafficManagement:
+      # Load balancing configuration
+      loadBalancing:
+        algorithm: LEAST_REQUEST # ROUND_ROBIN, LEAST_REQUEST, RANDOM, PASSTHROUGH
+        consistentHash:
+          httpCookie:
+            name: "session-cookie"
+            ttl: "3600s"
+      
+      # Retry configuration
+      retry:
+        attempts: 3
+        perTryTimeout: "10s"
+        retryOn:
+          - "5xx"
+          - "reset"
+          - "connect-failure"
+          - "refused-stream"
+        retryBackoff:
+          initialInterval: "1s"
+          maxInterval: "30s"
+          multiplier: 2.0
+      
+      # Timeout configuration
+      timeout:
+        requestTimeout: "30s"
+        idleTimeout: "300s"
+      
+      # Traffic splitting for A/B testing
+      trafficSplitting:
+        enabled: true
+        splits:
+          - version: "stable"
+            weight: 90
+          - version: "canary"
+            weight: 10
+    
+    # Circuit breaker configuration
+    circuitBreaker:
+      enabled: true
+      consecutiveErrors: 5
+      interval: "30s"
+      baseEjectionTime: "30s"
+      maxEjectionPercent: 50
+    
+    # Health check configuration
+    healthCheck:
+      enabled: true
+      interval: "10s"
+      timeout: "3s"
+      unhealthyThreshold: 2
+      healthyThreshold: 3
+  
+  # Component configuration with HA
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3 # HA configuration
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1"
+        limits:
+          memory: "8Gi"
+          cpu: "2"
+      storage:
+        size: 100Gi
+        storageClassName: fast-ssd
+      # Remote write for federation
+      remoteWrite:
+        - url: "https://prometheus-federation.example.com/api/v1/write"
+          name: "federation"
+          basicAuth:
+            username: "federated-user"
+            password: "federated-password"
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2 # HA configuration
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      ingress:
+        enabled: true
+        className: nginx
+        host: grafana.example.com
+        tls:
+          enabled: true
+          secretName: grafana-tls
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 3 # HA configuration
+      storage:
+        size: 200Gi
+        s3:
+          enabled: true
+          bucketName: "loki-logs"
+          region: "us-east-1"
+          endpoint: "s3.amazonaws.com"
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 2 # HA configuration
+      storage:
+        size: 100Gi
+  
+  # High availability settings
+  highAvailability:
+    enabled: true
+    antiAffinity: hard # Ensure pods are distributed across nodes
+  
+  # Global settings
+  global:
+    externalLabels:
+      cluster: "production"
+      environment: "prod"
+      region: "us-east-1"
+    logLevel: "info"
+    retentionPolicies:
+      metrics: "30d"
+      logs: "7d"
+      traces: "3d"

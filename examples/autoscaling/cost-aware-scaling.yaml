@@ -1,0 +1,305 @@
+# Cost-Aware Scaling Example
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-cost-optimized
+  namespace: monitoring
+spec:
+  autoscaling:
+    enabled: true
+    # Enable cost-aware scaling
+    costAware:
+      enabled: true
+      # Cloud provider for pricing
+      provider: "aws"  # aws, gcp, azure, onprem
+      region: "us-east-1"
+      
+      # Cost optimization settings
+      optimization:
+        # Maximum monthly budget per component
+        budgets:
+          prometheus: 500.00    # USD
+          grafana: 200.00      # USD
+          loki: 1000.00        # USD
+          tempo: 300.00        # USD
+        
+        # Optimization strategy
+        strategy: "balanced"  # balanced, aggressive, conservative
+        
+        # Spot instance usage
+        spotInstances:
+          enabled: true
+          maxSpotPercentage: 60  # Max 60% on spot
+          # Components safe for spot instances
+          allowedComponents: ["loki", "tempo"]
+        
+        # Time-based scaling
+        timeBasedScaling:
+          enabled: true
+          # Reduce resources during off-hours
+          offHours:
+            start: "20:00"
+            end: "06:00"
+            timezone: "America/New_York"
+            reductionPercent: 50
+          
+          # Weekend scaling
+          weekendScaling:
+            enabled: true
+            reductionPercent: 70
+    
+    # Combine with HPA for performance
+    hpa:
+      enabled: true
+    
+    # And VPA for right-sizing
+    vpa:
+      enabled: true
+  
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      
+      autoscaling:
+        costAware:
+          enabled: true
+          
+          # Cost constraints
+          maxHourlyCost: 0.70  # USD per hour
+          
+          # Instance type preferences
+          instancePreferences:
+          - family: "m5"       # Balanced
+            priority: 1
+          - family: "m5a"      # AMD, cheaper
+            priority: 2
+          - family: "t3"       # Burstable, cheapest
+            priority: 3
+          
+          # Resource optimization
+          resourceOptimization:
+            # Prefer vertical scaling until cost threshold
+            preferVerticalScaling: true
+            verticalScalingCostThreshold: 0.50  # USD/hour
+            
+            # Then switch to horizontal
+            horizontalScalingIncrement: 1
+            
+            # Resource efficiency targets
+            targetCPUEfficiency: 0.75      # 75% actual usage
+            targetMemoryEfficiency: 0.80    # 80% actual usage
+        
+        # Standard autoscaling with cost constraints
+        minReplicas: 1  # Can go to 1 for cost savings
+        maxReplicas: 10
+        targetCPUUtilizationPercentage: 75  # Higher target for cost
+        
+        # Time-based overrides
+        schedules:
+        - name: "business-hours"
+          schedule: "0 8 * * 1-5"  # 8 AM weekdays
+          minReplicas: 2
+          targetCPUUtilizationPercentage: 70
+        
+        - name: "off-hours"
+          schedule: "0 20 * * *"   # 8 PM daily
+          minReplicas: 1
+          targetCPUUtilizationPercentage: 85
+        
+        - name: "weekend"
+          schedule: "0 0 * * 0,6"  # Weekends
+          maxReplicas: 5  # Cap lower on weekends
+      
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "2Gi"
+        limits:
+          cpu: "2"
+          memory: "8Gi"
+      
+      # Storage optimization
+      storage:
+        class: "gp3"  # Cheaper than gp2
+        size: "100Gi"
+        # Lifecycle policies
+        lifecycle:
+          # Move old data to cheaper storage
+          transitions:
+          - days: 7
+            storageClass: "gp2"
+          - days: 30
+            storageClass: "sc1"  # Cold storage
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      
+      autoscaling:
+        costAware:
+          enabled: true
+          maxHourlyCost: 0.30
+          
+          # Use smallest instance that meets needs
+          instancePreferences:
+          - family: "t3"
+            priority: 1
+          - family: "t3a"
+            priority: 2
+        
+        # Aggressive scaling down when idle
+        minReplicas: 1
+        maxReplicas: 5
+        
+        # Scale based on actual usage
+        customMetrics:
+        - name: "active_users"
+          type: prometheus
+          query: |
+            sum(grafana_stat_totals_dashboard_viewers{namespace="${namespace}"})
+          targetValue: "25"  # 25 users per replica
+          metricType: AverageValue
+        
+        # Idle detection
+        idleScaling:
+          enabled: true
+          idleThresholdMinutes: 15
+          idleReplicas: 1
+      
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "1Gi"
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+      autoscaling:
+        costAware:
+          enabled: true
+          maxHourlyCost: 1.50
+          
+          # Can use spot instances
+          spotInstances:
+            enabled: true
+            onDemandBaseCapacity: 2  # Keep 2 on-demand
+          
+          # Optimize for throughput per dollar
+          optimization:
+            metric: "throughput_per_dollar"
+            target: 1000000  # 1M logs per dollar
+        
+        # Scale based on ingestion cost
+        customMetrics:
+        - name: "ingestion_cost_efficiency"
+          type: prometheus
+          query: |
+            sum(rate(loki_distributor_bytes_received_total[5m])) 
+            / 
+            sum(kube_pod_container_resource_requests{resource="cpu"})
+          targetValue: "1000000"  # Bytes per CPU
+          metricType: AverageValue
+        
+        minReplicas: 2
+        maxReplicas: 30
+      
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "1Gi"
+        limits:
+          cpu: "1"
+          memory: "4Gi"
+      
+      # Use S3 for cost-effective storage
+      storage:
+        type: "s3"
+        s3:
+          bucketName: "loki-storage-${cluster_name}"
+          region: "us-east-1"
+          storageClass: "INTELLIGENT_TIERING"
+        
+        # Compress old data
+        compression:
+          enabled: true
+          algorithm: "snappy"
+        
+        # Retention for cost
+        retention:
+          days: 7  # Short retention in hot storage
+          deleteOnCompact: true
+
+---
+# Cost monitoring dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cost-dashboard
+  namespace: monitoring
+data:
+  dashboard.json: |
+    {
+      "dashboard": {
+        "title": "Cost-Aware Scaling Dashboard",
+        "panels": [
+          {
+            "title": "Monthly Cost by Component",
+            "targets": [{
+              "expr": "sum by (component) (gunj_operator_component_monthly_cost_usd)"
+            }]
+          },
+          {
+            "title": "Cost Savings from Autoscaling",
+            "targets": [{
+              "expr": "sum(gunj_operator_cost_savings_monthly_usd)"
+            }]
+          },
+          {
+            "title": "Resource Efficiency",
+            "targets": [{
+              "expr": "gunj_operator_resource_efficiency_percent"
+            }]
+          },
+          {
+            "title": "Spot Instance Usage",
+            "targets": [{
+              "expr": "sum by (component) (kube_pod_labels{label_node_lifecycle=\"spot\"})"
+            }]
+          }
+        ]
+      }
+    }
+
+---
+# Alert for budget exceeded
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cost-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - name: cost
+    rules:
+    - alert: ComponentBudgetExceeded
+      expr: gunj_operator_component_monthly_cost_usd > 500
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Component {{ $labels.component }} exceeds budget"
+        description: "{{ $labels.component }} monthly cost is {{ $value }}USD"
+    
+    - alert: ClusterCostHigh
+      expr: sum(gunj_operator_component_monthly_cost_usd) > 2000
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Total cluster cost exceeds threshold"
+        description: "Total monthly cost is {{ $value }}USD"

@@ -1,0 +1,252 @@
+# Advanced HPA with Custom Metrics Example
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-advanced-hpa
+  namespace: monitoring
+spec:
+  autoscaling:
+    enabled: true
+    hpa:
+      enabled: true
+    # Custom metrics adapter endpoint
+    customMetricsAdapter: "http://prometheus-adapter.monitoring.svc:443"
+    
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      
+      autoscaling:
+        minReplicas: 2
+        maxReplicas: 15
+        
+        # Standard resource metrics
+        targetCPUUtilizationPercentage: 70
+        targetMemoryUtilizationPercentage: 80
+        
+        # Custom metrics from Prometheus
+        customMetrics:
+        - name: prometheus_tsdb_symbol_table_size_bytes
+          type: prometheus
+          query: |
+            avg(prometheus_tsdb_symbol_table_size_bytes{
+              namespace="${namespace}",
+              job="prometheus"
+            })
+          targetValue: "1073741824"  # 1GB
+          metricType: AverageValue
+        
+        - name: prometheus_rule_evaluation_duration_seconds
+          type: prometheus
+          query: |
+            histogram_quantile(0.99, 
+              sum(rate(prometheus_rule_evaluation_duration_seconds_bucket[5m])) by (le)
+            )
+          targetValue: "0.1"  # 100ms
+          metricType: AverageValue
+        
+        - name: prometheus_http_requests_per_second
+          type: prometheus
+          query: |
+            sum(rate(prometheus_http_requests_total{
+              namespace="${namespace}",
+              job="prometheus"
+            }[2m]))
+          targetValue: "1000"  # 1000 req/s per replica
+          metricType: AverageValue
+        
+        # External metrics (e.g., from cloud provider)
+        - name: sqs_queue_length
+          type: external
+          query: "aws_sqs_approximate_number_of_messages_visible"
+          targetValue: "100"
+          metricType: AverageValue
+        
+        # Advanced scaling behavior
+        behavior:
+          scaleUp:
+            stabilizationWindowSeconds: 30
+            selectPolicy: Max  # Use the metric requiring most replicas
+            policies:
+            - type: Percent
+              value: 200     # Can double replicas
+              periodSeconds: 60
+            - type: Pods
+              value: 8       # But max 8 pods at once
+              periodSeconds: 60
+          
+          scaleDown:
+            stabilizationWindowSeconds: 900  # 15 minutes
+            selectPolicy: Min  # Conservative scale down
+            policies:
+            - type: Percent
+              value: 25      # Remove max 25% of pods
+              periodSeconds: 300
+            - type: Pods
+              value: 2       # But at least 2 pods
+              periodSeconds: 300
+      
+      resources:
+        requests:
+          cpu: "1"
+          memory: "4Gi"
+        limits:
+          cpu: "4"
+          memory: "16Gi"
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+      autoscaling:
+        minReplicas: 3
+        maxReplicas: 30
+        
+        # Scale based on ingestion rate
+        customMetrics:
+        - name: loki_ingester_streams_created_total
+          type: prometheus
+          query: |
+            sum(rate(loki_ingester_streams_created_total{
+              namespace="${namespace}",
+              job="loki"
+            }[5m]))
+          targetValue: "1000"  # 1000 new streams per second per replica
+          metricType: AverageValue
+        
+        - name: loki_request_duration_seconds_p99
+          type: prometheus
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(loki_request_duration_seconds_bucket{
+                namespace="${namespace}",
+                job="loki",
+                route="/loki/api/v1/push"
+              }[5m])) by (le)
+            )
+          targetValue: "2"  # 2 second p99 latency
+          metricType: AverageValue
+        
+        - name: loki_ingester_memory_bytes
+          type: prometheus
+          query: |
+            avg(go_memstats_alloc_bytes{
+              namespace="${namespace}",
+              job="loki"
+            })
+          targetValue: "4294967296"  # 4GB per replica
+          metricType: AverageValue
+      
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "2Gi"
+        limits:
+          cpu: "2"
+          memory: "8Gi"
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      
+      autoscaling:
+        minReplicas: 2
+        maxReplicas: 10
+        
+        # Scale based on active users and dashboard queries
+        customMetrics:
+        - name: grafana_alerting_active_alerts
+          type: prometheus
+          query: |
+            sum(grafana_alerting_active_alerts{
+              namespace="${namespace}"
+            })
+          targetValue: "100"  # 100 active alerts per replica
+          metricType: AverageValue
+        
+        - name: grafana_api_dashboard_get_milliseconds_p95
+          type: prometheus
+          query: |
+            histogram_quantile(0.95,
+              sum(rate(grafana_api_dashboard_get_milliseconds_bucket[5m])) by (le)
+            )
+          targetValue: "500"  # 500ms p95 for dashboard loads
+          metricType: AverageValue
+        
+        - name: grafana_stat_totals_dashboard_viewers
+          type: prometheus
+          query: |
+            sum(grafana_stat_totals_dashboard_viewers{
+              namespace="${namespace}"
+            })
+          targetValue: "50"  # 50 concurrent viewers per replica
+          metricType: AverageValue
+      
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "512Mi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+
+---
+# ServiceMonitor to ensure metrics are available
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: platform-components
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/managed-by: gunj-operator
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+
+---
+# PrometheusAdapter configuration for custom metrics
+# This should be configured in the prometheus-adapter deployment
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-adapter-config
+  namespace: monitoring
+data:
+  config.yaml: |
+    rules:
+    - seriesQuery: 'prometheus_tsdb_symbol_table_size_bytes'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^(.*)"
+        as: "${1}"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'
+    
+    - seriesQuery: 'prometheus_http_requests_total'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+      name:
+        as: "prometheus_http_requests_per_second"
+      metricsQuery: 'sum(rate(<<.Series>>{<<.LabelMatchers>>}[2m]))'
+    
+    - seriesQuery: 'loki_ingester_streams_created_total'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+      name:
+        matches: "^(.*)"
+        as: "${1}"
+      metricsQuery: 'sum(rate(<<.Series>>{<<.LabelMatchers>>}[5m]))'
+    
+    externalRules:
+    - seriesQuery: 'aws_sqs_approximate_number_of_messages_visible'
+      name:
+        as: "sqs_queue_length"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'

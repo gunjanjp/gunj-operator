@@ -1,0 +1,102 @@
+# Basic ArgoCD Integration Example
+# This example demonstrates basic GitOps deployment using ArgoCD
+apiVersion: observability.io/v1beta1
+kind: GitOpsDeployment
+metadata:
+  name: observability-platform
+  namespace: monitoring
+spec:
+  # Git repository configuration
+  repository:
+    url: https://github.com/your-org/observability-configs.git
+    branch: main
+    path: /platforms/production
+    pollInterval: "1m"
+    # Reference to secret containing Git credentials (optional for public repos)
+    secretRef:
+      name: git-credentials
+      key: password
+
+  # Use ArgoCD as GitOps engine
+  gitOpsEngine: argocd
+  
+  # ArgoCD specific configuration
+  argocd:
+    applicationName: observability-platform
+    project: default
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    # Retry configuration
+    retryPolicy:
+      limit: 5
+      backoff:
+        duration: "5s"
+        factor: 2
+        maxDuration: "3m"
+
+  # Single environment configuration
+  environments:
+    - name: production
+      namespace: monitoring-prod
+      # Optional: Override branch/path for this environment
+      # branch: production
+      # path: /environments/production
+      
+      # Environment-specific values
+      values:
+        prometheus.replicas: "3"
+        grafana.persistence.size: "100Gi"
+        loki.retention: "30d"
+
+  # Enable automatic synchronization
+  autoSync: true
+  
+  # Sync policy
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    retry:
+      limit: 5
+      backoff:
+        duration: "5s"
+        factor: 2
+        maxDuration: "3m"
+
+  # Rollback configuration
+  rollback:
+    enabled: true
+    maxRetries: 3
+    failureThreshold: 50  # Rollback if 50% of resources fail
+    revisionHistoryLimit: 10
+
+  # Drift detection configuration
+  driftDetection:
+    enabled: true
+    checkInterval: "5m"
+    autoRemediate: false  # Manual remediation
+    ignoreFields:
+      - metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
+      - metadata.resourceVersion
+      - status
+
+---
+# Example Git credentials secret
+# Note: Create this manually with your actual credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-credentials
+  namespace: monitoring
+type: Opaque
+stringData:
+  username: your-username
+  password: your-token-or-password  # Use personal access token for GitHub
+  # For SSH authentication:
+  # ssh-privatekey: |
+  #   -----BEGIN OPENSSH PRIVATE KEY-----
+  #   ...
+  #   -----END OPENSSH PRIVATE KEY-----

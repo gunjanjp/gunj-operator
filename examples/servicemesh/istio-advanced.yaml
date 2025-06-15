@@ -1,0 +1,259 @@
+# Advanced Istio Service Mesh Configuration
+# This example demonstrates advanced Istio features including circuit breakers,
+# consistent hash load balancing, and multi-cluster configuration
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-istio-advanced
+  namespace: monitoring
+  annotations:
+    # Additional Istio-specific annotations
+    sidecar.istio.io/inject: "true"
+    sidecar.istio.io/rewriteAppHTTPProbers: "true"
+spec:
+  # Advanced Service Mesh Configuration
+  serviceMesh:
+    enabled: true
+    type: istio  # Explicitly specify Istio
+    
+    # Strict mTLS for zero-trust networking
+    mtls:
+      enabled: true
+      mode: STRICT
+    
+    # Advanced Traffic Management
+    trafficManagement:
+      # Sophisticated retry policy
+      retry:
+        attempts: 5
+        perTryTimeout: "15s"
+        retryOn: "5xx,reset,connect-failure,refused-stream,retriable-4xx,cancelled,deadline-exceeded,internal,resource-exhausted,unavailable"
+      
+      # Circuit breaker configuration
+      circuitBreaker:
+        consecutiveErrors: 5
+        interval: "30s"
+        baseEjectionTime: "30s"
+        maxEjectionPercent: 50
+        
+      # Timeout policies
+      timeout:
+        request: "60s"
+        idle: "300s"
+      
+      # Advanced load balancing with consistent hashing
+      loadBalancing:
+        algorithm: ROUND_ROBIN
+        consistentHash:
+          # Use HTTP header for session affinity
+          httpHeaderName: "x-session-id"
+          # Alternative: Cookie-based affinity
+          # httpCookie:
+          #   name: "session-cookie"
+          #   ttl: "3600s"
+    
+    # Full observability integration
+    observability:
+      metrics:
+        enabled: true
+        providers:
+          - prometheus
+          - telemetry_v2
+      tracing:
+        enabled: true
+        samplingRate: 0.1  # 10% sampling for better coverage
+      accessLogs:
+        enabled: true
+        format: JSON
+    
+    # Multi-cluster configuration
+    multiCluster:
+      enabled: true
+      clusterName: "primary-cluster"
+      network: "network1"
+      remoteClusters:
+        - name: "secondary-cluster"
+          endpoint: "https://secondary.example.com:6443"
+          network: "network2"
+        - name: "tertiary-cluster"
+          endpoint: "https://tertiary.example.com:6443"
+          network: "network3"
+  
+  # Components with Istio-optimized settings
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3  # HA configuration
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1"
+        limits:
+          memory: "8Gi"
+          cpu: "2"
+      storage:
+        size: 200Gi
+        storageClassName: fast-ssd
+      # Additional Istio scrape configs
+      additionalScrapeConfigs: |
+        - job_name: 'istio-mesh'
+          kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+              - istio-system
+          relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: istio-telemetry
+        
+        - job_name: 'envoy-stats'
+          metrics_path: /stats/prometheus
+          kubernetes_sd_configs:
+          - role: pod
+          relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            action: keep
+            regex: '.*-envoy-prom'
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      ingress:
+        enabled: true
+        host: grafana.example.com
+        annotations:
+          # Istio-specific ingress annotations
+          nginx.ingress.kubernetes.io/service-upstream: "true"
+      # Pre-configured Istio dashboards
+      dashboards:
+        - name: istio-mesh-dashboard
+          url: https://grafana.com/grafana/dashboards/7639
+        - name: istio-service-dashboard
+          url: https://grafana.com/grafana/dashboards/7636
+        - name: istio-workload-dashboard
+          url: https://grafana.com/grafana/dashboards/7630
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 3
+      storage:
+        size: 500Gi
+        storageClassName: fast-ssd
+      # Configure to collect Istio access logs
+      config:
+        ingester:
+          chunk_idle_period: 30m
+          chunk_block_size: 262144
+        schema_config:
+          configs:
+            - from: 2023-01-01
+              store: boltdb-shipper
+              object_store: filesystem
+              schema: v11
+              index:
+                prefix: loki_index_
+                period: 24h
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 3
+      storage:
+        size: 200Gi
+        storageClassName: fast-ssd
+      # Istio trace collection
+      receivers:
+        zipkin:
+          endpoint: "0.0.0.0:9411"
+        otlp:
+          protocols:
+            grpc:
+              endpoint: "0.0.0.0:4317"
+            http:
+              endpoint: "0.0.0.0:4318"
+
+  # Global settings
+  global:
+    # External labels for multi-cluster identification
+    externalLabels:
+      cluster: primary-cluster
+      region: us-east-1
+      environment: production
+      mesh: istio
+
+---
+# Additional Istio-specific resources that work with the operator
+
+# Gateway for external access (created by operator but can be customized)
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: observability-gateway
+  namespace: monitoring
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*.example.com"
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: observability-cert
+    hosts:
+    - "*.example.com"
+
+---
+# Telemetry configuration for enhanced metrics
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: observability-metrics
+  namespace: monitoring
+spec:
+  metrics:
+  - providers:
+    - name: prometheus
+    overrides:
+    - match:
+        metric: REQUEST_COUNT
+      tagOverrides:
+        method:
+          value: request.method | "unknown"
+        response_code:
+          value: response.code | 0
+    - match:
+        metric: REQUEST_DURATION
+      tagOverrides:
+        method:
+          value: request.method | "unknown"
+
+---
+# After applying this configuration:
+# 1. The operator creates Istio-specific resources (VirtualServices, DestinationRules, etc.)
+# 2. All components get Envoy sidecars with strict mTLS
+# 3. Advanced traffic management policies are applied
+# 4. Multi-cluster mesh is configured
+# 5. Enhanced observability with Istio telemetry
+#
+# Verify with:
+# istioctl analyze -n monitoring
+# istioctl proxy-config cluster deployment/prometheus-0 -n monitoring
+# kubectl exec -n monitoring deployment/prometheus-0 -c istio-proxy -- curl -s localhost:15000/clusters

@@ -1,0 +1,84 @@
+{
+  "platform": {
+    "title": "可観測性プラットフォーム",
+    "description": "Kubernetes向けエンタープライズグレード可観測性",
+    "create": "プラットフォームを作成",
+    "edit": "プラットフォームを編集",
+    "delete": "プラットフォームを削除",
+    "status": {
+      "ready": "準備完了",
+      "installing": "インストール中",
+      "failed": "失敗",
+      "upgrading": "アップグレード中",
+      "unknown": "不明"
+    },
+    "component_count": "{{count}}個のコンポーネント",
+    "messages": {
+      "created": "プラットフォーム「{{name}}」が正常に作成されました",
+      "updated": "プラットフォーム「{{name}}」が更新されました",
+      "deleted": "プラットフォーム「{{name}}」が削除されました",
+      "error": "プラットフォームの{{action}}に失敗しました: {{error}}"
+    },
+    "confirmDelete": "「{{name}}」を削除してもよろしいですか？この操作は取り消すことができず、関連するすべてのリソースが削除されます。"
+  },
+  "components": {
+    "prometheus": {
+      "name": "Prometheus",
+      "description": "メトリクス収集と保存"
+    },
+    "grafana": {
+      "name": "Grafana",
+      "description": "メトリクス可視化とダッシュボード"
+    },
+    "loki": {
+      "name": "Loki",
+      "description": "ログ集約システム"
+    },
+    "tempo": {
+      "name": "Tempo",
+      "description": "分散トレーシングバックエンド"
+    }
+  },
+  "common": {
+    "loading": "読み込み中...",
+    "error": "エラー",
+    "success": "成功",
+    "warning": "警告",
+    "info": "情報",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "retry": "再試行",
+    "refresh": "更新",
+    "search": "検索",
+    "filter": "フィルター",
+    "sort": "並べ替え",
+    "actions": "操作",
+    "yes": "はい",
+    "no": "いいえ"
+  },
+  "time": {
+    "just_now": "たった今",
+    "minute_ago": "1分前",
+    "minutes_ago": "{{count}}分前",
+    "hour_ago": "1時間前",
+    "hours_ago": "{{count}}時間前",
+    "day_ago": "1日前",
+    "days_ago": "{{count}}日前",
+    "duration": {
+      "seconds": "{{count}}秒",
+      "minutes": "{{count}}分",
+      "hours": "{{count}}時間",
+      "days": "{{count}}日"
+    }
+  },
+  "validation": {
+    "required": "このフィールドは必須です",
+    "minLength": "{{min}}文字以上で入力してください",
+    "maxLength": "{{max}}文字以内で入力してください",
+    "pattern": "無効な形式です",
+    "email": "無効なメールアドレスです",
+    "url": "無効なURLです",
+    "platformName": "小文字の英数字で、最大63文字まで"
+  }
+}

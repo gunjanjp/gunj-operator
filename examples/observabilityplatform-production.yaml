@@ -1,0 +1,286 @@
+# Example: Production-ready ObservabilityPlatform with all components
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: production-platform
+  namespace: observability
+spec:
+  # Component Configuration
+  components:
+    # Prometheus configuration for metrics
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3  # HA configuration
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1"
+        limits:
+          memory: "8Gi"
+          cpu: "2"
+      storage:
+        size: 100Gi
+        storageClassName: fast-ssd
+      retention: 30d
+      externalLabels:
+        cluster: production
+        region: us-east-1
+      remoteWrite:
+        - url: https://long-term-storage.example.com/api/v1/write
+          remoteTimeout: 30s
+      serviceMonitorSelector:
+        matchLabels:
+          prometheus: platform
+      additionalScrapeConfigs: |
+        - job_name: 'custom-app'
+          static_configs:
+            - targets: ['custom-app:8080']
+
+    # Grafana configuration for visualization
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      adminPassword: "changeme"  # Should use a secret reference in production
+      ingress:
+        enabled: true
+        className: nginx
+        host: grafana.observability.example.com
+        path: /
+        tls:
+          enabled: true
+          secretName: grafana-tls
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt-prod
+      dataSources:
+        - name: Prometheus
+          type: prometheus
+          url: http://prometheus:9090
+          access: proxy
+          isDefault: true
+        - name: Loki
+          type: loki
+          url: http://loki:3100
+          access: proxy
+        - name: Tempo
+          type: tempo
+          url: http://tempo:3100
+          access: proxy
+      dashboards:
+        - name: platform-overview
+          folder: Platform
+          configMap: platform-dashboards
+      plugins:
+        - grafana-piechart-panel
+        - grafana-clock-panel
+      smtp:
+        host: smtp.example.com
+        port: 587
+        user: notifications@example.com
+        from: grafana@example.com
+        tls: true
+
+    # Loki configuration for logs
+    loki:
+      enabled: true
+      version: v2.9.0
+      replicas: 3
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 200Gi
+        storageClassName: fast-ssd
+      s3:
+        enabled: true
+        bucketName: observability-loki-logs
+        region: us-east-1
+        endpoint: s3.amazonaws.com
+      retention: 168h  # 7 days
+      compactorEnabled: true
+
+    # Tempo configuration for traces
+    tempo:
+      enabled: true
+      version: v2.3.0
+      replicas: 2
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      storage:
+        size: 50Gi
+        storageClassName: fast-ssd
+      s3:
+        enabled: true
+        bucketName: observability-tempo-traces
+        region: us-east-1
+      retention: 336h  # 14 days
+      searchEnabled: true
+
+    # OpenTelemetry Collector configuration
+    openTelemetryCollector:
+      enabled: true
+      version: "0.92.0"
+      replicas: 3
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      config: |
+        receivers:
+          otlp:
+            protocols:
+              grpc:
+                endpoint: 0.0.0.0:4317
+              http:
+                endpoint: 0.0.0.0:4318
+        processors:
+          batch:
+            timeout: 1s
+            send_batch_size: 1024
+        exporters:
+          prometheus:
+            endpoint: "0.0.0.0:8889"
+          loki:
+            endpoint: http://loki:3100/loki/api/v1/push
+          otlp/tempo:
+            endpoint: tempo:4317
+            tls:
+              insecure: true
+        service:
+          pipelines:
+            metrics:
+              receivers: [otlp]
+              processors: [batch]
+              exporters: [prometheus]
+            logs:
+              receivers: [otlp]
+              processors: [batch]
+              exporters: [loki]
+            traces:
+              receivers: [otlp]
+              processors: [batch]
+              exporters: [otlp/tempo]
+
+  # Global configuration
+  global:
+    externalLabels:
+      environment: production
+      team: platform
+    logLevel: info
+    nodeSelector:
+      node-role.kubernetes.io/monitoring: "true"
+    tolerations:
+      - key: monitoring
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+    imagePullSecrets:
+      - name: regcred
+
+  # Alerting configuration
+  alerting:
+    alertmanager:
+      enabled: true
+      replicas: 3
+      config: |
+        global:
+          resolve_timeout: 5m
+          smtp_from: 'alertmanager@example.com'
+          smtp_smarthost: 'smtp.example.com:587'
+          smtp_auth_username: 'alertmanager@example.com'
+          smtp_require_tls: true
+        route:
+          group_by: ['alertname', 'cluster', 'service']
+          group_wait: 10s
+          group_interval: 10s
+          repeat_interval: 12h
+          receiver: 'team-notifications'
+          routes:
+            - match:
+                severity: critical
+              receiver: 'pagerduty-critical'
+        receivers:
+          - name: 'team-notifications'
+            email_configs:
+              - to: 'team@example.com'
+            slack_configs:
+              - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+                channel: '#alerts'
+          - name: 'pagerduty-critical'
+            pagerduty_configs:
+              - service_key: 'YOUR-PAGERDUTY-SERVICE-KEY'
+    rules:
+      - name: platform-alerts
+        groups:
+          - name: component_health
+            interval: 30s
+            rules:
+              - alert: ComponentDown
+                expr: up{job=~"prometheus|grafana|loki|tempo"} == 0
+                for: 5m
+                labels:
+                  severity: critical
+                annotations:
+                  summary: "Platform component {{ $labels.job }} is down"
+                  description: "{{ $labels.job }} has been down for more than 5 minutes."
+              - alert: HighMemoryUsage
+                expr: |
+                  (container_memory_usage_bytes{pod=~"prometheus-.*|grafana-.*|loki-.*|tempo-.*"} / 
+                   container_spec_memory_limit_bytes) > 0.9
+                for: 10m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "High memory usage for {{ $labels.pod }}"
+                  description: "Pod {{ $labels.pod }} memory usage is above 90%."
+
+  # High Availability configuration
+  highAvailability:
+    enabled: true
+    minReplicas: 3
+
+  # Backup configuration
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retentionDays: 7
+    destination:
+      type: s3
+      s3:
+        enabled: true
+        bucketName: observability-backups
+        region: us-east-1
+
+  # Security configuration
+  security:
+    tls:
+      enabled: true
+      autoTLS: true  # Use cert-manager
+    authentication:
+      type: oidc
+      oidc:
+        issuer: https://auth.example.com
+        clientId: observability-platform
+        redirectUrl: https://grafana.observability.example.com/login/generic_oauth
+    podSecurityPolicy: true
+    networkPolicy: true

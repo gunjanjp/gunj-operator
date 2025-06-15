@@ -1,121 +1,107 @@
-## 📋 Description
+<!-- 
+Thank you for contributing to Gunj Operator! 
 
-<!-- Provide a clear and concise description of the changes in this PR -->
+Please follow our contribution guidelines: https://github.com/gunjanjp/gunj-operator/blob/main/CONTRIBUTING.md
 
-### 🎯 Purpose
-<!-- Why is this change necessary? What problem does it solve? -->
+Select the appropriate template for your PR:
+- 🚀 Feature: ?template=feature.md
+- 🐛 Bug Fix: ?template=bug_fix.md
+- 📝 Documentation: ?template=documentation.md
+-->
 
-### 🔍 Changes Made
-<!-- List the key changes made in this PR -->
-- 
-- 
-- 
+## Description
 
-## 📦 Type of Change
+<!-- Provide a clear and concise description of your changes -->
+
+## Type of Change
 
 <!-- Please delete options that are not relevant -->
 
 - [ ] 🐛 Bug fix (non-breaking change which fixes an issue)
-- [ ] ✨ New feature (non-breaking change which adds functionality)
+- [ ] 🚀 New feature (non-breaking change which adds functionality)
 - [ ] 💥 Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] 📚 Documentation update
+- [ ] 📝 Documentation update
+- [ ] 🎨 Style update (formatting, renaming)
+- [ ] 🔨 Code refactoring (no functional changes)
 - [ ] ⚡ Performance improvement
-- [ ] ♻️ Code refactoring
-- [ ] 🔧 Configuration change
-- [ ] 🧪 Test improvement
-- [ ] 🎨 UI/UX improvement
+- [ ] ✅ Test update
+- [ ] 🤖 Build configuration update
+- [ ] 🔧 CI configuration update
+- [ ] ⬆️ Dependency update
+- [ ] 🔒 Security update
 
-## 🧪 Testing
+## Related Issues
 
-### Test Coverage
-<!-- Describe the tests that you ran to verify your changes -->
+<!-- Link to related issues -->
 
-- [ ] Unit tests pass (`make test-unit`)
-- [ ] Integration tests pass (`make test-integration`)
-- [ ] E2E tests pass (`make test-e2e`) - if applicable
-- [ ] Manual testing completed
+Closes #
+Related to #
 
-### Test Details
-<!-- Provide details about test scenarios covered -->
-```
-# Commands used for testing
-make test
-make lint
-make build
-```
+## Motivation and Context
 
-## ✅ Checklist
+<!-- Why is this change required? What problem does it solve? -->
+
+## How Has This Been Tested?
+
+<!-- Please describe the tests that you ran to verify your changes -->
+
+- [ ] Unit tests
+- [ ] Integration tests
+- [ ] E2E tests
+- [ ] Manual testing
+
+### Test Configuration:
+- Kubernetes version:
+- Go version:
+- Node.js version:
+- Operating System:
+
+## Screenshots (if applicable)
+
+<!-- Add screenshots to help explain your changes -->
+
+## Checklist
+
+<!-- Please check all that apply -->
 
 ### Code Quality
-- [ ] My code follows the [project style guidelines](../docs/development/coding-standards.md)
+- [ ] My code follows the project's style guidelines
 - [ ] I have performed a self-review of my own code
 - [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] My changes generate no new warnings
+- [ ] My changes generate no new warnings or errors
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing unit tests pass locally with my changes
 
 ### Documentation
-- [ ] I have updated the documentation accordingly
-- [ ] I have updated the CHANGELOG.md if applicable
-- [ ] I have updated API documentation if endpoints were modified
-- [ ] I have updated configuration examples if needed
+- [ ] I have made corresponding changes to the documentation
+- [ ] I have updated the README.md with details of changes (if applicable)
+- [ ] I have updated API documentation (if applicable)
+- [ ] I have added/updated code examples (if applicable)
+
+### Compliance
+- [ ] My commits follow the project's commit message conventions
+- [ ] I have signed-off my commits with DCO
+- [ ] I have updated relevant CHANGELOG entries
+- [ ] I have checked for breaking changes and documented them
+- [ ] I have updated version numbers if required
 
 ### Security
-- [ ] I have considered security implications of my changes
-- [ ] No sensitive data (passwords, tokens) are exposed in code or logs
-- [ ] Input validation is implemented where necessary
-- [ ] Dependencies are up to date and vulnerability-free
+- [ ] I have performed a security review of my own code
+- [ ] I have checked for potential security vulnerabilities
+- [ ] I have avoided hardcoding secrets or sensitive information
+- [ ] I have added necessary security tests
 
-### Performance
-- [ ] My changes do not negatively impact performance
-- [ ] I have benchmarked critical code paths if applicable
-- [ ] Resource usage (CPU/Memory) is within acceptable limits
+## Additional Notes
 
-## 🔗 Related Issues
-
-<!-- Link to related issues, PRs, or discussions -->
-
-Closes: #
-Relates to: #
-Blocks: #
-Blocked by: #
-
-## 📸 Screenshots/Recordings
-
-<!-- If applicable, add screenshots or recordings to help explain your changes -->
-
-<details>
-<summary>UI Changes</summary>
-
-<!-- Add before/after screenshots here -->
-
-</details>
-
-## 🚀 Deployment Notes
-
-<!-- Any special considerations for deployment? -->
-
-- [ ] Database migrations required
-- [ ] Configuration changes required
-- [ ] Breaking API changes
-- [ ] Requires coordination with other services
-
-### Rollback Plan
-<!-- How to rollback if issues are discovered post-deployment -->
-
-## 📝 Additional Notes
-
-<!-- Any additional information that reviewers should know -->
+<!-- Add any additional notes or context about the PR here -->
 
 ---
 
-**Reviewer Guidelines**: Please refer to our [PR Review Process](../docs/development/pr-review-process.md) for detailed review criteria.
-
-<!-- 
-PR Title Format: <type>(<scope>): <subject>
-Examples:
-- feat(operator): add prometheus configuration validation
-- fix(ui): resolve dashboard loading issue
-- docs(api): update REST API documentation
-- chore(deps): upgrade kubernetes client to v0.28.0
--->
+**PR Readiness Checklist for Reviewers:**
+- [ ] Code quality and style compliance
+- [ ] Test coverage and quality
+- [ ] Documentation completeness
+- [ ] Security considerations
+- [ ] Performance impact
+- [ ] Breaking changes handled appropriately
+- [ ] Commits are well-structured and follow conventions

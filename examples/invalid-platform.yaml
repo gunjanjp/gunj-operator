@@ -1,0 +1,49 @@
+# This is an INVALID ObservabilityPlatform configuration
+# The webhook will reject this with various validation errors
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: invalid-platform
+  namespace: monitoring
+spec:
+  components:
+    # ERROR: No components are enabled
+    prometheus:
+      enabled: false
+    grafana:
+      enabled: false
+    
+  # ERROR: Invalid configuration when components are enabled
+  # Uncomment below to see more validation errors:
+  
+  # components:
+  #   prometheus:
+  #     enabled: true
+  #     version: "invalid-version"  # ERROR: Invalid version format
+  #     replicas: 0                  # ERROR: Must be at least 1
+  #     resources:
+  #       requests:
+  #         cpu: "2"                 # ERROR: Requests exceed limits
+  #         memory: "4Gi"
+  #       limits:
+  #         cpu: "1"
+  #         memory: "2Gi"
+  #     storage:
+  #       size: "invalid"            # ERROR: Invalid quantity
+  #       retention: "30days"        # ERROR: Invalid retention format
+  #   loki:
+  #     enabled: true
+  #     storage:
+  #       s3:
+  #         enabled: true
+  #         # ERROR: Missing required bucketName and region
+  # global:
+  #   logLevel: "verbose"            # ERROR: Invalid log level
+  # highAvailability:
+  #   enabled: true
+  #   # ERROR: Components must have at least 2 replicas for HA
+  # backup:
+  #   enabled: true
+  #   schedule: "invalid cron"       # ERROR: Invalid cron expression
+  #   retention: 0                   # ERROR: Must be at least 1
+  #   storageType: "invalid"         # ERROR: Invalid storage type

@@ -1,0 +1,234 @@
+# Vertical Pod Autoscaling Example
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-with-vpa
+  namespace: monitoring
+spec:
+  autoscaling:
+    enabled: true
+    # Enable VPA for resource optimization
+    vpa:
+      enabled: true
+      # Update mode: "Off", "Initial", "Recreate", or "Auto"
+      updateMode: "Auto"
+      # Resource buffer percentage for safety
+      resourceBuffer: 15
+    # Can work together with HPA
+    hpa:
+      enabled: true
+    
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      
+      autoscaling:
+        # VPA configuration
+        vpa:
+          enabled: true
+          # Update policy
+          updatePolicy:
+            updateMode: "Auto"  # Automatically update pod resources
+          
+          # Resource policy
+          resourcePolicy:
+            containerPolicies:
+            - containerName: prometheus
+              mode: "Auto"
+              minAllowed:
+                cpu: "100m"
+                memory: "512Mi"
+              maxAllowed:
+                cpu: "4"
+                memory: "16Gi"
+              controlledResources: ["cpu", "memory"]
+          
+        # HPA works on different metrics (not CPU/memory)
+        minReplicas: 2
+        maxReplicas: 10
+        # Use custom metrics instead of CPU/memory
+        customMetrics:
+        - name: prometheus_tsdb_compactions_triggered_total
+          type: prometheus
+          query: |
+            rate(prometheus_tsdb_compactions_triggered_total[5m])
+          targetValue: "0.1"
+          metricType: AverageValue
+      
+      # Initial resources (VPA will optimize these)
+      resources:
+        requests:
+          cpu: "500m"      # VPA will adjust
+          memory: "2Gi"    # VPA will adjust
+        limits:
+          cpu: "2"         # VPA will adjust
+          memory: "8Gi"    # VPA will adjust
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      
+      autoscaling:
+        vpa:
+          enabled: true
+          updatePolicy:
+            updateMode: "Recreate"  # Restart pods for resource updates
+          
+          resourcePolicy:
+            containerPolicies:
+            - containerName: grafana
+              mode: "Auto"
+              minAllowed:
+                cpu: "50m"
+                memory: "128Mi"
+              maxAllowed:
+                cpu: "2"
+                memory: "4Gi"
+        
+        # Fixed replicas with VPA optimization
+        replicas: 3  # Fixed count, let VPA handle resources
+      
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "1Gi"
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+      autoscaling:
+        vpa:
+          enabled: true
+          updatePolicy:
+            updateMode: "Auto"
+            # Only update during low-traffic periods
+            evictionRequirements:
+            - resources: ["memory"]
+              changeRequirement: "TargetHigherThanRequests"
+          
+          resourcePolicy:
+            containerPolicies:
+            - containerName: loki
+              mode: "Auto"
+              minAllowed:
+                cpu: "100m"
+                memory: "512Mi"
+              maxAllowed:
+                cpu: "4"
+                memory: "32Gi"  # Loki can be memory intensive
+              # Only control memory, let CPU float
+              controlledResources: ["memory"]
+            
+            # Different policies for different containers
+            - containerName: promtail
+              mode: "Auto"
+              minAllowed:
+                cpu: "10m"
+                memory: "64Mi"
+              maxAllowed:
+                cpu: "200m"
+                memory: "256Mi"
+        
+        # Combine with HPA for best results
+        minReplicas: 2
+        maxReplicas: 20
+        targetCPUUtilizationPercentage: 70
+      
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "1Gi"
+        limits:
+          cpu: "1"
+          memory: "4Gi"
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      
+      autoscaling:
+        vpa:
+          enabled: true
+          updatePolicy:
+            updateMode: "Initial"  # Only set initial resources
+          
+          # Recommendation only mode
+          resourcePolicy:
+            containerPolicies:
+            - containerName: tempo
+              mode: "Off"  # Just recommend, don't apply
+              minAllowed:
+                cpu: "100m"
+                memory: "256Mi"
+              maxAllowed:
+                cpu: "2"
+                memory: "8Gi"
+      
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "512Mi"
+        limits:
+          cpu: "1"
+          memory: "2Gi"
+
+---
+# Example of what VPA creates (DO NOT APPLY DIRECTLY)
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: platform-with-vpa-prometheus-vpa
+  namespace: monitoring
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: prometheus-deployment
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: prometheus
+      mode: Auto
+      minAllowed:
+        cpu: 100m
+        memory: 512Mi
+      maxAllowed:
+        cpu: 4
+        memory: 16Gi
+      controlledResources: ["cpu", "memory"]
+status:
+  recommendation:
+    containerRecommendations:
+    - containerName: prometheus
+      target:
+        cpu: 750m
+        memory: 3Gi
+      lowerBound:
+        cpu: 500m
+        memory: 2Gi
+      upperBound:
+        cpu: 1
+        memory: 4Gi
+      uncappedTarget:
+        cpu: 750m
+        memory: 3Gi
+
+---
+# PodDisruptionBudget to control VPA updates
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prometheus-pdb
+  namespace: monitoring
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+      app.kubernetes.io/instance: platform-with-vpa

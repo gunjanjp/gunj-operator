@@ -1,0 +1,156 @@
+# Basic Flux Integration Example
+# This example demonstrates basic GitOps deployment using Flux v2
+apiVersion: observability.io/v1beta1
+kind: GitOpsDeployment
+metadata:
+  name: observability-platform-flux
+  namespace: monitoring
+spec:
+  # Git repository configuration
+  repository:
+    url: https://github.com/your-org/observability-configs.git
+    branch: main
+    path: /clusters/production
+    pollInterval: "1m"
+    # For private repositories
+    secretRef:
+      name: git-credentials
+
+  # Use Flux as GitOps engine
+  gitOpsEngine: flux
+  
+  # Flux specific configuration
+  flux:
+    kustomizationName: observability-platform
+    serviceAccount: default
+    interval: "5m"
+    timeout: "10m"
+    prune: true
+    # Health checks for Flux to monitor
+    healthChecks:
+      - type: Deployment
+        name: prometheus-server
+        namespace: monitoring-prod
+      - type: StatefulSet
+        name: prometheus-alertmanager
+        namespace: monitoring-prod
+      - type: Deployment
+        name: grafana
+        namespace: monitoring-prod
+
+  # Single environment configuration
+  environments:
+    - name: production
+      namespace: monitoring-prod
+      # Flux will use Kustomize for configuration management
+      values:
+        prometheus_replicas: "3"
+        grafana_storage_size: "100Gi"
+        loki_retention_days: "30"
+
+  # Enable automatic synchronization
+  autoSync: true
+  
+  # Sync policy for Flux
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+
+  # Rollback configuration
+  rollback:
+    enabled: true
+    maxRetries: 3
+    failureThreshold: 50
+    revisionHistoryLimit: 10
+
+  # Drift detection
+  driftDetection:
+    enabled: true
+    checkInterval: "10m"
+    autoRemediate: false
+    ignoreFields:
+      - metadata.annotations
+      - metadata.labels["kustomize.toolkit.fluxcd.io/revision"]
+      - status
+
+---
+# Example Flux GitRepository source
+# This will be created automatically by the operator
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: GitRepository
+metadata:
+  name: observability-configs
+  namespace: monitoring
+spec:
+  interval: 1m
+  ref:
+    branch: main
+  url: https://github.com/your-org/observability-configs.git
+  # For private repositories
+  secretRef:
+    name: git-credentials
+
+---
+# Example directory structure in Git repository
+# /clusters/production/
+# ├── kustomization.yaml
+# ├── namespace.yaml
+# ├── prometheus/
+# │   ├── kustomization.yaml
+# │   ├── deployment.yaml
+# │   ├── service.yaml
+# │   └── configmap.yaml
+# ├── grafana/
+# │   ├── kustomization.yaml
+# │   ├── deployment.yaml
+# │   ├── service.yaml
+# │   └── dashboards/
+# ├── loki/
+# │   ├── kustomization.yaml
+# │   ├── statefulset.yaml
+# │   └── service.yaml
+# └── tempo/
+#     ├── kustomization.yaml
+#     ├── deployment.yaml
+#     └── service.yaml
+
+---
+# Example Kustomization in Git repository
+# File: /clusters/production/kustomization.yaml
+# apiVersion: kustomize.config.k8s.io/v1beta1
+# kind: Kustomization
+# namespace: monitoring-prod
+# resources:
+#   - namespace.yaml
+#   - prometheus
+#   - grafana
+#   - loki
+#   - tempo
+# 
+# configMapGenerator:
+#   - name: observability-config
+#     literals:
+#       - prometheus_replicas=3
+#       - grafana_storage_size=100Gi
+#       - loki_retention_days=30
+# 
+# patchesStrategicMerge:
+#   - |-
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     metadata:
+#       name: prometheus-server
+#       namespace: monitoring-prod
+#     spec:
+#       replicas: 3
+# 
+# images:
+#   - name: prom/prometheus
+#     newTag: v2.48.0
+#   - name: grafana/grafana
+#     newTag: 10.2.0
+#   - name: grafana/loki
+#     newTag: 2.9.0
+#   - name: grafana/tempo
+#     newTag: 2.3.0

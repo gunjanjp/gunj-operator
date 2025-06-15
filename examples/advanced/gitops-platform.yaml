@@ -1,0 +1,275 @@
+# Advanced ObservabilityPlatform with GitOps Integration
+# This example shows integration with GitOps tools (ArgoCD/Flux)
+# and advanced automation features
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: gitops-integrated-platform
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/managed-by: argocd
+    gitops: "true"
+  annotations:
+    # ArgoCD annotations
+    argocd.argoproj.io/sync-wave: "10"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    # Flux annotations
+    fluxcd.io/automated: "true"
+    fluxcd.io/tag.prometheus: semver:~2.48
+    fluxcd.io/tag.grafana: semver:~10.2
+spec:
+  # GitOps configuration
+  gitops:
+    enabled: true
+    provider: argocd  # or flux
+    
+    # Automated synchronization
+    autoSync:
+      enabled: true
+      interval: 5m
+      prune: true
+      selfHeal: true
+      
+    # Configuration repository
+    configRepo:
+      url: https://github.com/company/observability-config
+      branch: main
+      path: /platforms/production
+      secretRef: git-credentials
+      
+    # Automated upgrades via GitOps
+    autoUpgrade:
+      enabled: true
+      schedule: "0 2 * * SUN"  # Sunday at 2 AM
+      strategy: blue-green
+      channels:
+        prometheus: stable
+        grafana: stable
+        loki: stable
+        tempo: experimental  # Testing newer versions
+        
+  # Advanced automation features
+  automation:
+    # Auto-scaling based on metrics
+    autoScaling:
+      enabled: true
+      
+      prometheus:
+        minReplicas: 3
+        maxReplicas: 10
+        metrics:
+        - type: cpu
+          targetAverageUtilization: 70
+        - type: memory
+          targetAverageUtilization: 80
+        - type: custom
+          metric:
+            name: prometheus_tsdb_symbol_table_size_bytes
+            targetValue: 1Gi
+            
+      grafana:
+        minReplicas: 2
+        maxReplicas: 5
+        metrics:
+        - type: cpu
+          targetAverageUtilization: 60
+        - type: custom
+          metric:
+            name: grafana_http_request_duration_seconds
+            targetValue: 100m  # 100ms p95
+            
+    # Automated remediation
+    remediation:
+      enabled: true
+      actions:
+      - trigger:
+          alert: PrometheusDown
+        action:
+          type: restart
+          maxAttempts: 3
+          
+      - trigger:
+          alert: GrafanaHighMemory
+        action:
+          type: scale
+          scaleUp: 1
+          
+      - trigger:
+          alert: LokiIngestionRateHigh
+        action:
+          type: custom
+          webhook: http://remediation-webhook.monitoring.svc/loki/rate-limit
+          
+  # Configuration as Code
+  configAsCode:
+    enabled: true
+    
+    # Prometheus configuration from Git
+    prometheus:
+      rulesRepo:
+        url: https://github.com/company/prometheus-rules
+        branch: main
+        path: /rules
+        syncInterval: 5m
+        
+      recordingRulesRepo:
+        url: https://github.com/company/recording-rules
+        branch: main
+        path: /recording
+        
+    # Grafana dashboards from Git
+    grafana:
+      dashboardsRepo:
+        url: https://github.com/company/grafana-dashboards
+        branch: main
+        path: /dashboards
+        folderAnnotation: grafana_folder
+        
+      datasourcesRepo:
+        url: https://github.com/company/grafana-datasources
+        branch: main
+        path: /datasources
+        
+    # Alerting configuration from Git
+    alerting:
+      rulesRepo:
+        url: https://github.com/company/alert-rules
+        branch: main
+        path: /alerts
+        validation:
+          enabled: true
+          webhook: http://alert-validator.monitoring.svc/validate
+          
+  # Progressive rollout configuration
+  rollout:
+    strategy: canary
+    canary:
+      steps:
+      - weight: 10
+        duration: 10m
+      - weight: 25
+        duration: 10m
+      - weight: 50
+        duration: 10m
+      - weight: 100
+        
+      analysis:
+        queries:
+        - name: error-rate
+          query: |
+            sum(rate(prometheus_http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(prometheus_http_requests_total[5m]))
+          threshold: 0.01  # 1% error rate
+          
+        - name: latency-p99
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(prometheus_http_request_duration_seconds_bucket[5m]))
+              by (le)
+            )
+          threshold: 0.5  # 500ms
+          
+  # Components with GitOps-specific configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0  # Managed by GitOps
+      replicas: 3
+      
+      # Configuration will be synced from Git
+      configOverride:
+        fromGit: true
+        
+    grafana:
+      enabled: true
+      version: "10.2.0"  # Managed by GitOps
+      replicas: 2
+      
+      # Provisioning from Git
+      provisioning:
+        dashboards:
+          fromGit: true
+          autoReload: true
+          
+        datasources:
+          fromGit: true
+          
+        plugins:
+          fromGit: true
+          pluginsRepo:
+            url: https://github.com/company/grafana-plugins
+            path: /plugins.yaml
+            
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      
+  # Observability for GitOps
+  monitoring:
+    gitopsMetrics:
+      enabled: true
+      # Expose metrics about sync status, drift, etc.
+      serviceMonitor:
+        enabled: true
+        interval: 30s
+        
+    # Alerts for GitOps issues
+    gitopsAlerts:
+    - name: GitOpsSyncFailed
+      expr: |
+        argocd_app_sync_total{sync_status="Failed"} > 0
+      for: 10m
+      severity: warning
+      
+    - name: GitOpsConfigDrift
+      expr: |
+        argocd_app_info{sync_status!="Synced"} > 0
+      for: 30m
+      severity: warning
+      
+  # Integration with CI/CD
+  cicd:
+    enabled: true
+    
+    # Webhook receivers for CI/CD events
+    webhooks:
+      github:
+        enabled: true
+        secret: github-webhook-secret
+        events:
+        - push
+        - pull_request
+        
+      jenkins:
+        enabled: true
+        endpoint: http://jenkins.ci.svc/generic-webhook-trigger
+        
+    # Automated testing on changes
+    testing:
+      enabled: true
+      preSync:
+        enabled: true
+        tests:
+        - name: config-validation
+          image: company/observability-validator:latest
+          command: ["/bin/validate", "--config", "/config"]
+          
+        - name: dry-run
+          image: company/observability-operator:latest
+          command: ["/bin/operator", "--dry-run", "--config", "/config"]
+          
+      postSync:
+        enabled: true
+        tests:
+        - name: smoke-tests
+          image: company/observability-tests:latest
+          command: ["/bin/smoke-test", "--platform", "$(PLATFORM_NAME)"]
+          
+        - name: integration-tests
+          image: company/observability-tests:latest
+          command: ["/bin/integration-test", "--platform", "$(PLATFORM_NAME)"]

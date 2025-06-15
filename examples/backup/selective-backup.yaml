@@ -1,0 +1,160 @@
+apiVersion: backup.observability.io/v1alpha1
+kind: Backup
+metadata:
+  name: selective-backup-1
+  namespace: gunj-system
+spec:
+  # Snapshot backup for specific components
+  type: Snapshot
+  
+  # Only backup monitoring namespace
+  includedNamespaces:
+    - monitoring
+  
+  # Exclude test and temporary resources
+  excludedNamespaces:
+    - monitoring-test
+    - monitoring-dev
+  
+  # Only backup Prometheus-related resources
+  includedResources:
+    - ObservabilityPlatform
+    - Prometheus
+    - ServiceMonitor
+    - PrometheusRule
+    - AlertmanagerConfig
+    - PersistentVolumeClaim
+  
+  # Exclude certain resource types
+  excludedResources:
+    - Pod
+    - ReplicaSet
+    - Job
+    - Event
+  
+  # Advanced label selector
+  labelSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: gunj-operator
+      component: prometheus
+    matchExpressions:
+      - key: environment
+        operator: In
+        values:
+          - production
+          - staging
+      - key: backup
+        operator: NotIn
+        values:
+          - exclude
+          - skip
+  
+  # S3 storage with specific configuration
+  storageLocation:
+    provider: S3
+    bucket: gunj-selective-backups
+    prefix: prometheus/snapshots
+    region: us-west-2
+    credential:
+      name: s3-credentials
+      key: access-key-id
+    config:
+      storageClass: GLACIER      # Long-term archival
+      serverSideEncryption: AES256
+      tagging: |
+        Component=Prometheus
+        BackupType=Selective
+        Compliance=Required
+  
+  # Moderate compression
+  compressionConfig:
+    algorithm: gzip
+    level: 5
+  
+  # Short TTL for snapshots
+  ttl: 168h  # 7 days
+  
+  # Only snapshot Prometheus volumes
+  snapshotVolumes: true
+  
+  # Don't include cluster resources
+  includeClusterResources: false
+  
+  # Validation hooks
+  hooks:
+    preBackup:
+      - name: check-prometheus-health
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Check if Prometheus is healthy before backup
+            kubectl get prometheus -n monitoring -o json | \
+              jq -r '.items[].status.conditions[] | select(.type=="Available") | .status' | \
+              grep -q "True" || exit 1
+        onError: Fail
+        timeout: 60s
+      
+      - name: flush-prometheus-wal
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Trigger Prometheus WAL flush
+            kubectl exec -n monitoring prometheus-0 -- \
+              wget -O- -q --post-data='' http://localhost:9090/api/v1/admin/tsdb/flush
+        onError: Continue
+        timeout: 120s
+
+---
+apiVersion: backup.observability.io/v1alpha1
+kind: Backup
+metadata:
+  name: grafana-only-backup
+  namespace: gunj-system
+spec:
+  # Backup only Grafana resources
+  type: Snapshot
+  
+  includedNamespaces:
+    - monitoring
+  
+  # Only Grafana-specific resources
+  includedResources:
+    - Grafana
+    - GrafanaDashboard
+    - GrafanaDataSource
+    - ConfigMap
+    - Secret
+  
+  # Grafana-specific label selector
+  labelSelector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+  
+  # Local storage for quick access
+  storageLocation:
+    provider: Local
+    bucket: grafana-backups
+    prefix: dashboards
+  
+  # Light compression
+  compressionConfig:
+    algorithm: gzip
+    level: 3
+  
+  ttl: 72h  # 3 days
+  
+  # Grafana-specific hooks
+  hooks:
+    preBackup:
+      - name: export-grafana-db
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Export Grafana database
+            kubectl exec -n monitoring grafana-0 -- \
+              grafana-cli admin export-dashboard-db
+        onError: Continue
+        timeout: 180s

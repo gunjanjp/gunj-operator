@@ -1,0 +1,132 @@
+apiVersion: observability.io/v1beta1
+kind: PrometheusConfig
+metadata:
+  name: rules-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus-config
+    app.kubernetes.io/instance: rules
+spec:
+  targetPlatform:
+    name: production-platform
+  
+  # Recording rules for pre-aggregation
+  recordingRules:
+  - name: node_metrics
+    interval: "30s"
+    rules:
+    - record: instance:node_cpu:rate5m
+      expr: |
+        100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+      labels:
+        aggregation: "instance"
+    
+    - record: instance:node_memory_usage:percentage
+      expr: |
+        100 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100)
+      labels:
+        aggregation: "instance"
+    
+    - record: instance:node_filesystem_usage:percentage
+      expr: |
+        100 - (node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs"} / 
+               node_filesystem_size_bytes{fstype!~"tmpfs|fuse.lxcfs"} * 100)
+      labels:
+        aggregation: "instance"
+  
+  - name: application_metrics
+    interval: "1m"
+    rules:
+    - record: job:http_requests:rate5m
+      expr: |
+        sum by (job, status_code) (rate(http_requests_total[5m]))
+    
+    - record: job:http_request_duration:p99
+      expr: |
+        histogram_quantile(0.99, 
+          sum by (job, le) (rate(http_request_duration_seconds_bucket[5m]))
+        )
+  
+  # Alerting rules
+  alertingRules:
+  - name: infrastructure_alerts
+    interval: "30s"
+    rules:
+    - alert: HighCPUUsage
+      expr: instance:node_cpu:rate5m > 80
+      for: "5m"
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "High CPU usage on {{ $labels.instance }}"
+        description: "CPU usage is above 80% (current value: {{ $value }}%)"
+        runbook_url: "https://runbooks.example.com/high-cpu"
+    
+    - alert: HighMemoryUsage
+      expr: instance:node_memory_usage:percentage > 90
+      for: "5m"
+      labels:
+        severity: critical
+        component: infrastructure
+      annotations:
+        summary: "High memory usage on {{ $labels.instance }}"
+        description: "Memory usage is above 90% (current value: {{ $value }}%)"
+        runbook_url: "https://runbooks.example.com/high-memory"
+    
+    - alert: DiskSpaceRunningOut
+      expr: instance:node_filesystem_usage:percentage > 85
+      for: "10m"
+      labels:
+        severity: warning
+        component: infrastructure
+      annotations:
+        summary: "Disk space running out on {{ $labels.instance }}"
+        description: "Disk usage on {{ $labels.device }} is above 85% (current: {{ $value }}%)"
+    
+    - alert: NodeDown
+      expr: up{job="node-exporter"} == 0
+      for: "2m"
+      labels:
+        severity: critical
+        component: infrastructure
+      annotations:
+        summary: "Node {{ $labels.instance }} is down"
+        description: "Node exporter on {{ $labels.instance }} has been down for more than 2 minutes"
+  
+  - name: application_alerts
+    interval: "1m"
+    rules:
+    - alert: HighErrorRate
+      expr: |
+        sum by (job) (rate(http_requests_total{status_code=~"5.."}[5m])) /
+        sum by (job) (rate(http_requests_total[5m])) > 0.05
+      for: "3m"
+      labels:
+        severity: critical
+        component: application
+      annotations:
+        summary: "High error rate for {{ $labels.job }}"
+        description: "Error rate is above 5% (current: {{ $value | humanizePercentage }})"
+    
+    - alert: HighLatency
+      expr: job:http_request_duration:p99 > 1
+      for: "5m"
+      keepFiringFor: "5m"
+      labels:
+        severity: warning
+        component: application
+      annotations:
+        summary: "High latency for {{ $labels.job }}"
+        description: "99th percentile latency is above 1s (current: {{ $value | humanizeDuration }})"
+    
+    - alert: PodCrashLooping
+      expr: |
+        rate(kube_pod_container_status_restarts_total[15m]) > 0.1
+      for: "5m"
+      labels:
+        severity: critical
+        component: application
+      annotations:
+        summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} is crash looping"
+        description: "Pod has restarted {{ $value | humanize }} times in the last 15 minutes"

@@ -1,0 +1,222 @@
+# Example: ArgoCD GitOps Integration
+# This example shows how to use ArgoCD for GitOps with the Gunj Operator
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-credentials
+  namespace: monitoring
+type: Opaque
+stringData:
+  username: git
+  password: ${GIT_TOKEN} # Replace with your Git token
+---
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: production-argocd
+  namespace: monitoring
+spec:
+  # GitOps configuration using ArgoCD
+  gitOps:
+    enabled: true
+    provider: argocd
+    
+    # Git repository configuration
+    repository:
+      url: https://github.com/example/observability-config.git
+      branch: main
+      path: environments/production
+      secretRef:
+        name: git-credentials
+        namespace: monitoring
+      interval: 5m
+    
+    # Sync policy
+    syncPolicy:
+      automated: true      # Enable automated sync
+      prune: true         # Remove resources not in Git
+      selfHeal: true      # Automatically fix drift
+      retry:
+        limit: 5
+        backoff:
+          duration: 30s
+          factor: 2
+          maxDuration: 5m
+      syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    
+    # Rollback configuration
+    rollback:
+      enabled: true
+      maxHistory: 10
+      triggers:
+      - type: healthCheck
+        threshold: "failed"
+        duration: 5m
+      - type: metric
+        threshold: "error_rate > 0.1"
+        duration: 10m
+    
+    # Drift detection
+    driftDetection:
+      enabled: true
+      interval: 10m
+      action: remediate  # or "notify"
+      ignoreFields:
+      - metadata.generation
+      - metadata.resourceVersion
+      - status
+  
+  # Platform components configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "2"
+        limits:
+          memory: "8Gi"
+          cpu: "4"
+      storage:
+        size: 100Gi
+        storageClassName: fast-ssd
+      retention: 30d
+      
+      # High availability configuration
+      highAvailability:
+        enabled: true
+        replicaExternalLabel: replica
+        
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      ingress:
+        enabled: true
+        className: nginx
+        host: grafana.example.com
+        tls:
+          enabled: true
+          secretName: grafana-tls
+      
+      # Grafana configuration
+      config:
+        auth:
+          generic_oauth:
+            enabled: true
+            client_id: grafana
+            scopes: openid profile email
+            auth_url: https://auth.example.com/oauth/authorize
+            token_url: https://auth.example.com/oauth/token
+            api_url: https://auth.example.com/oauth/userinfo
+        
+    loki:
+      enabled: true
+      version: "2.9.0"
+      storage:
+        size: 200Gi
+        storageClassName: fast-ssd
+      retention: 7d
+      
+      # S3 backend for long-term storage
+      s3:
+        enabled: true
+        bucketName: observability-loki-logs
+        region: us-east-1
+        endpoint: s3.amazonaws.com
+        
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      storage:
+        size: 50Gi
+        storageClassName: fast-ssd
+      retention: 72h
+      
+      # S3 backend for trace storage
+      s3:
+        enabled: true
+        bucketName: observability-tempo-traces
+        region: us-east-1
+
+  # Global configuration
+  global:
+    externalLabels:
+      cluster: production
+      region: us-east-1
+      environment: prod
+      team: platform
+    logLevel: info
+    
+  # Alerting configuration
+  alerting:
+    alertmanager:
+      enabled: true
+      replicas: 3
+      storage:
+        size: 10Gi
+      config:
+        global:
+          resolve_timeout: 5m
+          slack_api_url: ${SLACK_WEBHOOK_URL}
+        route:
+          group_by: ['alertname', 'cluster', 'service']
+          group_wait: 10s
+          group_interval: 10s
+          repeat_interval: 12h
+          receiver: 'platform-team'
+          routes:
+          - match:
+              severity: critical
+            receiver: 'pagerduty'
+            continue: true
+          - match:
+              severity: warning
+            receiver: 'slack'
+        receivers:
+        - name: 'platform-team'
+          slack_configs:
+          - channel: '#platform-alerts'
+            title: 'Platform Alert'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+        - name: 'pagerduty'
+          pagerduty_configs:
+          - service_key: ${PAGERDUTY_SERVICE_KEY}
+        - name: 'slack'
+          slack_configs:
+          - channel: '#platform-warnings'
+            send_resolved: true
+
+  # Resource monitoring
+  monitoring:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+    prometheusRule:
+      enabled: true
+      rules:
+      - alert: PlatformComponentDown
+        expr: up{job=~"prometheus|grafana|loki|tempo"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Platform component {{ $labels.job }} is down"
+          description: "{{ $labels.job }} has been down for more than 5 minutes"
+      
+      - alert: HighMemoryUsage
+        expr: |
+          (container_memory_usage_bytes / container_spec_memory_limit_bytes) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage in {{ $labels.pod }}"
+          description: "Pod {{ $labels.pod }} memory usage is above 90%"

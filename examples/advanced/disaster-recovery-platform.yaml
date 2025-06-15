@@ -1,0 +1,357 @@
+# Disaster Recovery ObservabilityPlatform
+# This example demonstrates comprehensive disaster recovery capabilities
+# including multi-region deployment, automated backups, and fast recovery
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: dr-enabled-platform
+  namespace: monitoring
+  labels:
+    disaster-recovery: enabled
+    region: primary
+    criticality: tier-0
+  annotations:
+    observability.io/rto: "15m"  # Recovery Time Objective
+    observability.io/rpo: "5m"   # Recovery Point Objective
+spec:
+  # Disaster Recovery Configuration
+  disasterRecovery:
+    enabled: true
+    
+    # Multi-region deployment
+    multiRegion:
+      enabled: true
+      regions:
+      - name: us-east-1
+        role: primary
+        endpoint: https://monitoring-use1.company.com
+        priority: 100
+      - name: us-west-2
+        role: standby
+        endpoint: https://monitoring-usw2.company.com
+        priority: 50
+      - name: eu-west-1
+        role: standby
+        endpoint: https://monitoring-euw1.company.com
+        priority: 30
+        
+      # Cross-region replication
+      replication:
+        enabled: true
+        mode: async  # or sync for stronger consistency
+        maxLag: 5m
+        compression: true
+        encryption: true
+        
+    # Automated backup configuration
+    backup:
+      enabled: true
+      
+      # Multiple backup destinations for redundancy
+      destinations:
+      - name: primary-s3
+        type: s3
+        priority: 100
+        config:
+          endpoint: s3.amazonaws.com
+          region: us-east-1
+          bucket: company-observability-backups-use1
+          storageClass: STANDARD_IA
+          serverSideEncryption: AES256
+          
+      - name: secondary-s3
+        type: s3
+        priority: 50
+        config:
+          endpoint: s3.amazonaws.com
+          region: us-west-2
+          bucket: company-observability-backups-usw2
+          storageClass: STANDARD_IA
+          
+      - name: archive-glacier
+        type: s3
+        priority: 10
+        config:
+          endpoint: s3.amazonaws.com
+          region: us-east-1
+          bucket: company-observability-archive
+          storageClass: DEEP_ARCHIVE
+          lifecycle:
+            transitionDays: 30
+            
+      # Backup schedules
+      schedules:
+      - name: continuous
+        type: incremental
+        interval: 5m  # RPO of 5 minutes
+        retention: 24h
+        components: ["prometheus", "loki"]
+        
+      - name: hourly
+        type: snapshot
+        schedule: "0 * * * *"
+        retention: 48h
+        components: ["all"]
+        
+      - name: daily
+        type: full
+        schedule: "0 2 * * *"
+        retention: 30d
+        components: ["all"]
+        
+      - name: weekly
+        type: full
+        schedule: "0 3 * * 0"
+        retention: 90d
+        components: ["all"]
+        
+      # Pre and post backup hooks
+      hooks:
+        preBackup:
+        - name: flush-wal
+          command: ["/bin/prometheus", "--flush-wal"]
+        - name: create-snapshot
+          command: ["/bin/create-snapshot.sh"]
+          
+        postBackup:
+        - name: validate-backup
+          command: ["/bin/validate-backup.sh"]
+        - name: notify-success
+          webhook: https://webhook.company.com/backup-success
+          
+    # Automated restore testing
+    restoreTesting:
+      enabled: true
+      schedule: "0 4 * * 0"  # Weekly on Sunday
+      targetNamespace: dr-test
+      validation:
+        enabled: true
+        queries:
+        - name: data-integrity
+          query: "up{job='prometheus'}"
+          expectedResult: 1
+        - name: retention-check
+          query: "prometheus_tsdb_lowest_timestamp"
+          minAge: 604800  # 7 days in seconds
+          
+  # High Availability Components Configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3  # Odd number for quorum
+      
+      # Enable high availability mode
+      highAvailability:
+        enabled: true
+        replicaExternalLabelName: __replica__
+        
+      # Resources for fast recovery
+      resources:
+        requests:
+          memory: "8Gi"
+          cpu: "2"
+        limits:
+          memory: "16Gi"
+          cpu: "4"
+          
+      # Fast storage for quick recovery
+      storage:
+        size: 500Gi
+        storageClassName: io2  # High IOPS for fast restore
+        
+        # WAL configuration for durability
+        wal:
+          compression: false  # Disable for faster writes
+          segmentSize: 128MB
+          retentionTime: 4h
+          
+      # Data replication
+      replication:
+        enabled: true
+        factor: 3
+        mode: chain  # or fan-out
+        
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 3
+      
+      # External database for HA
+      database:
+        type: postgres
+        host: postgres-ha.monitoring.svc.cluster.local
+        port: 5432
+        name: grafana
+        sslMode: require
+        
+        # Connection pooling for resilience
+        connectionPool:
+          maxOpen: 25
+          maxIdle: 25
+          maxLifetime: 5m
+          
+      # Session affinity for consistency
+      sessionAffinity:
+        enabled: true
+        type: clientIP
+        timeoutSeconds: 10800  # 3 hours
+        
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+      # Distributed mode for resilience
+      deploymentMode: distributed
+      
+      # Component replicas
+      distributor:
+        replicas: 3
+        autoscaling:
+          enabled: true
+          minReplicas: 3
+          maxReplicas: 10
+          
+      ingester:
+        replicas: 3
+        # Spread across zones
+        topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          
+      querier:
+        replicas: 3
+        
+      # Replication for durability
+      replication:
+        factor: 3
+        
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      
+      deploymentMode: distributed
+      
+      distributor:
+        replicas: 3
+        
+      ingester:
+        replicas: 3
+        
+  # Failover configuration
+  failover:
+    enabled: true
+    automatic: true
+    
+    # Health checks
+    healthChecks:
+      interval: 10s
+      timeout: 5s
+      failureThreshold: 3
+      
+    # Failover triggers
+    triggers:
+    - name: region-down
+      condition: "avg(up{region='primary'}) < 0.5"
+      action: failover-to-standby
+      
+    - name: data-loss
+      condition: "prometheus_tsdb_data_replay_duration_seconds > 300"
+      action: restore-from-backup
+      
+    # Failover procedures
+    procedures:
+      preFailover:
+      - name: freeze-writes
+        command: ["/bin/freeze-writes.sh"]
+      - name: final-backup
+        command: ["/bin/emergency-backup.sh"]
+        
+      postFailover:
+      - name: verify-data
+        command: ["/bin/verify-data-integrity.sh"]
+      - name: update-dns
+        command: ["/bin/update-dns.sh"]
+      - name: notify-teams
+        webhook: https://webhook.company.com/failover-complete
+        
+  # Recovery procedures
+  recovery:
+    # Point-in-time recovery
+    pointInTimeRecovery:
+      enabled: true
+      granularity: 5m
+      maxAge: 30d
+      
+    # Automated recovery workflows
+    workflows:
+    - name: component-failure
+      trigger: "up == 0"
+      steps:
+      - action: restart
+        maxAttempts: 3
+      - action: recreate
+        if: restart-failed
+      - action: restore-from-backup
+        if: recreate-failed
+        
+    - name: data-corruption
+      trigger: "prometheus_tsdb_corruptions_total > 0"
+      steps:
+      - action: isolate-replica
+      - action: restore-from-healthy-replica
+      - action: validate-data
+      - action: rejoin-cluster
+      
+  # Monitoring for DR
+  monitoring:
+    disasterRecoveryMetrics:
+      enabled: true
+      
+      # Key DR metrics
+      metrics:
+      - name: backup_last_success_timestamp
+        help: "Timestamp of last successful backup"
+      - name: replication_lag_seconds
+        help: "Replication lag in seconds"
+      - name: recovery_time_estimate_seconds
+        help: "Estimated recovery time"
+      - name: data_durability_score
+        help: "Data durability score (0-100)"
+        
+    # DR-specific alerts
+    alerts:
+    - name: BackupFailed
+      expr: "time() - backup_last_success_timestamp > 3600"
+      severity: critical
+      annotations:
+        summary: "Backup has not succeeded in the last hour"
+        
+    - name: ReplicationLagHigh
+      expr: "replication_lag_seconds > 300"
+      severity: warning
+      annotations:
+        summary: "Replication lag exceeds 5 minutes"
+        
+    - name: RPOViolation
+      expr: "time() - backup_last_success_timestamp > 300"
+      severity: critical
+      annotations:
+        summary: "RPO violation - no backup in 5 minutes"
+        
+  # Documentation and runbooks
+  documentation:
+    disasterRecovery:
+      runbooks:
+      - name: regional-failover
+        url: https://wiki.company.com/dr/regional-failover
+      - name: backup-restore
+        url: https://wiki.company.com/dr/backup-restore
+      - name: data-recovery
+        url: https://wiki.company.com/dr/data-recovery
+        
+    contacts:
+      primary: sre-oncall@company.com
+      escalation: platform-leads@company.com
+      executive: cto@company.com

@@ -1,0 +1,301 @@
+# Multi-Environment Flux Integration Example
+# This example demonstrates GitOps deployment across multiple environments using Flux v2
+apiVersion: observability.io/v1beta1
+kind: GitOpsDeployment
+metadata:
+  name: observability-platform-flux-multi
+  namespace: flux-system
+spec:
+  # Git repository configuration
+  repository:
+    url: https://github.com/your-org/observability-configs.git
+    branch: main
+    path: /clusters
+    pollInterval: "30s"
+    secretRef:
+      name: git-credentials
+    webhook:
+      enabled: true
+      secret: github-webhook-secret
+
+  # Use Flux as GitOps engine
+  gitOpsEngine: flux
+  
+  # Flux configuration
+  flux:
+    kustomizationName: observability-platform
+    serviceAccount: flux-reconciler
+    interval: "5m"
+    timeout: "10m"
+    prune: true
+
+  # Multiple environments
+  environments:
+    # Development environment
+    - name: development
+      namespace: monitoring-dev
+      path: /clusters/dev
+      # Flux-specific values (will be passed as post-build substitutions)
+      values:
+        cluster_name: "dev-cluster"
+        prometheus_replicas: "1"
+        prometheus_retention: "7d"
+        prometheus_storage: "50Gi"
+        grafana_replicas: "1"
+        grafana_storage: "10Gi"
+        loki_replicas: "1"
+        loki_retention: "3d"
+        environment_name: "development"
+      # Health checks
+      healthChecks:
+        - type: Deployment
+          name: prometheus-server
+          namespace: monitoring-dev
+        - type: Deployment
+          name: grafana
+          namespace: monitoring-dev
+
+    # Staging environment
+    - name: staging
+      namespace: monitoring-staging
+      path: /clusters/staging
+      values:
+        cluster_name: "staging-cluster"
+        prometheus_replicas: "2"
+        prometheus_retention: "14d"
+        prometheus_storage: "200Gi"
+        grafana_replicas: "2"
+        grafana_storage: "50Gi"
+        loki_replicas: "2"
+        loki_retention: "7d"
+        environment_name: "staging"
+      # Promotion from dev
+      promotionPolicy:
+        autoPromotion: true
+        fromEnvironment: development
+        approvalRequired: false
+        conditions:
+          - type: HealthCheck
+            status: "Healthy"
+          - type: TimeSinceDeployment
+            status: "Met"
+            reason: "1h"
+      # Staging-specific health checks
+      healthChecks:
+        - type: Deployment
+          name: prometheus-server
+          namespace: monitoring-staging
+        - type: StatefulSet
+          name: loki
+          namespace: monitoring-staging
+        - type: Deployment
+          name: grafana
+          namespace: monitoring-staging
+
+    # Production environment
+    - name: production
+      namespace: monitoring-prod
+      path: /clusters/production
+      values:
+        cluster_name: "prod-cluster"
+        prometheus_replicas: "3"
+        prometheus_retention: "30d"
+        prometheus_storage: "1Ti"
+        grafana_replicas: "3"
+        grafana_storage: "100Gi"
+        loki_replicas: "3"
+        loki_retention: "30d"
+        tempo_replicas: "3"
+        tempo_retention: "14d"
+        environment_name: "production"
+        high_availability: "true"
+      # Promotion from staging with approval
+      promotionPolicy:
+        autoPromotion: true
+        fromEnvironment: staging
+        approvalRequired: true
+        conditions:
+          - type: HealthCheck
+            status: "Healthy"
+          - type: TestsPassed
+            status: "Passed"
+          - type: MetricsThreshold
+            status: "Met"
+          - type: TimeSinceDeployment
+            status: "Met"
+            reason: "12h"
+      # Production health checks
+      healthChecks:
+        - type: Deployment
+          name: prometheus-server
+          namespace: monitoring-prod
+        - type: StatefulSet
+          name: prometheus-alertmanager
+          namespace: monitoring-prod
+        - type: StatefulSet
+          name: loki
+          namespace: monitoring-prod
+        - type: Deployment
+          name: grafana
+          namespace: monitoring-prod
+        - type: Deployment
+          name: tempo-distributor
+          namespace: monitoring-prod
+      # Production-specific hooks
+      preSync:
+        - name: create-backup
+          type: Job
+          config:
+            script: |
+              #!/bin/bash
+              echo "Creating backup before production deployment"
+              kubectl create job backup-$(date +%s) --from=cronjob/backup-job -n monitoring-prod
+      postSync:
+        - name: validate-deployment
+          type: Job
+          config:
+            script: |
+              #!/bin/bash
+              echo "Running post-deployment validation"
+              kubectl wait --for=condition=ready pod -l app=prometheus -n monitoring-prod --timeout=300s
+              kubectl wait --for=condition=ready pod -l app=grafana -n monitoring-prod --timeout=300s
+
+  # Sync configuration
+  autoSync: true
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+
+  # Advanced rollback with per-environment settings
+  rollback:
+    enabled: true
+    maxRetries: 3
+    failureThreshold: 50
+    revisionHistoryLimit: 20
+    # Environment-specific overrides
+    environmentOverrides:
+      production:
+        maxRetries: 5
+        failureThreshold: 20  # More sensitive in production
+
+  # Drift detection with environment-specific settings
+  driftDetection:
+    enabled: true
+    checkInterval: "5m"
+    autoRemediate: false
+    environmentOverrides:
+      development:
+        autoRemediate: true
+        checkInterval: "10m"
+      staging:
+        autoRemediate: true
+        checkInterval: "5m"
+      production:
+        autoRemediate: false  # Manual remediation in production
+        checkInterval: "1m"   # More frequent checks
+    ignoreFields:
+      - metadata.annotations["fluxcd.io/sync-checksum"]
+      - metadata.labels["kustomize.toolkit.fluxcd.io/name"]
+      - metadata.labels["kustomize.toolkit.fluxcd.io/namespace"]
+      - status
+
+---
+# Example Git repository structure for Flux multi-env
+# /clusters/
+# ├── base/                    # Base configurations
+# │   ├── kustomization.yaml
+# │   ├── prometheus/
+# │   ├── grafana/
+# │   ├── loki/
+# │   └── tempo/
+# ├── dev/                     # Development overrides
+# │   ├── kustomization.yaml
+# │   ├── values.yaml
+# │   └── patches/
+# ├── staging/                 # Staging overrides
+# │   ├── kustomization.yaml
+# │   ├── values.yaml
+# │   └── patches/
+# └── production/              # Production overrides
+#     ├── kustomization.yaml
+#     ├── values.yaml
+#     ├── patches/
+#     └── secrets/
+
+---
+# Example Flux Kustomization for production
+# File: /clusters/production/kustomization.yaml
+# apiVersion: kustomize.config.k8s.io/v1beta1
+# kind: Kustomization
+# namespace: monitoring-prod
+# 
+# resources:
+#   - ../base
+# 
+# patchesStrategicMerge:
+#   - patches/prometheus-ha.yaml
+#   - patches/grafana-ha.yaml
+#   - patches/loki-ha.yaml
+# 
+# configMapGenerator:
+#   - name: cluster-config
+#     literals:
+#       - CLUSTER_NAME=${cluster_name}
+#       - ENVIRONMENT=${environment_name}
+#       - PROMETHEUS_REPLICAS=${prometheus_replicas}
+#       - PROMETHEUS_RETENTION=${prometheus_retention}
+#       - PROMETHEUS_STORAGE=${prometheus_storage}
+# 
+# secretGenerator:
+#   - name: observability-secrets
+#     envs:
+#       - secrets/prod.env
+# 
+# replicas:
+#   - name: prometheus-server
+#     count: ${prometheus_replicas}
+#   - name: grafana
+#     count: ${grafana_replicas}
+#   - name: loki-distributor
+#     count: ${loki_replicas}
+# 
+# images:
+#   - name: prom/prometheus
+#     newTag: v2.48.0
+#   - name: grafana/grafana
+#     newTag: 10.2.0
+#   - name: grafana/loki
+#     newTag: 2.9.0
+#   - name: grafana/tempo
+#     newTag: 2.3.0
+
+---
+# ServiceAccount for Flux
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-reconciler
+  namespace: flux-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: flux-reconciler
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: flux-reconciler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: flux-reconciler
+subjects:
+  - kind: ServiceAccount
+    name: flux-reconciler
+    namespace: flux-system

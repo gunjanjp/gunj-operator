@@ -1,0 +1,85 @@
+{
+  "platform": {
+    "title": "Plataforma de Observabilidad",
+    "description": "Observabilidad de grado empresarial para Kubernetes",
+    "create": "Crear Plataforma",
+    "edit": "Editar Plataforma",
+    "delete": "Eliminar Plataforma",
+    "status": {
+      "ready": "Listo",
+      "installing": "Instalando",
+      "failed": "Fallido",
+      "upgrading": "Actualizando",
+      "unknown": "Desconocido"
+    },
+    "component_count_one": "{{count}} componente",
+    "component_count_other": "{{count}} componentes",
+    "messages": {
+      "created": "Plataforma '{{name}}' creada exitosamente",
+      "updated": "Plataforma '{{name}}' actualizada",
+      "deleted": "Plataforma '{{name}}' eliminada",
+      "error": "Error al {{action}} la plataforma: {{error}}"
+    },
+    "confirmDelete": "¿Está seguro de que desea eliminar '{{name}}'? Esta acción no se puede deshacer y eliminará todos los recursos asociados."
+  },
+  "components": {
+    "prometheus": {
+      "name": "Prometheus",
+      "description": "Recolección y almacenamiento de métricas"
+    },
+    "grafana": {
+      "name": "Grafana",
+      "description": "Visualización de métricas y paneles"
+    },
+    "loki": {
+      "name": "Loki",
+      "description": "Sistema de agregación de logs"
+    },
+    "tempo": {
+      "name": "Tempo",
+      "description": "Backend de rastreo distribuido"
+    }
+  },
+  "common": {
+    "loading": "Cargando...",
+    "error": "Error",
+    "success": "Éxito",
+    "warning": "Advertencia",
+    "info": "Información",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "retry": "Reintentar",
+    "refresh": "Actualizar",
+    "search": "Buscar",
+    "filter": "Filtrar",
+    "sort": "Ordenar",
+    "actions": "Acciones",
+    "yes": "Sí",
+    "no": "No"
+  },
+  "time": {
+    "just_now": "justo ahora",
+    "minute_ago": "hace 1 minuto",
+    "minutes_ago": "hace {{count}} minutos",
+    "hour_ago": "hace 1 hora",
+    "hours_ago": "hace {{count}} horas",
+    "day_ago": "hace 1 día",
+    "days_ago": "hace {{count}} días",
+    "duration": {
+      "seconds": "{{count}}s",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}h",
+      "days": "{{count}}d"
+    }
+  },
+  "validation": {
+    "required": "Este campo es obligatorio",
+    "minLength": "Debe tener al menos {{min}} caracteres",
+    "maxLength": "No debe exceder {{max}} caracteres",
+    "pattern": "Formato inválido",
+    "email": "Dirección de correo inválida",
+    "url": "URL inválida",
+    "platformName": "Debe ser alfanumérico en minúsculas, máximo 63 caracteres"
+  }
+}

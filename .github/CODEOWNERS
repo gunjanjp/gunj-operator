@@ -1,98 +1,95 @@
-# Code Owners for Gunj Operator
-# This file defines code ownership for automatic review requests
-# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# CODEOWNERS for Gunj Operator
+# 
+# This file defines who is responsible for code in this repository.
+# These owners will be automatically requested for review when someone
+# opens a pull request that modifies code that they own.
+#
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
 # Default owners for everything in the repo
-* @gunjanjp
+* @gunjanjp @maintainer-team
 
-# Operator Core
-/operator/ @gunjanjp @operator-team
-/controllers/ @gunjanjp @operator-team
-/api/v*/ @gunjanjp @operator-team @api-team
-/config/ @gunjanjp @operator-team @devops-team
+# Operator core
+/cmd/operator/ @operator-team @gunjanjp
+/controllers/ @operator-team @gunjanjp
+/internal/operator/ @operator-team
+/pkg/operator/ @operator-team
 
-# API Server
-/internal/api/ @gunjanjp @api-team
-/pkg/api/ @gunjanjp @api-team
-/internal/graphql/ @api-team
-/internal/handlers/ @api-team
-/internal/middleware/ @api-team @security-team
+# API server
+/cmd/api-server/ @api-team @backend-lead
+/internal/api/ @api-team @backend-lead
+/pkg/api/ @api-team
+/api/ @api-team @operator-team
 
 # UI/Frontend
-/ui/ @frontend-team
-/ui/src/components/ @frontend-team @ux-team
-/ui/src/api/ @frontend-team @api-team
-/ui/public/ @frontend-team @ux-team
+/ui/ @frontend-team @ui-lead
 *.tsx @frontend-team
 *.ts @frontend-team
-*.css @frontend-team @ux-team
+*.css @frontend-team
+*.scss @frontend-team
+
+# CRDs and Kubernetes APIs
+/api/v*/ @operator-team @api-team
+/config/crd/ @operator-team @gunjanjp
+
+# Webhooks
+/internal/webhooks/ @operator-team @security-team
+/config/webhook/ @operator-team @security-team
+
+# Helm charts
+/charts/ @devops-team @operator-team
+/deploy/ @devops-team
 
 # Documentation
 /docs/ @docs-team @gunjanjp
 *.md @docs-team
 /examples/ @docs-team @operator-team
-README.md @gunjanjp @docs-team
-CONTRIBUTING.md @gunjanjp @docs-team
 
-# CI/CD and DevOps
+# CI/CD
 /.github/ @devops-team @gunjanjp
-/.github/workflows/ @devops-team @gunjanjp
-/hack/ @devops-team @operator-team
-/build/ @devops-team
-/scripts/ @devops-team
-Dockerfile* @devops-team @security-team
-docker-compose*.yml @devops-team
-Makefile @devops-team @gunjanjp
-.dockerignore @devops-team
+/Dockerfile* @devops-team @security-team
+/Makefile @devops-team @gunjanjp
 
-# Testing
-/test/ @gunjanjp @operator-team
-/test/e2e/ @operator-team @qa-team
-/test/integration/ @operator-team @api-team
-/test/performance/ @operator-team @performance-team
-*_test.go @operator-team
-*.test.ts @frontend-team
-*.test.tsx @frontend-team
-
-# Security
+# Security-sensitive files
 /internal/auth/ @security-team @gunjanjp
-/internal/rbac/ @security-team @gunjanjp
-/pkg/security/ @security-team
+/internal/security/ @security-team @gunjanjp
 /config/rbac/ @security-team @operator-team
 SECURITY.md @security-team @gunjanjp
 
-# Helm Charts
-/charts/ @devops-team @operator-team
-/charts/*/templates/ @devops-team @operator-team
-/charts/*/values.yaml @devops-team @gunjanjp
+# Configuration
+*.yaml @operator-team
+*.yml @operator-team
+/config/ @operator-team @devops-team
 
 # Dependencies
-go.mod @gunjanjp @operator-team
-go.sum @gunjanjp @operator-team
-package.json @frontend-team @gunjanjp
-package-lock.json @frontend-team @gunjanjp
-yarn.lock @frontend-team @gunjanjp
+go.mod @backend-lead @gunjanjp
+go.sum @backend-lead @gunjanjp
+package.json @frontend-team @ui-lead
+package-lock.json @frontend-team @ui-lead
+yarn.lock @frontend-team @ui-lead
 
-# Legal and Compliance
-LICENSE @gunjanjp
-NOTICE @gunjanjp
-CODE_OF_CONDUCT.md @gunjanjp
-.github/SECURITY.md @security-team @gunjanjp
+# Tests
+*_test.go @operator-team @api-team
+/test/ @qa-team @operator-team
+*.test.ts @frontend-team @qa-team
+*.test.tsx @frontend-team @qa-team
 
-# Project Configuration
-.gitignore @gunjanjp
-.gitattributes @gunjanjp
-.editorconfig @gunjanjp
-PROJECT @gunjanjp
+# Build and tooling
+/hack/ @devops-team @operator-team
+/scripts/ @devops-team
+/.gitignore @gunjanjp
+/.editorconfig @gunjanjp
 
-# Special Files Requiring Multiple Approvals
-# Breaking changes to APIs need multiple teams
-/api/v*/types.go @gunjanjp @operator-team @api-team
-/pkg/api/openapi.yaml @api-team @docs-team @frontend-team
+# Project governance
+/CONTRIBUTING.md @gunjanjp
+/CODE_OF_CONDUCT.md @gunjanjp
+/LICENSE @gunjanjp
+/README.md @gunjanjp @docs-team
 
-# Performance critical paths
-/controllers/reconcile.go @operator-team @performance-team
-/internal/cache/ @operator-team @performance-team
+# Performance-critical code
+/internal/controllers/reconciler.go @operator-team @performance-team
+/internal/api/handlers/ @api-team @performance-team
 
-# Data migration and schema changes
-/internal/migrations/ @gunjanjp @operator-team @database-team
+# Special files that need careful review
+/internal/operator/manager.go @gunjanjp @operator-team
+/cmd/operator/main.go @gunjanjp @operator-team

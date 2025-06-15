@@ -1,0 +1,334 @@
+# Example: Flux GitOps Integration
+# This example shows how to use Flux for GitOps with the Gunj Operator
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-ssh-key
+  namespace: monitoring
+type: Opaque
+data:
+  # Generate with: ssh-keygen -t rsa -b 4096 -f deploy-key -N ""
+  # Add deploy-key.pub to your Git repository as a deploy key
+  ssh-privatekey: |
+    ${BASE64_ENCODED_PRIVATE_KEY}
+---
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: production-flux
+  namespace: monitoring
+spec:
+  # GitOps configuration using Flux
+  gitOps:
+    enabled: true
+    provider: flux
+    
+    # Git repository configuration
+    repository:
+      url: git@github.com:example/observability-config.git
+      branch: main
+      path: environments/production/manifests
+      secretRef:
+        name: git-ssh-key
+        namespace: monitoring
+      interval: 1m  # Flux default is 1m
+    
+    # Sync policy
+    syncPolicy:
+      automated: true      # Enable automated sync
+      prune: true         # Remove resources not in Git
+      selfHeal: true      # Automatically fix drift
+      retry:
+        limit: 3
+      syncOptions:
+      - ServerSideApply=true  # Use server-side apply
+    
+    # Promotion configuration for Flux
+    promotion:
+      strategy: progressive
+      environments:
+      - name: dev
+        namespace: monitoring-dev
+        branch: dev
+        autoPromote: true
+        promotionPolicy:
+          minReplicaAvailability: 80
+          healthCheckDuration: 10m
+          metricThresholds:
+          - name: error_rate
+            query: |
+              rate(http_requests_total{status=~"5.."}[5m]) / 
+              rate(http_requests_total[5m])
+            threshold: 0.01
+            operator: "<"
+      
+      - name: staging
+        namespace: monitoring-staging
+        branch: staging
+        autoPromote: true
+        promotionPolicy:
+          minReplicaAvailability: 90
+          healthCheckDuration: 30m
+          metricThresholds:
+          - name: error_rate
+            query: |
+              rate(http_requests_total{status=~"5.."}[5m]) / 
+              rate(http_requests_total[5m])
+            threshold: 0.005
+            operator: "<"
+          - name: p95_latency
+            query: |
+              histogram_quantile(0.95, 
+                rate(http_request_duration_seconds_bucket[5m]))
+            threshold: 0.5
+            operator: "<"
+      
+      - name: production
+        namespace: monitoring
+        branch: main
+        autoPromote: false  # Manual approval required
+        promotionPolicy:
+          minReplicaAvailability: 95
+          healthCheckDuration: 1h
+    
+    # Rollback configuration
+    rollback:
+      enabled: true
+      maxHistory: 20
+      triggers:
+      - type: healthCheck
+        threshold: "unhealthy"
+        duration: 5m
+      - type: error
+        threshold: "5%"
+        duration: 10m
+    
+    # Drift detection with Flux
+    driftDetection:
+      enabled: true
+      interval: 5m
+      action: remediate
+  
+  # Platform components configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "2"
+        limits:
+          memory: "8Gi"
+          cpu: "4"
+      storage:
+        size: 100Gi
+        storageClassName: fast-ssd
+      retention: 30d
+      
+      # External storage configuration
+      remoteWrite:
+      - url: https://prometheus-storage.example.com/api/v1/write
+        basicAuth:
+          username:
+            key: username
+            name: remote-write-auth
+          password:
+            key: password
+            name: remote-write-auth
+        writeRelabelConfigs:
+        - sourceLabels: [__name__]
+          regex: 'job:.*'
+          action: keep
+      
+      # Federation configuration
+      federationEndpoints:
+      - name: region-us-west
+        url: https://prometheus-us-west.example.com
+      - name: region-eu-central
+        url: https://prometheus-eu-central.example.com
+        
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      
+      # Persistence configuration
+      persistence:
+        enabled: true
+        size: 10Gi
+        storageClassName: fast-ssd
+      
+      # Database configuration (for HA)
+      database:
+        type: postgres
+        host: postgres.database.svc.cluster.local
+        name: grafana
+        user: grafana
+        passwordSecret:
+          name: grafana-db-credentials
+          key: password
+      
+      # Plugin configuration
+      plugins:
+      - grafana-piechart-panel
+      - grafana-worldmap-panel
+      - alexanderzobnin-zabbix-app
+      
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+      # Microservices mode for scalability
+      deploymentMode: microservices
+      
+      # Component configuration
+      ingester:
+        replicas: 3
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+      
+      querier:
+        replicas: 2
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+      
+      distributor:
+        replicas: 2
+        resources:
+          requests:
+            memory: "500Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      
+      # Storage configuration
+      storage:
+        boltdb:
+          size: 10Gi
+          storageClassName: fast-ssd
+        filesystem:
+          size: 100Gi
+          storageClassName: fast-ssd
+        
+      # S3 configuration for chunks
+      s3:
+        enabled: true
+        bucketName: observability-loki-chunks
+        region: us-east-1
+        
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      
+      # Microservices mode
+      deploymentMode: microservices
+      
+      # Component configuration
+      ingester:
+        replicas: 3
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+      
+      querier:
+        replicas: 2
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+      
+      compactor:
+        replicas: 1
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+      
+      # Storage configuration
+      storage:
+        trace:
+          backend: s3
+          s3:
+            bucket: observability-tempo-traces
+            region: us-east-1
+            endpoint: s3.amazonaws.com
+
+  # Global configuration
+  global:
+    externalLabels:
+      cluster: production-flux
+      region: us-east-1
+      environment: prod
+      gitops: flux
+    
+    # Image pull secrets
+    imagePullSecrets:
+    - name: registry-credentials
+    
+    # Node selection
+    nodeSelector:
+      workload-type: observability
+    
+    # Tolerations
+    tolerations:
+    - key: observability
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+
+  # Cost optimization settings
+  costOptimization:
+    enabled: true
+    
+    # Spot instance support
+    spotInstances:
+      enabled: true
+      maxPrice: 0.5
+      
+    # Auto-scaling configuration
+    autoScaling:
+      enabled: true
+      metrics:
+      - type: cpu
+        targetUtilization: 70
+      - type: memory
+        targetUtilization: 80
+      - type: custom
+        metric: prometheus_tsdb_symbol_table_size_bytes
+        targetValue: 1e9
+    
+    # Resource recommendations
+    recommendations:
+      enabled: true
+      interval: 24h

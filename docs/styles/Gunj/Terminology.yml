@@ -1,0 +1,13 @@
+extends: substitution
+message: Use '%s' instead of '%s' for consistency.
+level: warning
+ignorecase: true
+swap:
+  kubernetes: Kubernetes
+  k8s: Kubernetes
+  kube: Kubernetes
+  "op platform": ObservabilityPlatform
+  prometheus: Prometheus
+  grafana: Grafana
+  loki: Loki
+  tempo: Tempo

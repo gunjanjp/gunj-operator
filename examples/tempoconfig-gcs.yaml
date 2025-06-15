@@ -1,0 +1,161 @@
+# TempoConfig with Google Cloud Storage
+apiVersion: observability.io/v1beta1
+kind: TempoConfig
+metadata:
+  name: tempo-gcs
+  namespace: observability
+spec:
+  targetPlatform:
+    name: gcp-platform
+  
+  # GCS Storage Configuration
+  storage:
+    trace:
+      backend: gcs
+      gcs:
+        bucketName: tempo-traces-production
+        chunkBufferSize: 10485760 # 10MB
+        requestTimeout: "5s"
+        hedgeRequestsAt50P: true
+        hedgeRequestsUpTo: 3
+        serviceAccount:
+          # Option 1: Key file mounted as volume
+          keyFile: /var/secrets/gcs/key.json
+          # Option 2: Key from secret (uncomment to use)
+          # keySecret:
+          #   name: gcs-service-account
+          #   key: service-account.json
+      
+      # WAL Configuration
+      wal:
+        path: /var/tempo/wal
+        encoding: lz4
+        
+      # Block Configuration
+      block:
+        version: vParquet
+        encoding: snappy
+        
+      # Cache Configuration with Redis
+      cache:
+        backend: redis
+        redis:
+          endpoint: redis-master.cache.svc.cluster.local:6379
+          password:
+            name: redis-credentials
+            key: password
+          timeout: "200ms"
+          expiration: "1h"
+  
+  # Distributor Configuration
+  distributor:
+    receivers:
+      otlp:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+          cors:
+            allowedOrigins:
+              - "https://*.googleapis.com"
+              - "https://*.googleusercontent.com"
+      jaeger:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:14250"
+          thriftHttp:
+            endpoint: "0.0.0.0:14268"
+    
+    rateLimit:
+      rateLimiterBurstSize: 50000
+      strategy: global
+  
+  # Ingester Configuration
+  ingester:
+    maxBlockDuration: "1h"
+    maxBlockBytes: "500MB"
+    maxTracesPerBlock: 500000
+    concurrentFlushes: 16
+    
+  # Compactor Configuration
+  compactor:
+    blockRetention: "672h" # 28 days
+    compactionWindow: "1h"
+    compactionCycle: "5m"
+    maxCompactionObjects: 500000
+    maxBlockBytes: "50GB"
+    
+  # Querier Configuration
+  querier:
+    concurrentRequests: 10
+    search:
+      maxDuration: "672h" # 28 days
+      maxResultLimit: 5000
+      defaultResultLimit: 100
+      concurrentJobs: 500
+      targetBytesPerJob: "50MB"
+    
+  # Query Frontend Configuration
+  queryFrontend:
+    search:
+      concurrentJobs: 1000
+      targetBytesPerJob: "50MB"
+      queryTimeout: "3m"
+    traceById:
+      queryTimeout: "30s"
+      concurrentRequests: 1000
+  
+  # Metrics Generator for GCP
+  metrics:
+    enabled: true
+    processor:
+      serviceGraphs:
+        enabled: true
+        dimensions:
+          - service.name
+          - service.namespace
+          - cloud.provider
+          - cloud.region
+          - cloud.availability_zone
+      spanMetrics:
+        enabled: true
+        dimensions:
+          - service.name
+          - span.name
+          - span.kind
+          - gcp.project.id
+          - gcp.resource.type
+    storage:
+      remoteWrite:
+        - url: https://monitoring.googleapis.com/v1/projects/PROJECT_ID/timeSeries:write
+          headers:
+            Authorization: Bearer ${GCP_TOKEN}
+          remoteTimeout: "30s"
+    registry:
+      externalLabels:
+        cluster: gke-production
+        cloud_provider: gcp
+        region: us-central1
+  
+  # Server Configuration
+  server:
+    httpListenPort: 3200
+    grpcListenPort: 9095
+    logLevel: info
+    logFormat: json
+    
+  # Multi-tenant Overrides for GCP Projects
+  overrides:
+    defaults:
+      ingestionRateLimitBytes: 100000000 # 100MB
+      maxTracesPerUser: 5000000
+      blockRetention: "672h" # 28 days
+    perTenantOverrides:
+      project-prod:
+        ingestionRateLimitBytes: 500000000 # 500MB
+        maxTracesPerUser: 20000000
+        blockRetention: "1344h" # 56 days
+      project-dev:
+        ingestionRateLimitBytes: 50000000 # 50MB
+        maxTracesPerUser: 1000000
+        blockRetention: "168h" # 7 days

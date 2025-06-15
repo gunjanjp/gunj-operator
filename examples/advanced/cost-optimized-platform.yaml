@@ -1,0 +1,270 @@
+# Cost-Optimized ObservabilityPlatform
+# This example demonstrates various cost optimization strategies
+# including spot instances, data tiering, and resource optimization
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: cost-optimized-platform
+  namespace: monitoring
+  labels:
+    cost-optimization: enabled
+    budget: restricted
+  annotations:
+    observability.io/monthly-budget: "5000"
+    observability.io/cost-center: "engineering"
+spec:
+  # Cost optimization settings
+  costOptimization:
+    enabled: true
+    targetMonthlyCost: 5000  # USD
+    
+    # Automated cost controls
+    controls:
+      enforceResourceLimits: true
+      preventOverprovisioning: true
+      autoScaleDown: true
+      deleteUnusedPVCs: true
+      
+    # Resource recommendations
+    recommendations:
+      enabled: true
+      frequency: daily
+      autoApply: false  # Require manual approval
+      slackChannel: "#cost-alerts"
+      
+  # Use spot instances where possible
+  scheduling:
+    nodeSelector:
+      node.kubernetes.io/lifecycle: spot
+    tolerations:
+    - key: "spot"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+      
+    # Spread across availability zones for spot interruption resilience
+    topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 2  # Reduced for cost
+      
+      # Right-sized resources based on actual usage
+      resources:
+        requests:
+          memory: "2Gi"  # Reduced from 8Gi
+          cpu: "500m"    # Reduced from 2
+        limits:
+          memory: "4Gi"  # Reduced from 16Gi
+          cpu: "1"       # Reduced from 4
+          
+      # Storage optimization
+      storage:
+        size: 100Gi  # Reduced from 500Gi
+        storageClassName: gp3  # Cheaper than io2
+        
+        # Shorter retention for cost savings
+        retention: 15d  # Reduced from 90d
+        
+        # Enable compression
+        compression:
+          enabled: true
+          algorithm: snappy
+          
+      # Data tiering for long-term storage
+      dataLifecycle:
+        enabled: true
+        tiers:
+        - name: hot
+          retention: 24h
+          storage: local-ssd
+        - name: warm
+          retention: 7d
+          storage: standard-ssd
+          downsampling:
+            resolution: 5m
+        - name: cold
+          retention: 15d
+          storage: s3
+          downsampling:
+            resolution: 1h
+            
+      # Remote write to cheaper long-term storage
+      remoteWrite:
+        enabled: true
+        endpoint: https://thanos.company.com/api/v1/receive
+        queue:
+          # Batch for efficiency
+          maxSamplesPerSend: 10000
+          batchSendDeadline: 30s
+          
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 1  # Single instance with SQLite
+      
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+          
+      # Use SQLite instead of external database
+      database:
+        type: sqlite
+        
+      # Cache configuration for reduced load
+      caching:
+        enabled: true
+        dataSourceCache:
+          enabled: true
+          ttl: 300  # 5 minutes
+        renderingCache:
+          enabled: true
+          ttl: 3600  # 1 hour
+          
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+      # Single binary mode for cost savings
+      deploymentMode: single-binary
+      replicas: 2
+      
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+          
+      # Aggressive retention and limits
+      limits:
+        retentionPeriod: 72h  # 3 days only
+        ingestionRate: 10MB   # Reduced from 50MB
+        ingestionBurstSize: 20MB
+        maxStreamsPerUser: 1000  # Reduced from 10000
+        
+      # Storage optimization
+      storage:
+        filesystem:
+          enabled: true
+          size: 50Gi
+        # Archive to S3 after 24h
+        s3:
+          enabled: true
+          bucketName: company-loki-archive
+          endpoint: s3.amazonaws.com
+          storageClass: GLACIER  # Cheapest option
+          lifecycle:
+            enabled: true
+            rules:
+            - id: archive-old-logs
+              status: enabled
+              transitions:
+              - days: 1
+                storageClass: GLACIER
+                
+    tempo:
+      enabled: false  # Disabled to save costs
+      # Can be enabled on-demand
+      
+  # Automated resource optimization
+  resourceOptimization:
+    enabled: true
+    
+    # Vertical Pod Autoscaler
+    vpa:
+      enabled: true
+      updateMode: "Auto"
+      
+    # Cluster autoscaling integration
+    clusterAutoscaler:
+      enabled: true
+      scaleDownDelay: 10m
+      scaleDownUnneededTime: 10m
+      
+  # Cost allocation and chargeback
+  costAllocation:
+    enabled: true
+    
+    # Tag all resources
+    labels:
+      cost-center: engineering
+      project: platform
+      environment: production
+      
+    # Export cost data
+    export:
+      enabled: true
+      format: csv
+      destination:
+        type: s3
+        bucket: company-cost-reports
+        prefix: observability/
+      schedule: "0 0 * * *"  # Daily
+      
+    # Cost alerts
+    alerts:
+    - name: DailyCostExceeded
+      threshold: 200  # USD
+      action: email
+      recipients:
+      - platform-team@company.com
+      
+    - name: MonthlyCostProjection
+      threshold: 5000  # USD
+      action: slack
+      channel: "#platform-alerts"
+      
+  # On-demand scaling
+  onDemand:
+    enabled: true
+    # Scale up during business hours only
+    schedule:
+      scaleUp:
+        cron: "0 8 * * 1-5"  # Mon-Fri 8 AM
+        replicas:
+          prometheus: 3
+          grafana: 2
+      scaleDown:
+        cron: "0 20 * * 1-5"  # Mon-Fri 8 PM
+        replicas:
+          prometheus: 1
+          grafana: 1
+          
+  # Monitoring cost metrics
+  monitoring:
+    costMetrics:
+      enabled: true
+      # Expose cost metrics
+      metrics:
+      - name: observability_platform_hourly_cost
+        query: |
+          sum by (component) (
+            kube_pod_container_resource_requests{namespace="monitoring"} * 
+            on(node) group_left() kube_node_labels{label_node_kubernetes_io_instance_type!=""}
+          ) * 0.10  # Approximate cost per resource unit
+          
+      - name: observability_platform_storage_cost
+        query: |
+          sum by (component) (
+            kube_persistentvolumeclaim_resource_requests_storage_bytes{namespace="monitoring"} / 
+            1024 / 1024 / 1024
+          ) * 0.10  # Cost per GB
+          
+      # Cost dashboard
+      dashboards:
+        enabled: true
+        costDashboard:
+          uid: cost-optimization
+          title: "Observability Platform Costs"
+          refresh: 5m

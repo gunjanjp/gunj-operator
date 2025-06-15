@@ -1,0 +1,221 @@
+# Multi-Environment ArgoCD Integration Example
+# This example demonstrates GitOps deployment across dev, staging, and production environments
+apiVersion: observability.io/v1beta1
+kind: GitOpsDeployment
+metadata:
+  name: observability-platform-multi-env
+  namespace: monitoring
+spec:
+  # Git repository configuration
+  repository:
+    url: https://github.com/your-org/observability-configs.git
+    branch: main
+    path: /platforms
+    pollInterval: "1m"
+    secretRef:
+      name: git-credentials
+    # Webhook configuration for real-time updates
+    webhook:
+      enabled: true
+      secret: webhook-secret
+
+  # Use ArgoCD as GitOps engine
+  gitOpsEngine: argocd
+  
+  # ArgoCD configuration
+  argocd:
+    applicationName: observability-platform
+    project: observability
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - ApplyOutOfSyncOnly=true
+    # Ignore certain differences
+    ignoreDifferences:
+      - group: apps
+        kind: Deployment
+        jsonPointers:
+          - /spec/replicas
+      - group: autoscaling
+        kind: HorizontalPodAutoscaler
+        jsonPointers:
+          - /spec/minReplicas
+          - /spec/maxReplicas
+
+  # Multiple environments with promotion flow
+  environments:
+    # Development environment
+    - name: development
+      namespace: monitoring-dev
+      branch: develop
+      path: /environments/dev
+      values:
+        prometheus.replicas: "1"
+        prometheus.retention: "7d"
+        grafana.persistence.size: "10Gi"
+        loki.retention: "3d"
+        global.environment: "development"
+      # No promotion policy - this is the source environment
+
+    # Staging environment
+    - name: staging
+      namespace: monitoring-staging
+      branch: main
+      path: /environments/staging
+      values:
+        prometheus.replicas: "2"
+        prometheus.retention: "14d"
+        grafana.persistence.size: "50Gi"
+        loki.retention: "7d"
+        global.environment: "staging"
+      # Promotion from development
+      promotionPolicy:
+        autoPromotion: true
+        fromEnvironment: development
+        approvalRequired: false
+        conditions:
+          - type: HealthCheck
+            status: "Healthy"
+          - type: TimeSinceDeployment
+            status: "Met"
+            reason: "2h"  # Wait 2 hours after dev deployment
+
+    # Production environment
+    - name: production
+      namespace: monitoring-prod
+      branch: main
+      path: /environments/production
+      values:
+        prometheus.replicas: "3"
+        prometheus.retention: "30d"
+        prometheus.storageSize: "500Gi"
+        grafana.persistence.size: "100Gi"
+        grafana.replicas: "2"
+        loki.retention: "30d"
+        loki.replicas: "3"
+        tempo.retention: "14d"
+        global.environment: "production"
+      # Promotion from staging with manual approval
+      promotionPolicy:
+        autoPromotion: true
+        fromEnvironment: staging
+        approvalRequired: true
+        conditions:
+          - type: HealthCheck
+            status: "Healthy"
+          - type: TestsPassed
+            status: "Passed"
+          - type: MetricsThreshold
+            status: "Met"
+          - type: TimeSinceDeployment
+            status: "Met"
+            reason: "24h"  # Wait 24 hours after staging deployment
+      # Pre and post sync hooks
+      preSync:
+        - name: backup-data
+          type: Job
+          config:
+            image: "backup-tool:latest"
+            command: ["backup.sh", "pre-deployment"]
+      postSync:
+        - name: run-smoke-tests
+          type: Job
+          config:
+            image: "test-runner:latest"
+            command: ["test.sh", "smoke-tests"]
+        - name: notify-slack
+          type: Webhook
+          config:
+            url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+            method: "POST"
+            body: |
+              {
+                "text": "Production deployment completed for observability platform"
+              }
+
+  # Enable automatic synchronization
+  autoSync: true
+  
+  # Advanced sync policy
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - Validate=true
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - RespectIgnoreDifferences=true
+
+  # Enhanced rollback configuration
+  rollback:
+    enabled: true
+    maxRetries: 3
+    failureThreshold: 30  # Rollback if 30% of resources fail
+    revisionHistoryLimit: 20
+    # Different settings per environment
+    environmentOverrides:
+      production:
+        maxRetries: 5
+        failureThreshold: 10  # More sensitive in production
+
+  # Drift detection with auto-remediation for non-prod
+  driftDetection:
+    enabled: true
+    checkInterval: "5m"
+    autoRemediate: false  # Global setting
+    environmentOverrides:
+      development:
+        autoRemediate: true  # Auto-fix drift in dev
+      staging:
+        autoRemediate: true  # Auto-fix drift in staging
+    ignoreFields:
+      - metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
+      - metadata.resourceVersion
+      - metadata.generation
+      - metadata.uid
+      - status
+      - spec.replicas  # Ignore replica changes (handled by HPA)
+
+---
+# Service account for ArgoCD to manage resources
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argocd-manager
+  namespace: argocd
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argocd-manager
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argocd-manager
+subjects:
+  - kind: ServiceAccount
+    name: argocd-manager
+    namespace: argocd
+
+---
+# Example webhook secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: webhook-secret
+  namespace: monitoring
+type: Opaque
+stringData:
+  secret: "your-webhook-validation-secret"

@@ -63,3 +63,9 @@ spec:
     externalLabels:
       cluster: dev-cluster
       environment: development
+    logLevel: info
+  
+  # Security Configuration
+  security:
+    networkPolicy: true
+    podSecurityPolicy: false

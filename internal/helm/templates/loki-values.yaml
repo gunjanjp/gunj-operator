@@ -1,0 +1,231 @@
+# Default Helm values for Loki deployment
+# These values can be overridden by the operator based on the ObservabilityPlatform spec
+
+# Deployment mode
+deploymentMode: SingleBinary
+
+# Single binary configuration
+singleBinary:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  
+  # Pod annotations
+  podAnnotations: {}
+  
+  # Node selector
+  nodeSelector: {}
+  
+  # Tolerations
+  tolerations: []
+  
+  # Affinity
+  affinity: {}
+  
+  # Persistence
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""
+
+# Loki configuration
+loki:
+  # Auth
+  auth_enabled: false
+  
+  # Server
+  server:
+    http_listen_port: 3100
+    grpc_listen_port: 9095
+    log_level: info
+  
+  # Common config
+  common:
+    path_prefix: /loki
+    storage:
+      filesystem:
+        chunks_directory: /loki/chunks
+        rules_directory: /loki/rules
+    replication_factor: 1
+  
+  # Query range config
+  query_range:
+    results_cache:
+      cache:
+        embedded_cache:
+          enabled: true
+          max_size_mb: 100
+  
+  # Schema config
+  schema_config:
+    configs:
+      - from: 2020-05-15
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+  
+  # Ruler config
+  ruler:
+    alertmanager_url: http://alertmanager:9093
+    enable_api: true
+    enable_alertmanager_v2: true
+  
+  # Analytics
+  analytics:
+    reporting_enabled: false
+  
+  # Limits config
+  limits_config:
+    enforce_metric_name: false
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+    max_cache_freshness_per_query: 10m
+    split_queries_by_interval: 30m
+    retention_period: 168h
+  
+  # Compactor
+  compactor:
+    retention_enabled: true
+    retention_delete_delay: 2h
+    retention_delete_worker_count: 150
+
+# Storage configuration
+storage:
+  type: filesystem
+  filesystem:
+    size: 10Gi
+    storageClass: ""
+  
+  # S3 configuration (when type is s3)
+  s3:
+    s3: ""
+    bucketNames: ""
+    region: ""
+    accessKeyId: ""
+    secretAccessKey: ""
+    insecure: false
+    s3ForcePathStyle: true
+
+# Gateway configuration
+gateway:
+  enabled: false
+
+# Monitoring
+monitoring:
+  # Dashboards
+  dashboards:
+    enabled: true
+    namespace: ""
+    labels:
+      grafana_dashboard: "1"
+  
+  # Rules
+  rules:
+    enabled: true
+    namespace: ""
+  
+  # Service Monitor
+  serviceMonitor:
+    enabled: true
+    labels: {}
+
+# RBAC configuration
+rbac:
+  pspEnabled: false
+  sccEnabled: false
+
+# Service Account
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: true
+
+# Network Policy
+networkPolicy:
+  enabled: false
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 3100
+  targetPort: 3100
+  nodePort: ""
+  annotations: {}
+  labels: {}
+
+# Ingress configuration
+ingress:
+  enabled: false
+  annotations: {}
+  hosts: []
+  tls: []
+
+# Test
+test:
+  enabled: false
+
+# Extra containers
+extraContainers: []
+
+# Extra volumes
+extraVolumes: []
+
+# Extra volume mounts
+extraVolumeMounts: []
+
+# Extra ports
+extraPorts: []
+
+# Extra environment variables
+extraEnv: []
+
+# Extra environment variables from secrets
+extraEnvFrom: []
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
+
+# Topology spread constraints
+topologySpreadConstraints: []
+
+# Update strategy
+updateStrategy:
+  type: RollingUpdate
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
+# Container security context
+containerSecurityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# Priority class name
+priorityClassName: ""
+
+# Global settings
+global:
+  image:
+    registry: docker.io
+  dnsService: ""
+  dnsNamespace: ""
+  clusterDomain: cluster.local

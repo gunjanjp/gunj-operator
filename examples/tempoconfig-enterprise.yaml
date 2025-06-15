@@ -1,0 +1,438 @@
+# Enterprise TempoConfig with Advanced Features
+apiVersion: observability.io/v1beta1
+kind: TempoConfig
+metadata:
+  name: tempo-enterprise
+  namespace: observability
+  labels:
+    environment: production
+    tier: enterprise
+spec:
+  targetPlatform:
+    name: enterprise-platform
+  
+  # Advanced Storage Configuration
+  storage:
+    trace:
+      backend: s3
+      s3:
+        bucket: tempo-traces-enterprise
+        region: us-east-1
+        endpoint: https://s3.us-east-1.amazonaws.com
+        accessKey: ${AWS_ACCESS_KEY_ID}
+        secretKey:
+          name: aws-credentials
+          key: secret-key
+        storageClass: INTELLIGENT_TIERING
+        sse:
+          type: SSE-KMS
+          kmsKeyId: alias/tempo-encryption-key
+        tags:
+          Environment: production
+          Application: tempo
+          Team: observability
+        partSize: "100MB"
+        hedgeRequestsAt50P: true
+        hedgeRequestsUpTo: 3
+      
+      # WAL Configuration
+      wal:
+        path: /var/tempo/wal
+        encoding: snappy
+        searchEncoding: "10m"
+        ingestionSlack: true
+        
+      # Block Configuration
+      block:
+        version: vParquet
+        encoding: zstd
+        rowGroupSizeBytes: 104857600 # 100MB
+        bloomFilter:
+          falsePositive: 0.01
+          shardSizeBytes: 100000
+          
+      # Pool Configuration
+      pool:
+        maxWorkers: 100
+        queueDepth: 20000
+        
+      # Cache Configuration
+      cache:
+        backend: memcached
+        memcached:
+          host: memcached.cache.svc.cluster.local:11211
+          service: memcached
+          timeout: "500ms"
+          maxIdleConns: 16
+          updateInterval: "1m"
+          consistentHash: true
+        background:
+          writebackGoroutines: 10
+          writebackBuffer: 10000
+  
+  # Advanced Distributor Configuration
+  distributor:
+    receivers:
+      otlp:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+          tls:
+            enabled: true
+            certFile: /tls/server.crt
+            keyFile: /tls/server.key
+            clientAuthType: RequireAndVerifyClientCert
+            clientCaFile: /tls/ca.crt
+          maxRecvMsgSizeBytes: "100MB"
+          maxConcurrentStreams: 1000
+        http:
+          endpoint: "0.0.0.0:4318"
+          tls:
+            enabled: true
+            certFile: /tls/server.crt
+            keyFile: /tls/server.key
+          cors:
+            allowedOrigins:
+              - "https://*.company.com"
+            allowedHeaders:
+              - "*"
+            maxAge: 3600
+          maxRequestBodySize: "100MB"
+      
+      jaeger:
+        protocols:
+          grpc:
+            endpoint: "0.0.0.0:14250"
+            tls:
+              enabled: true
+              certFile: /tls/server.crt
+              keyFile: /tls/server.key
+            maxRecvMsgSizeBytes: "50MB"
+          thriftHttp:
+            endpoint: "0.0.0.0:14268"
+            tls:
+              enabled: true
+              certFile: /tls/server.crt
+              keyFile: /tls/server.key
+          thriftBinary:
+            endpoint: "0.0.0.0:6832"
+            queueSize: 5000
+            maxPacketSize: "1MB"
+            workers: 50
+          thriftCompact:
+            endpoint: "0.0.0.0:6831"
+            queueSize: 5000
+            maxPacketSize: "1MB"
+            workers: 50
+        remoteSampling:
+          fetchEndpoint: true
+          fetchInterval: "60s"
+          fetchTimeout: "5s"
+          hostEndpoint: "http://jaeger-collector:14268/api/sampling"
+      
+      zipkin:
+        endpoint: "0.0.0.0:9411"
+        parseStringTags: true
+        
+      kafka:
+        brokers:
+          - kafka-0.kafka.svc.cluster.local:9092
+          - kafka-1.kafka.svc.cluster.local:9092
+          - kafka-2.kafka.svc.cluster.local:9092
+        topic: tempo-traces
+        protocolVersion: sasl_ssl
+        encoding: otlp_proto
+        groupId: tempo-consumer-group
+        clientId: tempo-distributor
+        auth:
+          sasl:
+            mechanism: scram-sha-512
+            username: tempo-user
+            password:
+              name: kafka-credentials
+              key: password
+          tls:
+            enabled: true
+            caFile: /tls/kafka/ca.crt
+            certFile: /tls/kafka/client.crt
+            keyFile: /tls/kafka/client.key
+    
+    # Rate Limiting
+    rateLimit:
+      rateLimiterBurstSize: 100000
+      rateLimiterProcessorsPerInstance: true
+      strategy: global
+      
+    # Forwarders
+    forwarders:
+      - "tempo-backup.backup-region.svc.cluster.local:4317"
+      
+    # Trace Logging
+    logReceivedTraces: warn
+    extendWrites: true
+    searchTagsDenyList:
+      - "password"
+      - "secret"
+      - "token"
+  
+  # Ingester Configuration
+  ingester:
+    maxBlockDuration: "2h"
+    maxBlockBytes: "1GB"
+    completeBlockTimeout: "30m"
+    maxTracesPerBlock: 2000000
+    concurrentFlushes: 32
+    flushCheckPeriod: "10s"
+    flushOpTimeout: "5m"
+    traceIdLabelName: trace_id
+    autocompleteFilteringEnabled: true
+    lifecyclerConfig:
+      address: 0.0.0.0
+      port: 9095
+      ringCheckPeriod: "5s"
+      joinAfter: "30s"
+      minReadyDuration: "15s"
+      interfaceNames:
+        - eth0
+        - en0
+      heartbeatPeriod: "5s"
+      numTokens: 512
+  
+  # Compactor Configuration
+  compactor:
+    blockRetention: "720h" # 30 days
+    compactedBlockRetention: "24h"
+    maxCompactionObjects: 1000000
+    maxBlockBytes: "100GB"
+    maxTracesPerBlock: 5000000
+    blockRetentionConcurrency: 16
+    retentionIterations: 100
+    tenantShardSize: 1000
+    compactionWindow: "1h"
+    compactionCycle: "30s"
+    flushSizeBytes: "100MB"
+    iteratorBufferSize: "10MB"
+  
+  # Querier Configuration
+  querier:
+    concurrentRequests: 20
+    search:
+      maxDuration: "168h" # 7 days
+      maxResultLimit: 10000
+      defaultResultLimit: 100
+      concurrentJobs: 1000
+      targetBytesPerJob: "100MB"
+      chunkSizeBytes: "50MB"
+      prefetchJobs: 10
+      cacheConnectionTimeout: "10s"
+    traceLookup:
+      concurrentRequests: 50
+      targetBytesPerRequest: 10000
+    frontend:
+      workerGrpcClientConfig:
+        maxRecvMsgSize: "100MB"
+        maxSendMsgSize: "100MB"
+        useTls: true
+        tls:
+          certPath: /tls/client.crt
+          keyPath: /tls/client.key
+          caPath: /tls/ca.crt
+          serverName: tempo-query-frontend
+        backoffOnRateLimits: true
+        backoffConfig:
+          minPeriod: "100ms"
+          maxPeriod: "10s"
+          maxRetries: 10
+    maxOutstandingPerTenant: 100000
+    maxBytesPerTagValues: "50MB"
+    workerParallelism: 10
+  
+  # Query Frontend Configuration
+  queryFrontend:
+    maxRetries: 5
+    search:
+      concurrentJobs: 2000
+      targetBytesPerJob: "100MB"
+      maxDuration: "168h"
+      defaultResultLimit: "20"
+      maxResultLimit: "1000"
+      queryIngestersUntil: "30m"
+      queryTimeout: "5m"
+    traceById:
+      queryTimeout: "1m"
+      concurrentRequests: 2000
+      hedgeRequestsAt: "500ms"
+      hedgeRequestsUpTo: 3
+    metrics:
+      queryTimeout: "30s"
+      maxDuration: "48h"
+      queryBackendAfter: "15m"
+  
+  # Metrics Generator Configuration
+  metrics:
+    enabled: true
+    ringConfig:
+      kvStore: memberlist
+      heartbeatPeriod: "5s"
+      heartbeatTimeout: "1m"
+      instanceId: ${HOSTNAME}
+      instanceInterfaceNames:
+        - eth0
+        - en0
+    processor:
+      serviceGraphs:
+        enabled: true
+        dimensions:
+          - service.namespace
+          - service.name
+          - service.version
+        maxItems: 10000
+        waitTime: "10s"
+        workers: 10
+        histogramBuckets: [0.001, 0.01, 0.1, 0.3, 0.6, 0.8, 1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20]
+        enableClientServerPrefix: true
+        enableMessagingSystemLatencyHistogram: true
+      spanMetrics:
+        enabled: true
+        dimensions:
+          - service.name
+          - span.name
+          - span.kind
+          - status.code
+        intrinsicDimensions:
+          service.name: true
+          span.name: true
+        filterPolicies:
+          - include:
+              matchType: strict
+              attributes:
+                - key: span.kind
+                  value: SPAN_KIND_SERVER
+        histogramBuckets: [0.001, 0.01, 0.1, 0.3, 0.6, 0.8, 1, 2, 3, 4, 5, 6, 8, 10, 13, 16, 20]
+        aggregationInterval: "30s"
+        enableTargetInfo: true
+      localBlocks:
+        path: /var/tempo/generator
+        completeBlockTimeout: "15m"
+        maxLiveTraces: 100000
+        maxBlockDuration: "5m"
+        maxBlockBytes: "100MB"
+        flushCheckPeriod: "10s"
+        traceIdLabelName: trace_id
+    storage:
+      path: /var/tempo/generator/wal
+      remoteWrite:
+        - url: http://prometheus:9090/api/v1/write
+          sendExemplars: true
+          headers:
+            X-Scope-OrgID: tempo-metrics
+          remoteTimeout: "30s"
+          tls:
+            insecureSkipVerify: false
+            caFile: /tls/prometheus/ca.crt
+            certFile: /tls/prometheus/client.crt
+            keyFile: /tls/prometheus/client.key
+          basicAuth:
+            username: tempo
+            password:
+              name: prometheus-credentials
+              key: password
+      wal:
+        path: /var/tempo/generator/wal
+        truncateFrequency: "5m"
+        minWalTime: "15m"
+        maxWalTime: "4h"
+    registry:
+      maxSeries: 1000000
+      maxSeriesPerLabelSet: 100000
+      externalLabels:
+        cluster: production
+        region: us-east-1
+      staleDuration: "5m"
+    metricsFlushInterval: "10s"
+    remoteWriteFlushDeadline: "1m"
+  
+  # Server Configuration
+  server:
+    httpListenPort: 3200
+    httpListenAddress: "0.0.0.0"
+    grpcListenPort: 9095
+    grpcListenAddress: "0.0.0.0"
+    httpPathPrefix: ""
+    logLevel: info
+    logFormat: json
+    httpIdleTimeout: "120s"
+    httpWriteTimeout: "20s"
+    grpcMaxRecvMsgSize: "100MB"
+    grpcMaxSendMsgSize: "100MB"
+    grpcMaxConcurrentStreams: 1000
+    gracefulShutdownTimeout: "30s"
+    registerInstrumentation: true
+  
+  # Multi-tenant Overrides
+  overrides:
+    overridesReloadPeriod: "30s"
+    defaults:
+      ingestionRateLimitBytes: 100000000 # 100MB
+      ingestionBurstSizeBytes: 200000000 # 200MB
+      maxTracesPerUser: 10000000
+      maxBytesPerTrace: "50MB"
+      maxSearchDuration: "720h" # 30 days
+      maxGlobalTracesPerUser: 100000000
+      maxBytesPerTagValuesQuery: "100GB"
+      blockRetention: "720h" # 30 days
+      maxSearchBatchSize: 5000
+      maxSpansPerTrace: 100000
+      metricsGenerator:
+        processors:
+          service_graphs:
+            enabled: true
+          span_metrics:
+            enabled: true
+        maxActiveSeries: 100000
+        collectionInterval: "15s"
+    perTenantOverrides:
+      premium-tenant:
+        ingestionRateLimitBytes: 500000000 # 500MB
+        ingestionBurstSizeBytes: 1000000000 # 1GB
+        maxTracesPerUser: 50000000
+        maxBytesPerTrace: "100MB"
+        maxSearchDuration: "2160h" # 90 days
+        blockRetention: "2160h" # 90 days
+        metricsGenerator:
+          maxActiveSeries: 500000
+      basic-tenant:
+        ingestionRateLimitBytes: 50000000 # 50MB
+        ingestionBurstSizeBytes: 100000000 # 100MB
+        maxTracesPerUser: 1000000
+        maxBytesPerTrace: "10MB"
+        maxSearchDuration: "168h" # 7 days
+        blockRetention: "168h" # 7 days
+        metricsGenerator:
+          disableCollection: true
+  
+  # Memberlist Configuration for HA
+  memberlistKv:
+    bindAddr: "0.0.0.0:7946"
+    bindPort: 7946
+    joinInterval: "1s"
+    maxJoinBackoff: "1m"
+    maxJoinRetries: 10
+    minJoinBackoff: "1s"
+    joinMembers:
+      - tempo-distributor-0.tempo-distributor-headless.observability.svc.cluster.local:7946
+      - tempo-distributor-1.tempo-distributor-headless.observability.svc.cluster.local:7946
+      - tempo-distributor-2.tempo-distributor-headless.observability.svc.cluster.local:7946
+    pushPullInterval: "30s"
+    gossipInterval: "1s"
+    gossipNodes: 3
+    gossipToDeadNodesTime: "30s"
+    deadNodeReclaimTime: "0s"
+    enableCompression: true
+    advertiseAddr: ""
+    advertisePort: 7946
+    clusterLabel: production
+    clusterLabelVerificationDisabled: false
+  
+  # Usage Reporting
+  usageReport:
+    enabled: false

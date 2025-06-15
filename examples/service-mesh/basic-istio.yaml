@@ -1,0 +1,88 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: istio-platform
+  namespace: monitoring
+spec:
+  # Enable service mesh integration with Istio
+  serviceMesh:
+    enabled: true
+    type: istio # Can be 'istio', 'linkerd', or 'auto' (auto-detect)
+    
+    # mTLS configuration
+    mtls:
+      enabled: true
+      mode: STRICT # STRICT, PERMISSIVE, or DISABLE
+      certificateRotation:
+        enabled: true
+        rotationInterval: "720h" # 30 days
+    
+    # Health check configuration
+    healthCheck:
+      enabled: true
+      interval: "30s"
+      timeout: "5s"
+      unhealthyThreshold: 3
+      healthyThreshold: 2
+    
+    # Sidecar injection configuration
+    sidecarInjection:
+      autoInject: true
+      resourceLimits:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "200m"
+          memory: "256Mi"
+  
+  # Standard component configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 2
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 50Gi
+        storageClassName: fast-ssd
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 1
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 1
+      storage:
+        size: 100Gi
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 1
+      storage:
+        size: 50Gi
+  
+  # Global settings
+  global:
+    externalLabels:
+      cluster: "production"
+      region: "us-east-1"
+    nodeSelector:
+      workload-type: observability

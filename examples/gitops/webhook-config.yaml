@@ -1,0 +1,506 @@
+# Example: Git Webhook Configuration
+# This example shows how to configure webhooks for automatic GitOps triggers
+
+---
+# Webhook receiver service
+apiVersion: v1
+kind: Service
+metadata:
+  name: gunj-webhook-receiver
+  namespace: gunj-system
+spec:
+  selector:
+    app: gunj-operator
+    component: webhook-receiver
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  - name: https
+    port: 443
+    targetPort: 8443
+  type: ClusterIP
+
+---
+# Ingress for webhook endpoint
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gunj-webhook-ingress
+  namespace: gunj-system
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Rate limiting to prevent abuse
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+    nginx.ingress.kubernetes.io/limit-connections: "5"
+    # IP whitelist (optional - add your Git provider IPs)
+    # nginx.ingress.kubernetes.io/whitelist-source-range: "192.168.0.0/16,10.0.0.0/8"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - webhooks.observability.example.com
+    secretName: webhook-tls
+  rules:
+  - host: webhooks.observability.example.com
+    http:
+      paths:
+      - path: /webhooks/github
+        pathType: Prefix
+        backend:
+          service:
+            name: gunj-webhook-receiver
+            port:
+              number: 443
+      - path: /webhooks/gitlab
+        pathType: Prefix
+        backend:
+          service:
+            name: gunj-webhook-receiver
+            port:
+              number: 443
+      - path: /webhooks/bitbucket
+        pathType: Prefix
+        backend:
+          service:
+            name: gunj-webhook-receiver
+            port:
+              number: 443
+
+---
+# Secret for webhook authentication
+apiVersion: v1
+kind: Secret
+metadata:
+  name: webhook-secrets
+  namespace: gunj-system
+type: Opaque
+stringData:
+  # GitHub webhook secret (generate with: openssl rand -hex 32)
+  github-secret: ${GITHUB_WEBHOOK_SECRET}
+  # GitLab webhook token
+  gitlab-token: ${GITLAB_WEBHOOK_TOKEN}
+  # Generic webhook auth token
+  webhook-auth-token: ${WEBHOOK_AUTH_TOKEN}
+
+---
+# ConfigMap for webhook configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webhook-config
+  namespace: gunj-system
+data:
+  config.yaml: |
+    # Webhook receiver configuration
+    server:
+      port: 8080
+      tlsPort: 8443
+      tlsCert: /tls/tls.crt
+      tlsKey: /tls/tls.key
+      
+    # Authentication
+    auth:
+      github:
+        secretPath: /secrets/github-secret
+      gitlab:
+        tokenPath: /secrets/gitlab-token
+      generic:
+        tokenPath: /secrets/webhook-auth-token
+    
+    # Event processing
+    processing:
+      workers: 10
+      queueSize: 1000
+      maxPayloadSize: 10485760  # 10MB
+      
+    # Providers configuration
+    providers:
+      github:
+        enabled: true
+        # GitHub webhook events to process
+        events:
+        - push
+        - pull_request
+        - create  # For tags
+        - release
+        
+        # Repository filtering
+        repositories:
+          # Whitelist specific repositories
+          whitelist:
+          - "example/observability-config"
+          - "example/platform-deployments"
+          # Or use patterns
+          patterns:
+          - "example/.*-gitops"
+          - "platform/.*"
+      
+      gitlab:
+        enabled: true
+        events:
+        - push
+        - merge_request
+        - tag_push
+        
+      bitbucket:
+        enabled: true
+        events:
+        - repo:push
+        - pullrequest:created
+        - pullrequest:fulfilled
+    
+    # Logging
+    logging:
+      level: info
+      format: json
+      
+    # Metrics
+    metrics:
+      enabled: true
+      port: 9090
+      path: /metrics
+
+---
+# Platform with webhook integration
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-webhook-enabled
+  namespace: monitoring
+spec:
+  gitOps:
+    enabled: true
+    provider: argocd
+    
+    repository:
+      url: https://github.com/example/observability-config.git
+      branch: main
+      path: environments/production
+      interval: 5m  # Regular sync interval (webhook will trigger immediate sync)
+      
+      # Webhook configuration
+      webhook:
+        enabled: true
+        # Secret containing webhook credentials
+        secretRef:
+          name: git-webhook-config
+          namespace: monitoring
+    
+    syncPolicy:
+      automated: true
+      prune: true
+      selfHeal: true
+    
+    # Webhook-specific settings
+    webhookConfig:
+      # Process only specific events
+      eventFilters:
+      - type: push
+        branches:
+        - main
+        - release/*
+        # Skip CI commits
+        skipCommitPatterns:
+        - "\\[skip ci\\]"
+        - "\\[ci skip\\]"
+        - "Automated commit by"
+        
+      - type: pull_request
+        actions:
+        - closed
+        - merged
+        targetBranches:
+        - main
+        
+      - type: tag
+        patterns:
+        - "v*"  # Only version tags
+      
+      # Sync behavior on webhook events
+      syncBehavior:
+        # Immediate sync on push to main
+        push:
+          immediate: true
+          debounceSeconds: 30  # Wait 30s for multiple pushes
+          
+        # Sync on PR merge
+        pullRequest:
+          onMerge: true
+          onClose: false
+          
+        # Sync on tag creation
+        tag:
+          immediate: true
+          onlyVersionTags: true
+      
+      # Notifications for webhook events
+      notifications:
+        slack:
+          enabled: true
+          channel: "#gitops-events"
+          events:
+          - push
+          - tag
+          messageTemplate: |
+            :webhook: *GitOps Event*
+            Type: `{{ .EventType }}`
+            Repository: `{{ .Repository }}`
+            Branch: `{{ .Branch }}`
+            Author: {{ .Author }}
+            Message: {{ .Message }}
+            Platform: `{{ .Platform }}`
+            Action: {{ .Action }}
+  
+  # Standard platform configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3
+      
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+    tempo:
+      enabled: true
+      version: "2.3.0"
+
+---
+# Secret for Git webhook configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-webhook-config
+  namespace: monitoring
+type: Opaque
+stringData:
+  # GitHub webhook configuration
+  github.yaml: |
+    webhook:
+      secret: ${GITHUB_WEBHOOK_SECRET}
+      # Events to subscribe to
+      events:
+      - push
+      - pull_request
+      - create
+      - delete
+      - release
+      
+  # GitLab webhook configuration  
+  gitlab.yaml: |
+    webhook:
+      token: ${GITLAB_WEBHOOK_TOKEN}
+      events:
+      - Push Hook
+      - Tag Push Hook
+      - Merge Request Hook
+      
+  # Bitbucket webhook configuration
+  bitbucket.yaml: |
+    webhook:
+      secret: ${BITBUCKET_WEBHOOK_SECRET}
+      events:
+      - repo:push
+      - pullrequest:created
+      - pullrequest:fulfilled
+      - pullrequest:rejected
+
+---
+# Example: GitHub webhook setup script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webhook-setup-scripts
+  namespace: gunj-system
+data:
+  setup-github-webhook.sh: |
+    #!/bin/bash
+    # Script to configure GitHub webhook
+    
+    REPO="example/observability-config"
+    WEBHOOK_URL="https://webhooks.observability.example.com/webhooks/github"
+    SECRET="${GITHUB_WEBHOOK_SECRET}"
+    
+    # Create webhook using GitHub API
+    curl -X POST \
+      -H "Authorization: token ${GITHUB_TOKEN}" \
+      -H "Accept: application/vnd.github.v3+json" \
+      https://api.github.com/repos/${REPO}/hooks \
+      -d @- <<EOF
+    {
+      "name": "web",
+      "active": true,
+      "events": [
+        "push",
+        "pull_request",
+        "create",
+        "delete",
+        "release"
+      ],
+      "config": {
+        "url": "${WEBHOOK_URL}",
+        "content_type": "json",
+        "secret": "${SECRET}",
+        "insecure_ssl": "0"
+      }
+    }
+    EOF
+    
+    echo "GitHub webhook configured for ${REPO}"
+  
+  setup-gitlab-webhook.sh: |
+    #!/bin/bash
+    # Script to configure GitLab webhook
+    
+    PROJECT_ID="12345"  # Your GitLab project ID
+    WEBHOOK_URL="https://webhooks.observability.example.com/webhooks/gitlab"
+    TOKEN="${GITLAB_WEBHOOK_TOKEN}"
+    
+    # Create webhook using GitLab API
+    curl -X POST \
+      -H "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" \
+      "https://gitlab.com/api/v4/projects/${PROJECT_ID}/hooks" \
+      -d "url=${WEBHOOK_URL}" \
+      -d "token=${TOKEN}" \
+      -d "push_events=true" \
+      -d "tag_push_events=true" \
+      -d "merge_requests_events=true" \
+      -d "enable_ssl_verification=true"
+    
+    echo "GitLab webhook configured for project ${PROJECT_ID}"
+
+---
+# Monitoring for webhook events
+apiVersion: v1
+kind: ServiceMonitor
+metadata:
+  name: webhook-receiver-metrics
+  namespace: gunj-system
+spec:
+  selector:
+    matchLabels:
+      app: gunj-operator
+      component: webhook-receiver
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+
+---
+# PrometheusRule for webhook alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: webhook-alerts
+  namespace: gunj-system
+spec:
+  groups:
+  - name: webhook.rules
+    interval: 30s
+    rules:
+    - alert: WebhookReceiverDown
+      expr: up{job="webhook-receiver"} == 0
+      for: 5m
+      labels:
+        severity: critical
+        component: webhook
+      annotations:
+        summary: "Webhook receiver is down"
+        description: "The GitOps webhook receiver has been down for more than 5 minutes"
+    
+    - alert: WebhookHighErrorRate
+      expr: |
+        rate(webhook_events_failed_total[5m]) / 
+        rate(webhook_events_received_total[5m]) > 0.1
+      for: 10m
+      labels:
+        severity: warning
+        component: webhook
+      annotations:
+        summary: "High webhook error rate"
+        description: "More than 10% of webhook events are failing"
+    
+    - alert: WebhookQueueFull
+      expr: webhook_queue_size >= 900
+      for: 5m
+      labels:
+        severity: warning
+        component: webhook
+      annotations:
+        summary: "Webhook queue is almost full"
+        description: "Webhook event queue has {{ $value }} events (max 1000)"
+    
+    - alert: WebhookProcessingLag
+      expr: |
+        histogram_quantile(0.95, 
+          rate(webhook_processing_duration_seconds_bucket[5m])
+        ) > 30
+      for: 10m
+      labels:
+        severity: warning
+        component: webhook
+      annotations:
+        summary: "Webhook processing is slow"
+        description: "95th percentile webhook processing time is {{ $value }}s"
+
+---
+# Example webhook event (for testing)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webhook-test-payloads
+  namespace: gunj-system
+data:
+  github-push.json: |
+    {
+      "ref": "refs/heads/main",
+      "before": "abc123",
+      "after": "def456",
+      "repository": {
+        "name": "observability-config",
+        "full_name": "example/observability-config",
+        "clone_url": "https://github.com/example/observability-config.git"
+      },
+      "pusher": {
+        "name": "developer",
+        "email": "developer@example.com"
+      },
+      "head_commit": {
+        "id": "def456",
+        "message": "Update Prometheus configuration",
+        "timestamp": "2024-01-15T10:30:00Z",
+        "author": {
+          "name": "Developer",
+          "email": "developer@example.com"
+        }
+      }
+    }
+  
+  test-webhook.sh: |
+    #!/bin/bash
+    # Test webhook endpoint
+    
+    WEBHOOK_URL="https://webhooks.observability.example.com/webhooks/github"
+    SECRET="${GITHUB_WEBHOOK_SECRET}"
+    PAYLOAD=$(cat github-push.json)
+    
+    # Calculate signature
+    SIGNATURE="sha256=$(echo -n "${PAYLOAD}" | openssl dgst -sha256 -hmac "${SECRET}" | cut -d' ' -f2)"
+    
+    # Send test webhook
+    curl -X POST \
+      -H "Content-Type: application/json" \
+      -H "X-GitHub-Event: push" \
+      -H "X-Hub-Signature-256: ${SIGNATURE}" \
+      -d "${PAYLOAD}" \
+      "${WEBHOOK_URL}"
+    
+    echo "Test webhook sent"

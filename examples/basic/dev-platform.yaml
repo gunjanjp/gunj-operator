@@ -1,0 +1,122 @@
+# Development Environment ObservabilityPlatform
+# This example shows a configuration suitable for development environments
+# with minimal resources and all components enabled
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: dev-platform
+  namespace: dev-monitoring
+  labels:
+    environment: development
+    team: platform-engineering
+  annotations:
+    observability.io/description: "Development observability stack"
+    observability.io/owner: "platform-team@company.com"
+spec:
+  # Development-sized resource allocations
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 1  # Single replica for dev
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      storage:
+        size: 10Gi
+        storageClassName: standard
+      retention: 7d  # Short retention for dev
+      config:
+        scrapeInterval: 30s  # Less frequent scraping
+        evaluationInterval: 30s
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 1
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "100m"
+        limits:
+          memory: "512Mi"
+          cpu: "200m"
+      persistence:
+        enabled: true
+        size: 1Gi
+      # Dev admin credentials (should use secrets in production)
+      adminUser: admin
+      adminPassword: devpassword123
+      
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 1
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "200m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      storage:
+        size: 20Gi
+        storageClassName: standard
+      retention: 168h  # 7 days
+      
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 1
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "100m"
+        limits:
+          memory: "512Mi"
+          cpu: "200m"
+      storage:
+        size: 10Gi
+        storageClassName: standard
+        
+  # Global settings for development
+  global:
+    logLevel: debug  # Verbose logging for debugging
+    externalLabels:
+      environment: development
+      cluster: dev-cluster
+      region: local
+      
+  # Simple alerting for dev
+  alerting:
+    alertmanager:
+      enabled: true
+      replicas: 1
+      config:
+        route:
+          receiver: 'dev-team'
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 12h
+        receivers:
+        - name: 'dev-team'
+          webhook_configs:
+          - url: 'http://webhook-receiver.dev-monitoring.svc.cluster.local/alerts'
+            send_resolved: true
+            
+  # No ingress in dev - use port-forward
+  ingress:
+    enabled: false
+    
+  # Development-specific features
+  features:
+    autoUpgrade: false  # Manual upgrades only
+    monitoring:
+      selfMonitoring: true  # Monitor the monitoring stack
+    debug:
+      enabled: true
+      verboseLogging: true

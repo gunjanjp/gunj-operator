@@ -1,0 +1,467 @@
+# Flux v2 GitOps Integration Example
+
+This example demonstrates how to integrate the Gunj Operator with Flux v2 for GitOps-based deployments.
+
+## Prerequisites
+
+1. Flux v2 installed in the cluster
+2. Git repository with observability platform configurations
+3. Credentials for accessing the Git repository
+
+## Basic Flux Integration
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: production-flux
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1"
+    grafana:
+      enabled: true
+      version: "10.2.0"
+  
+  # GitOps configuration
+  gitOps:
+    type: Flux
+    repository:
+      url: https://github.com/myorg/observability-configs
+      branch: main
+      path: ./clusters/production
+      credentialsSecret:
+        name: git-credentials
+        namespace: flux-system
+    
+    # Sync policy
+    syncPolicy:
+      automated:
+        prune: true
+        selfHeal: true
+      syncOptions:
+        - ServerSideApply=true
+        - IfNotPresent=true
+      retry:
+        limit: 3
+        backoff:
+          duration: "30s"
+          factor: 2
+          maxDuration: "5m"
+```
+
+## Multi-Environment Setup with Kustomizations
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: multi-env-flux
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+    grafana:
+      enabled: true
+    loki:
+      enabled: true
+    tempo:
+      enabled: true
+  
+  gitOps:
+    type: Flux
+    repository:
+      url: ssh://git@github.com/myorg/observability-configs
+      branch: main
+      path: ./
+      credentialsSecret:
+        name: git-ssh-credentials
+        namespace: flux-system
+    
+    # Multiple environments
+    environments:
+      - name: dev
+        branch: develop
+        path: ./clusters/dev
+        autoSync: true
+        promotionGates:
+          - type: Time
+            config:
+              minAge: "30m"
+      
+      - name: staging
+        branch: staging
+        path: ./clusters/staging
+        autoSync: true
+        promotionGates:
+          - type: Test
+            config:
+              suite: e2e
+          - type: Metric
+            config:
+              metric: "rate(http_requests_failed_total[5m])"
+              threshold: "0.05"
+      
+      - name: production
+        branch: main
+        path: ./clusters/production
+        autoSync: false
+        promotionGates:
+          - type: Manual
+            config:
+              approvers: "sre-team"
+    
+    # Drift detection with auto-remediation
+    driftDetection:
+      enabled: true
+      interval: "10m"
+      autoRemediate: true
+      notificationPolicy:
+        channels:
+          - type: Teams
+            config:
+              webhook: https://outlook.office.com/webhook/xxx
+        severity: Error
+```
+
+## Git Repository Structure for Flux
+
+```
+observability-configs/
+├── clusters/
+│   ├── dev/
+│   │   ├── flux-system/
+│   │   │   ├── gotk-components.yaml
+│   │   │   └── gotk-sync.yaml
+│   │   └── observability/
+│   │       ├── kustomization.yaml
+│   │       ├── namespace.yaml
+│   │       └── platform/
+│   │           ├── kustomization.yaml
+│   │           └── release.yaml
+│   ├── staging/
+│   │   └── observability/
+│   │       └── kustomization.yaml
+│   └── production/
+│       └── observability/
+│           └── kustomization.yaml
+├── infrastructure/
+│   ├── sources/
+│   │   └── helm-repos.yaml
+│   └── configs/
+│       ├── prometheus-config.yaml
+│       └── grafana-config.yaml
+└── apps/
+    └── observability/
+        ├── base/
+        │   ├── kustomization.yaml
+        │   ├── prometheus/
+        │   └── grafana/
+        └── overlays/
+            ├── dev/
+            ├── staging/
+            └── production/
+```
+
+## Flux Kustomization Example
+
+```yaml
+# clusters/production/observability/kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+resources:
+  - namespace.yaml
+  - ../../../apps/observability/overlays/production
+  - ../../../infrastructure/configs
+patches:
+  - target:
+      kind: ConfigMap
+      name: prometheus-config
+    patch: |-
+      - op: replace
+        path: /data/prometheus.yml
+        value: |
+          global:
+            scrape_interval: 30s
+            evaluation_interval: 30s
+            external_labels:
+              cluster: production
+              region: us-east-1
+```
+
+## Image Update Automation
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: flux-image-automation
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+      imageUpdatePolicy:
+        enabled: true
+        interval: "5m"
+        policy: "semver:~2.48"
+    grafana:
+      enabled: true
+      imageUpdatePolicy:
+        enabled: true
+        interval: "5m"
+        policy: "semver:~10.0"
+  
+  gitOps:
+    type: Flux
+    repository:
+      url: https://github.com/myorg/observability-configs
+      branch: main
+      path: ./clusters/production
+    
+    # This will create ImageRepository, ImagePolicy, and ImageUpdateAutomation resources
+    imageAutomation:
+      enabled: true
+      git:
+        commit:
+          author:
+            name: Flux Bot
+            email: flux@gunj-operator.io
+          messageTemplate: |
+            Auto-update images
+            
+            [ci skip]
+        push:
+          branch: main
+```
+
+## Creating Git Credentials for Flux
+
+```yaml
+# HTTPS credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-credentials
+  namespace: flux-system
+type: Opaque
+data:
+  username: <base64-encoded-username>
+  password: <base64-encoded-token>
+---
+# SSH credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-ssh-credentials
+  namespace: flux-system
+type: Opaque
+data:
+  identity: <base64-encoded-private-key>
+  identity.pub: <base64-encoded-public-key>
+  known_hosts: <base64-encoded-known-hosts>
+```
+
+## Webhook Configuration for Flux
+
+```yaml
+apiVersion: notification.toolkit.fluxcd.io/v1beta1
+kind: Receiver
+metadata:
+  name: github-receiver
+  namespace: flux-system
+spec:
+  type: github
+  events:
+    - ping
+    - push
+    - pull_request
+  secretRef:
+    name: webhook-token
+  resources:
+    - kind: GitRepository
+      name: observability-configs
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: webhook-token
+  namespace: flux-system
+type: Opaque
+data:
+  token: <base64-encoded-webhook-token>
+```
+
+## Progressive Delivery with Flagger
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: flux-progressive
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+      progressiveDelivery:
+        enabled: true
+        analysis:
+          interval: "1m"
+          threshold: 5
+          stepWeight: 10
+          metrics:
+            - name: request-success-rate
+              threshold: 99
+              interval: "1m"
+            - name: request-duration
+              threshold: 500
+              interval: "30s"
+  
+  gitOps:
+    type: Flux
+    repository:
+      url: https://github.com/myorg/observability-configs
+      branch: main
+      path: ./clusters/production
+```
+
+## Monitoring Flux GitOps Status
+
+```bash
+# Check platform GitOps status
+kubectl get observabilityplatform production-flux -o yaml
+
+# Check Flux resources
+kubectl get gitrepositories -n monitoring
+kubectl get kustomizations -n monitoring
+
+# View sync status
+flux get sources git -n monitoring
+flux get kustomizations -n monitoring
+
+# Check image automation
+kubectl get imagerepositories -n monitoring
+kubectl get imagepolicies -n monitoring
+kubectl get imageupdateautomations -n monitoring
+
+# View events
+kubectl events -n monitoring --for observabilityplatform/production-flux
+```
+
+## Health Checks Configuration
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: flux-health-checks
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+  
+  gitOps:
+    type: Flux
+    repository:
+      url: https://github.com/myorg/observability-configs
+      branch: main
+      path: ./clusters/production
+    
+    # Health checks will be added to Kustomization
+    healthChecks:
+      - apiVersion: apps/v1
+        kind: Deployment
+        name: prometheus-server
+        namespace: monitoring
+      - apiVersion: apps/v1
+        kind: StatefulSet
+        name: prometheus-alertmanager
+        namespace: monitoring
+      - apiVersion: v1
+        kind: Service
+        name: prometheus-server
+        namespace: monitoring
+```
+
+## Troubleshooting Flux Integration
+
+1. **Kustomization not syncing**
+   ```bash
+   # Check Kustomization status
+   kubectl describe kustomization production-flux-kustomization -n monitoring
+   
+   # Check GitRepository status
+   kubectl describe gitrepository production-flux-source -n monitoring
+   
+   # Force reconciliation
+   flux reconcile source git production-flux-source -n monitoring
+   flux reconcile kustomization production-flux-kustomization -n monitoring
+   ```
+
+2. **Image updates not working**
+   ```bash
+   # Check image repositories
+   kubectl get imagerepositories -n monitoring -o wide
+   
+   # Check image policies
+   kubectl get imagepolicies -n monitoring -o wide
+   
+   # Check automation status
+   kubectl describe imageupdateautomation production-flux-automation -n monitoring
+   ```
+
+3. **Webhook not working**
+   ```bash
+   # Check receiver status
+   kubectl describe receiver github-receiver -n flux-system
+   
+   # Get webhook URL
+   kubectl get receiver github-receiver -n flux-system -o jsonpath='{.status.url}'
+   
+   # Check events
+   kubectl events -n flux-system --for receiver/github-receiver
+   ```
+
+## Advanced: Multi-Cluster Setup
+
+```yaml
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: flux-multi-cluster
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+  
+  gitOps:
+    type: Flux
+    repository:
+      url: https://github.com/myorg/observability-configs
+      branch: main
+      path: ./clusters/hub
+    
+    # Multi-cluster configuration
+    clusters:
+      - name: us-east-1
+        path: ./clusters/us-east-1
+        kubeConfig:
+          secretRef:
+            name: us-east-1-kubeconfig
+      - name: eu-west-1
+        path: ./clusters/eu-west-1
+        kubeConfig:
+          secretRef:
+            name: eu-west-1-kubeconfig
+```

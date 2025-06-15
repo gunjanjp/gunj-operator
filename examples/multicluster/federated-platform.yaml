@@ -1,0 +1,471 @@
+# Example: Federated ObservabilityPlatform
+# This example shows how to deploy an observability platform across multiple clusters
+---
+# Global ObservabilityPlatform deployed to hub cluster
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: global-observability
+  namespace: monitoring
+  annotations:
+    # Enable federation for this platform
+    federation.gunj.io/enabled: "true"
+    # Target all production clusters
+    federation.gunj.io/cluster-selector: "environment=production"
+    # Enable failover
+    failover.gunj.io/enabled: "true"
+  labels:
+    platform: global
+    failover: enabled
+spec:
+  # Global configuration applied to all clusters
+  global:
+    externalLabels:
+      platform: gunj
+      federation: enabled
+    logLevel: info
+    retentionPolicies:
+      metrics: 30d
+      logs: 7d
+      traces: 3d
+  
+  # Prometheus configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      mode: federated
+      replicas: 3  # Will be adjusted per cluster
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "2"
+        limits:
+          memory: "8Gi"
+          cpu: "4"
+      storage:
+        size: 500Gi
+        storageClassName: fast-ssd
+      retention: 30d
+      # Federation configuration
+      federationConfig:
+        enabled: true
+        matchLabels:
+          - '{__name__=~"job:.*"}'
+          - '{__name__=~"instance:.*"}'
+        honorLabels: true
+      # Remote write to hub cluster
+      remoteWrite:
+      - url: http://prometheus-hub.monitoring.svc.cluster.local:9090/api/v1/write
+        writeRelabelConfigs:
+        - sourceLabels: [__name__]
+          regex: '(job|instance):.*'
+          action: keep
+        queueConfig:
+          capacity: 10000
+          maxShards: 30
+          minShards: 1
+          maxSamplesPerSend: 5000
+      # Service monitors to federate
+      serviceMonitorSelector:
+        matchLabels:
+          federate: "true"
+    
+    # Grafana configuration
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      adminPassword: # Will be synced via secret
+      ingress:
+        enabled: true
+        className: nginx
+        host: grafana.{{ .ClusterName }}.example.com
+        tlsSecret: grafana-tls
+      datasources:
+      - name: Prometheus-Local
+        type: prometheus
+        url: http://prometheus:9090
+        access: proxy
+        isDefault: true
+      - name: Prometheus-Global
+        type: prometheus
+        url: http://prometheus-hub.monitoring.svc.cluster.local:9090
+        access: proxy
+        jsonData:
+          httpMethod: POST
+      - name: Loki-Local
+        type: loki
+        url: http://loki:3100
+        access: proxy
+      - name: Tempo-Local
+        type: tempo
+        url: http://tempo:3200
+        access: proxy
+      # Dashboard providers
+      dashboardProviders:
+      - name: 'default'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 10
+        allowUiUpdates: false
+        options:
+          path: /var/lib/grafana/dashboards/default
+      - name: 'global'
+        orgId: 1
+        folder: 'Global'
+        type: file
+        disableDeletion: true
+        updateIntervalSeconds: 10
+        allowUiUpdates: false
+        options:
+          path: /var/lib/grafana/dashboards/global
+    
+    # Loki configuration
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 3
+      storage:
+        size: 1Ti
+        storageClassName: fast-ssd
+      # Multi-cluster configuration
+      multiCluster:
+        enabled: true
+        memberlist:
+          join_members:
+          - loki-memberlist.monitoring.svc.cluster.local:7946
+      # S3 backend for long-term storage
+      s3:
+        enabled: true
+        bucketName: gunj-loki-{{ .ClusterName }}
+        region: {{ .ClusterRegion }}
+        endpoint: s3.{{ .ClusterRegion }}.amazonaws.com
+      # Compactor for deduplication
+      compactor:
+        enabled: true
+        retention_enabled: true
+        retention_delete_delay: 2h
+        retention_delete_worker_count: 150
+    
+    # Tempo configuration
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 2
+      storage:
+        size: 200Gi
+        storageClassName: fast-ssd
+      # Multi-cluster trace collection
+      multiCluster:
+        enabled: true
+      # S3 backend
+      s3:
+        enabled: true
+        bucketName: gunj-tempo-{{ .ClusterName }}
+        region: {{ .ClusterRegion }}
+      # Trace ingestion settings
+      ingestion:
+        trace_idle_period: 30s
+        max_block_bytes: 5000000
+        max_block_duration: 30m
+    
+    # OpenTelemetry Collector
+    otelCollector:
+      enabled: true
+      mode: deployment
+      replicas: 3
+      config: |
+        receivers:
+          otlp:
+            protocols:
+              grpc:
+                endpoint: 0.0.0.0:4317
+              http:
+                endpoint: 0.0.0.0:4318
+          prometheus:
+            config:
+              scrape_configs:
+              - job_name: 'federated-metrics'
+                honor_labels: true
+                metrics_path: '/federate'
+                params:
+                  'match[]':
+                  - '{job=~".*"}'
+                static_configs:
+                - targets:
+                  - prometheus:9090
+        
+        processors:
+          batch:
+            timeout: 10s
+            send_batch_size: 1024
+          memory_limiter:
+            check_interval: 1s
+            limit_mib: 1024
+          attributes:
+            actions:
+            - key: cluster
+              value: {{ .ClusterName }}
+              action: upsert
+            - key: region
+              value: {{ .ClusterRegion }}
+              action: upsert
+        
+        exporters:
+          prometheus:
+            endpoint: "0.0.0.0:8889"
+          loki:
+            endpoint: http://loki:3100/loki/api/v1/push
+          otlp:
+            endpoint: tempo:4317
+            tls:
+              insecure: true
+          # Export to hub cluster
+          otlp/hub:
+            endpoint: otel-hub.monitoring.svc.cluster.local:4317
+            tls:
+              insecure: true
+        
+        service:
+          pipelines:
+            metrics:
+              receivers: [prometheus, otlp]
+              processors: [memory_limiter, batch, attributes]
+              exporters: [prometheus, otlp/hub]
+            logs:
+              receivers: [otlp]
+              processors: [memory_limiter, batch, attributes]
+              exporters: [loki, otlp/hub]
+            traces:
+              receivers: [otlp]
+              processors: [memory_limiter, batch, attributes]
+              exporters: [otlp, otlp/hub]
+  
+  # Alerting configuration
+  alerting:
+    alertmanager:
+      enabled: true
+      replicas: 3
+      # Global alertmanager config synced across clusters
+      configSecret: alertmanager-global-config
+    
+    # Alert rules
+    rules:
+    - name: multi-cluster-alerts
+      interval: 30s
+      rules:
+      - alert: ClusterDown
+        expr: up{job="cluster-health"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Cluster {{ $labels.cluster }} is down"
+          description: "Cluster {{ $labels.cluster }} has been unreachable for 5 minutes"
+      
+      - alert: CrossClusterLatencyHigh
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job="cross-cluster"}[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency between clusters"
+          description: "P99 latency between {{ $labels.source_cluster }} and {{ $labels.target_cluster }} is {{ $value }}s"
+  
+  # Backup configuration
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retention: 7  # Keep 7 backups
+    s3:
+      bucketName: gunj-backups-{{ .ClusterName }}
+      region: {{ .ClusterRegion }}
+    includeVolumes: true
+    
+  # High Availability
+  highAvailability:
+    enabled: true
+    # Pod disruption budgets
+    podDisruptionBudget:
+      minAvailable: 1
+    # Anti-affinity rules
+    podAntiAffinity: required
+    # Topology spread
+    topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: DoNotSchedule
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+
+status:
+  phase: Ready
+  conditions:
+  - type: Ready
+    status: "True"
+    lastTransitionTime: 2024-01-15T10:00:00Z
+    reason: AllComponentsReady
+    message: All observability components are running
+  federationStatus:
+    syncedClusters:
+    - us-east-1
+    - eu-west-1
+    - ap-south-1
+    lastSyncTime: 2024-01-15T10:00:00Z
+---
+# Regional Overrides for US East
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-overrides-us-east
+  namespace: monitoring
+  annotations:
+    federation.gunj.io/target-cluster: us-east-1
+data:
+  overrides.yaml: |
+    spec:
+      components:
+        prometheus:
+          replicas: 3
+          resources:
+            requests:
+              memory: "6Gi"
+              cpu: "3"
+        grafana:
+          ingress:
+            host: grafana.us-east-1.example.com
+      global:
+        externalLabels:
+          cluster: us-east-1
+          region: us-east
+          datacenter: us-east-1a
+---
+# Regional Overrides for EU West
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-overrides-eu-west
+  namespace: monitoring
+  annotations:
+    federation.gunj.io/target-cluster: eu-west-1
+data:
+  overrides.yaml: |
+    spec:
+      components:
+        prometheus:
+          replicas: 2
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2"
+        grafana:
+          ingress:
+            host: grafana.eu-west-1.example.com
+        loki:
+          s3:
+            endpoint: s3.eu-west-1.amazonaws.com
+      global:
+        externalLabels:
+          cluster: eu-west-1
+          region: eu-west
+          datacenter: eu-west-1b
+          compliance: gdpr
+---
+# Global Alertmanager Configuration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-global-config
+  namespace: monitoring
+  labels:
+    sync: global
+    type: auth
+    sync: enabled
+type: Opaque
+stringData:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+      slack_api_url: '<slack-webhook-url>'
+      pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+    
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 12h
+      receiver: 'default'
+      routes:
+      - match:
+          severity: critical
+        receiver: 'pagerduty'
+        continue: true
+      - match:
+          severity: warning
+        receiver: 'slack'
+      - match_re:
+          cluster: (us-east-1|eu-west-1)
+        receiver: 'production'
+      - match:
+          cluster: dev-cluster
+        receiver: 'dev-team'
+    
+    receivers:
+    - name: 'default'
+      slack_configs:
+      - channel: '#alerts'
+        title: 'Alert: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+    
+    - name: 'pagerduty'
+      pagerduty_configs:
+      - service_key: '<service-key>'
+        description: '{{ .GroupLabels.alertname }} on {{ .GroupLabels.cluster }}'
+    
+    - name: 'slack'
+      slack_configs:
+      - channel: '#warnings'
+        send_resolved: true
+    
+    - name: 'production'
+      webhook_configs:
+      - url: 'http://incident-manager.monitoring.svc:8080/webhook'
+      email_configs:
+      - to: 'oncall@example.com'
+    
+    - name: 'dev-team'
+      slack_configs:
+      - channel: '#dev-alerts'
+---
+# ServiceMonitor for cross-cluster federation
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: federated-metrics
+  namespace: monitoring
+  labels:
+    federate: "true"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: metrics
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    relabelings:
+    - sourceLabels: [__address__]
+      targetLabel: instance
+    - sourceLabels: [__meta_kubernetes_pod_node_name]
+      targetLabel: node
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+    - targetLabel: cluster
+      replacement: {{ .ClusterName }}

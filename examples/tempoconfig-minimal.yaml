@@ -1,0 +1,42 @@
+# Minimal TempoConfig for Development
+apiVersion: observability.io/v1beta1
+kind: TempoConfig
+metadata:
+  name: tempo-minimal
+  namespace: observability
+spec:
+  targetPlatform:
+    name: dev-platform
+  
+  # Filesystem Storage for Development
+  storage:
+    trace:
+      backend: filesystem
+      filesystem:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+  
+  # Simple Receiver Configuration
+  distributor:
+    receivers:
+      otlp:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+  
+  # Basic Ingester Settings
+  ingester:
+    maxBlockDuration: "10m"
+    maxBlockBytes: "10MB"
+    
+  # Minimal Compactor Settings
+  compactor:
+    blockRetention: "24h" # 1 day for dev
+  
+  # Simple Server Settings
+  server:
+    httpListenPort: 3200
+    logLevel: debug
+    logFormat: logfmt

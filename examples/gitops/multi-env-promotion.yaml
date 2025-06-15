@@ -1,0 +1,416 @@
+# Example: Multi-Environment Promotion Setup
+# This example demonstrates progressive deployment through multiple environments
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-credentials
+  namespace: monitoring-dev
+type: Opaque
+stringData:
+  username: git
+  token: ${GITHUB_TOKEN}
+---
+# Copy the secret to all namespaces
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-credentials
+  namespace: monitoring-staging
+type: Opaque
+stringData:
+  username: git
+  token: ${GITHUB_TOKEN}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-credentials
+  namespace: monitoring-prod
+type: Opaque
+stringData:
+  username: git
+  token: ${GITHUB_TOKEN}
+---
+# Development Environment
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-dev
+  namespace: monitoring-dev
+  annotations:
+    promotion.observability.io/environment: dev
+spec:
+  gitOps:
+    enabled: true
+    provider: argocd
+    
+    repository:
+      url: https://github.com/example/observability-gitops.git
+      branch: dev
+      path: environments/dev
+      secretRef:
+        name: git-credentials
+      interval: 1m  # Fast sync for dev
+    
+    syncPolicy:
+      automated: true
+      prune: true
+      selfHeal: true
+    
+    # Promotion configuration
+    promotion:
+      strategy: automatic
+      environments:
+      - name: dev
+        namespace: monitoring-dev
+        branch: dev
+        autoPromote: true  # Auto-promote to staging after health checks
+        promotionPolicy:
+          minReplicaAvailability: 50  # Lower threshold for dev
+          healthCheckDuration: 5m     # Quick health check
+          metricThresholds:
+          - name: startup_success
+            query: |
+              up{namespace="monitoring-dev"} == 1
+            threshold: 1
+            operator: ">="
+      
+      - name: staging
+        namespace: monitoring-staging
+        branch: staging
+        autoPromote: true  # Auto-promote to prod after extensive testing
+        promotionPolicy:
+          minReplicaAvailability: 80
+          healthCheckDuration: 30m  # Longer testing period
+          metricThresholds:
+          - name: error_rate
+            query: |
+              sum(rate(http_requests_total{status=~"5..",namespace="monitoring-staging"}[5m])) / 
+              sum(rate(http_requests_total{namespace="monitoring-staging"}[5m]))
+            threshold: 0.01  # Less than 1% error rate
+            operator: "<"
+          - name: p99_latency
+            query: |
+              histogram_quantile(0.99, 
+                sum(rate(http_request_duration_seconds_bucket{namespace="monitoring-staging"}[5m])) 
+                by (le))
+            threshold: 1.0  # Less than 1 second
+            operator: "<"
+          - name: memory_usage
+            query: |
+              max(container_memory_usage_bytes{namespace="monitoring-staging"} / 
+                  container_spec_memory_limit_bytes{namespace="monitoring-staging"}) 
+              by (pod)
+            threshold: 0.8  # Less than 80% memory
+            operator: "<"
+      
+      - name: production
+        namespace: monitoring-prod
+        branch: main
+        autoPromote: false  # Manual approval required
+        promotionPolicy:
+          minReplicaAvailability: 95
+          healthCheckDuration: 2h  # Extended validation
+          metricThresholds:
+          - name: error_rate
+            query: |
+              sum(rate(http_requests_total{status=~"5..",namespace="monitoring-prod"}[5m])) / 
+              sum(rate(http_requests_total{namespace="monitoring-prod"}[5m]))
+            threshold: 0.001  # Less than 0.1% error rate
+            operator: "<"
+          - name: p99_latency
+            query: |
+              histogram_quantile(0.99, 
+                sum(rate(http_request_duration_seconds_bucket{namespace="monitoring-prod"}[5m])) 
+                by (le))
+            threshold: 0.5  # Less than 500ms
+            operator: "<"
+          - name: availability
+            query: |
+              avg_over_time(up{namespace="monitoring-prod"}[5m])
+            threshold: 0.999  # 99.9% availability
+            operator: ">="
+      
+      approvalRequired: true  # Manual approval for production
+    
+    # Rollback on promotion failure
+    rollback:
+      enabled: true
+      maxHistory: 5
+      triggers:
+      - type: healthCheck
+        threshold: "failed"
+        duration: 2m
+  
+  # Minimal components for dev
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 1
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      storage:
+        size: 10Gi
+      retention: 3d
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 1
+      
+    loki:
+      enabled: true
+      version: "2.9.0"
+      storage:
+        size: 10Gi
+      retention: 1d
+    
+    tempo:
+      enabled: false  # Not needed in dev
+
+---
+# Staging Environment (similar structure with higher resources)
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-staging
+  namespace: monitoring-staging
+  annotations:
+    promotion.observability.io/environment: staging
+spec:
+  # Similar to dev but with:
+  # - More replicas (2-3)
+  # - More resources
+  # - Longer retention
+  # - Additional components enabled
+  gitOps:
+    enabled: true
+    provider: argocd
+    repository:
+      url: https://github.com/example/observability-gitops.git
+      branch: staging
+      path: environments/staging
+      secretRef:
+        name: git-credentials
+      interval: 5m
+    
+    syncPolicy:
+      automated: true
+      prune: true
+      selfHeal: true
+    
+    # Same promotion configuration as dev platform
+    promotion:
+      strategy: automatic
+      environments:
+      - name: dev
+        namespace: monitoring-dev
+        branch: dev
+        autoPromote: true
+      - name: staging
+        namespace: monitoring-staging
+        branch: staging
+        autoPromote: true
+        promotionPolicy:
+          minReplicaAvailability: 80
+          healthCheckDuration: 30m
+      - name: production
+        namespace: monitoring-prod
+        branch: main
+        autoPromote: false
+        promotionPolicy:
+          minReplicaAvailability: 95
+          healthCheckDuration: 2h
+  
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 2
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+      storage:
+        size: 50Gi
+      retention: 7d
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      
+    loki:
+      enabled: true
+      version: "2.9.0"
+      storage:
+        size: 50Gi
+      retention: 3d
+      
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      storage:
+        size: 20Gi
+
+---
+# Production Environment (full configuration)
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-production
+  namespace: monitoring-prod
+  annotations:
+    promotion.observability.io/environment: production
+    promotion.observability.io/approval-required: "true"
+spec:
+  gitOps:
+    enabled: true
+    provider: argocd
+    repository:
+      url: https://github.com/example/observability-gitops.git
+      branch: main
+      path: environments/production
+      secretRef:
+        name: git-credentials
+      interval: 10m  # Slower sync for stability
+    
+    syncPolicy:
+      automated: false  # Manual sync for production
+      prune: false      # Don't auto-prune in production
+      selfHeal: true
+      retry:
+        limit: 5
+        backoff:
+          duration: 1m
+          factor: 2
+          maxDuration: 10m
+    
+    # Production is the final environment
+    promotion:
+      strategy: manual  # All changes require approval
+      environments:
+      - name: production
+        namespace: monitoring-prod
+        branch: main
+        autoPromote: false
+    
+    # Comprehensive rollback configuration
+    rollback:
+      enabled: true
+      maxHistory: 30  # Keep more history in production
+      triggers:
+      - type: healthCheck
+        threshold: "failed"
+        duration: 5m
+      - type: metric
+        threshold: "error_rate > 0.01"  # 1% error rate
+        duration: 10m
+      - type: metric
+        threshold: "p99_latency > 2"    # 2 second latency
+        duration: 10m
+    
+    # Drift detection with notification only (no auto-remediation)
+    driftDetection:
+      enabled: true
+      interval: 15m
+      action: notify  # Don't auto-fix in production
+  
+  # Full production configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3
+      resources:
+        requests:
+          memory: "8Gi"
+          cpu: "4"
+        limits:
+          memory: "16Gi"
+          cpu: "8"
+      storage:
+        size: 500Gi
+        storageClassName: fast-ssd
+      retention: 30d
+      highAvailability:
+        enabled: true
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 3
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+      ingress:
+        enabled: true
+        className: nginx
+        host: grafana.example.com
+        tls:
+          enabled: true
+      
+    loki:
+      enabled: true
+      version: "2.9.0"
+      deploymentMode: microservices
+      storage:
+        size: 1Ti
+      retention: 30d
+      s3:
+        enabled: true
+        bucketName: prod-loki-logs
+        
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      deploymentMode: microservices
+      storage:
+        size: 200Gi
+      retention: 7d
+      s3:
+        enabled: true
+        bucketName: prod-tempo-traces
+
+  # Production-specific settings
+  global:
+    externalLabels:
+      cluster: production
+      region: us-east-1
+      environment: prod
+      tier: critical
+    
+  # Enhanced monitoring for production
+  monitoring:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 15s  # More frequent monitoring
+    prometheusRule:
+      enabled: true
+      rules:
+      # Critical alerts for production
+      - alert: ProductionPlatformDown
+        expr: up{namespace="monitoring-prod",job=~"prometheus|grafana|loki|tempo"} == 0
+        for: 2m  # Faster alerting
+        labels:
+          severity: critical
+          environment: production
+          page: true  # Page on-call
+        annotations:
+          summary: "CRITICAL: Production platform component {{ $labels.job }} is down"
+          runbook: "https://runbooks.example.com/platform-down"

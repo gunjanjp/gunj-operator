@@ -1,0 +1,308 @@
+# Linkerd Service Mesh Configuration
+# This example demonstrates Linkerd-specific features including service profiles,
+# retry budgets, and traffic splits for canary deployments
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-linkerd
+  namespace: monitoring
+  annotations:
+    # Linkerd-specific annotations
+    linkerd.io/inject: enabled
+    config.linkerd.io/proxy-cpu-request: "100m"
+    config.linkerd.io/proxy-memory-request: "20Mi"
+spec:
+  # Linkerd Service Mesh Configuration
+  serviceMesh:
+    enabled: true
+    type: linkerd  # Explicitly specify Linkerd
+    
+    # mTLS is automatic in Linkerd
+    mtls:
+      enabled: true
+      mode: STRICT  # Linkerd always uses strict mTLS
+    
+    # Traffic Management for Linkerd
+    trafficManagement:
+      # Retry configuration (via retry budgets)
+      retry:
+        attempts: 3
+        perTryTimeout: "10s"
+        retryOn: "5xx,reset"
+      
+      # Linkerd doesn't have circuit breakers but uses retry budgets
+      circuitBreaker:
+        consecutiveErrors: 10  # Translated to retry budget
+        interval: "10s"
+        baseEjectionTime: "30s"
+        maxEjectionPercent: 50
+        
+      # Timeout policies
+      timeout:
+        request: "30s"
+        idle: "300s"
+      
+      # Load balancing (Linkerd uses exponentially-weighted moving average)
+      loadBalancing:
+        algorithm: ROUND_ROBIN  # Linkerd uses EWMA by default
+    
+    # Observability with Linkerd
+    observability:
+      metrics:
+        enabled: true
+        providers:
+          - prometheus  # Linkerd exposes Prometheus metrics
+      tracing:
+        enabled: true
+        samplingRate: 0.01  # 1% sampling
+      accessLogs:
+        enabled: false  # Linkerd doesn't have built-in access logs
+    
+    # Multi-cluster configuration
+    multiCluster:
+      enabled: true
+      clusterName: "primary"
+      network: "primary-network"
+      remoteClusters:
+        - name: "secondary"
+          endpoint: "https://secondary-k8s.example.com:6443"
+          network: "secondary-network"
+  
+  # Components Configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 2
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 100Gi
+      # Linkerd-specific Prometheus configuration
+      additionalScrapeConfigs: |
+        - job_name: 'linkerd-metrics'
+          kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+              - monitoring
+              - linkerd
+          relabel_configs:
+          - source_labels:
+            - __meta_kubernetes_pod_container_name
+            - __meta_kubernetes_pod_container_port_name
+            action: keep
+            regex: ^linkerd-proxy;linkerd-admin$
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_label_linkerd_io_proxy_job]
+            action: replace
+            target_label: k8s_job
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_linkerd_io_proxy_(.+)
+          - action: labeldrop
+            regex: __meta_kubernetes_pod_label_linkerd_io_proxy_(.+)
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_linkerd_io_(.+)
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+            replacement: __tmp_pod_label_$1
+          - action: labelmap
+            regex: __tmp_pod_label_linkerd_io_(.+)
+            replacement: __tmp_pod_label_$1
+          - action: labeldrop
+            regex: __tmp_pod_label_linkerd_io_(.+)
+          - action: labelmap
+            regex: __tmp_pod_label_(.+)
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+      ingress:
+        enabled: true
+        host: grafana.example.com
+      # Linkerd dashboards
+      dashboards:
+        - name: linkerd-top-line
+          url: https://grafana.com/grafana/dashboards/15474
+        - name: linkerd-service
+          url: https://grafana.com/grafana/dashboards/15475
+        - name: linkerd-pod
+          url: https://grafana.com/grafana/dashboards/15477
+        - name: linkerd-namespace
+          url: https://grafana.com/grafana/dashboards/15479
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      storage:
+        size: 200Gi
+      # Configure to collect Linkerd proxy logs
+      config:
+        server:
+          http_listen_port: 3100
+        positions:
+          filename: /tmp/positions.yaml
+        clients:
+          - url: http://loki:3100/loki/api/v1/push
+        scrape_configs:
+          - job_name: linkerd-proxy
+            kubernetes_sd_configs:
+              - role: pod
+            relabel_configs:
+              - source_labels:
+                  - __meta_kubernetes_pod_label_linkerd_io_proxy_job
+                action: keep
+                regex: (.+)
+              - source_labels:
+                  - __meta_kubernetes_namespace
+                  - __meta_kubernetes_pod_name
+                  - __meta_kubernetes_pod_container_name
+                regex: (.*)
+                target_label: __path__
+                replacement: /var/log/pods/${1}_${2}_*/${3}/*.log
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      storage:
+        size: 100Gi
+      # OpenCensus receiver for Linkerd traces
+      receivers:
+        opencensus:
+          endpoint: "0.0.0.0:55678"
+        otlp:
+          protocols:
+            grpc:
+              endpoint: "0.0.0.0:4317"
+
+---
+# ServiceProfile for Prometheus (managed by operator, shown for reference)
+apiVersion: linkerd.io/v1alpha2
+kind: ServiceProfile
+metadata:
+  name: prometheus.monitoring.svc.cluster.local
+  namespace: monitoring
+spec:
+  # Retry budget prevents retry storms
+  retryBudget:
+    retryRatio: 0.2  # 20% of requests can be retried
+    minRetriesPerSecond: 10
+    ttl: 10s
+  
+  # Route configuration
+  routes:
+  - name: metrics
+    condition:
+      method: GET
+      pathRegex: "/metrics"
+    responseClasses:
+    - condition:
+        status:
+          min: 200
+          max: 299
+      isFailure: false
+    timeout: 30s
+    
+  - name: query
+    condition:
+      method: GET
+      pathRegex: "/api/v1/query.*"
+    responseClasses:
+    - condition:
+        status:
+          min: 200
+          max: 299
+      isFailure: false
+    timeout: 60s
+    isRetryable: true
+    
+  - name: query_range
+    condition:
+      method: GET
+      pathRegex: "/api/v1/query_range.*"
+    responseClasses:
+    - condition:
+        status:
+          min: 200
+          max: 299
+      isFailure: false
+    timeout: 120s
+    isRetryable: true
+
+---
+# TrafficSplit for canary deployment (example)
+apiVersion: split.smi-spec.io/v1alpha1
+kind: TrafficSplit
+metadata:
+  name: grafana-canary
+  namespace: monitoring
+spec:
+  service: grafana
+  backends:
+  - service: grafana-stable
+    weight: 90
+  - service: grafana-canary
+    weight: 10
+
+---
+# Server resource for mTLS policy
+apiVersion: policy.linkerd.io/v1beta1
+kind: Server
+metadata:
+  name: observability-server
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: gunj-operator
+  port: all
+  proxyProtocol: "HTTP/2"
+
+---
+# ServerAuthorization for access control
+apiVersion: policy.linkerd.io/v1beta1
+kind: ServerAuthorization
+metadata:
+  name: observability-authz
+  namespace: monitoring
+spec:
+  server:
+    name: observability-server
+  client:
+    meshTLS:
+      identities:
+        - "prometheus.monitoring.serviceaccount.identity.linkerd.cluster.local"
+        - "grafana.monitoring.serviceaccount.identity.linkerd.cluster.local"
+        - "loki.monitoring.serviceaccount.identity.linkerd.cluster.local"
+        - "tempo.monitoring.serviceaccount.identity.linkerd.cluster.local"
+
+---
+# After applying this configuration:
+# 1. The operator creates Linkerd-specific resources (ServiceProfiles, etc.)
+# 2. All components get Linkerd proxies with automatic mTLS
+# 3. Retry budgets prevent cascading failures
+# 4. Service profiles optimize traffic handling
+# 5. Linkerd metrics are collected by Prometheus
+#
+# Verify with:
+# linkerd check --proxy -n monitoring
+# linkerd viz stat -n monitoring deploy
+# linkerd viz top -n monitoring
+# linkerd viz tap -n monitoring deploy/prometheus

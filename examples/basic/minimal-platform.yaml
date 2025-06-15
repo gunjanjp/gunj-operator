@@ -1,0 +1,14 @@
+# Minimal ObservabilityPlatform Example
+# This example shows the simplest possible configuration with default settings
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: minimal-platform
+  namespace: observability
+spec:
+  # Minimal spec - all components use defaults
+  components:
+    prometheus:
+      enabled: true
+    grafana:
+      enabled: true

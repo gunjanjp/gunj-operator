@@ -1,0 +1,189 @@
+---
+# Example ObservabilityPlatform resources to demonstrate kubectl printer columns
+# These examples show different states and configurations that will be displayed
+# when using kubectl get commands
+
+# Example 1: Fully deployed platform with all components
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: production-full
+  namespace: monitoring
+spec:
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+    loki:
+      enabled: true
+      version: "2.9.0"
+    tempo:
+      enabled: true
+      version: "2.3.0"
+status:
+  phase: Ready
+  health:
+    status: Healthy
+    healthyCount: 4
+    totalCount: 4
+  version: "v2.0.0"
+  message: "All components are running successfully"
+  componentStatus:
+    prometheus:
+      phase: Ready
+      version: v2.48.0
+      replicas: 3
+      ready: 3
+    grafana:
+      phase: Ready
+      version: "10.2.0"
+      replicas: 2
+      ready: 2
+    loki:
+      phase: Ready
+      version: "2.9.0"
+      replicas: 1
+      ready: 1
+    tempo:
+      phase: Ready
+      version: "2.3.0"
+      replicas: 1
+      ready: 1
+
+---
+# Example 2: Platform being installed
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: staging-installing
+  namespace: staging
+spec:
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+    grafana:
+      enabled: true
+      version: "10.2.0"
+status:
+  phase: Installing
+  health:
+    status: Unknown
+    healthyCount: 0
+    totalCount: 2
+  message: "Installing Prometheus and Grafana components"
+  componentStatus:
+    prometheus:
+      phase: Deploying
+      version: v2.48.0
+    grafana:
+      phase: Pending
+
+---
+# Example 3: Platform with some failed components
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: dev-degraded
+  namespace: development
+spec:
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+    grafana:
+      enabled: true
+      version: "10.2.0"
+    loki:
+      enabled: true
+      version: "2.9.0"
+status:
+  phase: Degraded
+  health:
+    status: Degraded
+    healthyCount: 2
+    totalCount: 3
+  version: "v2.0.0"
+  message: "Loki component failed to start: insufficient memory"
+  componentStatus:
+    prometheus:
+      phase: Ready
+      version: v2.48.0
+      replicas: 1
+      ready: 1
+    grafana:
+      phase: Ready
+      version: "10.2.0"
+      replicas: 1
+      ready: 1
+    loki:
+      phase: Failed
+      version: "2.9.0"
+      message: "OOMKilled"
+
+---
+# Example 4: Platform upgrade in progress
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: qa-upgrading
+  namespace: qa
+spec:
+  components:
+    prometheus:
+      enabled: true
+      version: v2.49.0  # Upgrading from v2.48.0
+    grafana:
+      enabled: true
+      version: "10.3.0"  # Upgrading from 10.2.0
+status:
+  phase: Upgrading
+  health:
+    status: Degraded
+    healthyCount: 1
+    totalCount: 2
+  version: "v2.0.0"
+  message: "Upgrading components to new versions"
+  componentStatus:
+    prometheus:
+      phase: Upgrading
+      version: v2.48.0  # Current version
+      replicas: 2
+      ready: 1
+    grafana:
+      phase: Ready
+      version: "10.3.0"  # Already upgraded
+      replicas: 1
+      ready: 1
+
+---
+# Example 5: Minimal platform (v1alpha1)
+apiVersion: observability.io/v1alpha1
+kind: ObservabilityPlatform
+metadata:
+  name: minimal-platform
+  namespace: test
+spec:
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+status:
+  phase: Ready
+  message: "Platform is ready"
+  conditions:
+  - type: Ready
+    status: "True"
+    reason: AllComponentsReady
+    message: All components are ready
+    lastTransitionTime: "2025-06-12T10:00:00Z"
+  componentStatus:
+    prometheus:
+      phase: Ready
+      version: v2.48.0
+      readyReplicas: 1

@@ -1,0 +1,307 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: observability-mesh-platform
+  namespace: monitoring
+spec:
+  # Enable service mesh with comprehensive observability features
+  serviceMesh:
+    enabled: true
+    type: auto
+    
+    # Full observability configuration
+    observability:
+      # Metrics collection
+      metrics:
+        enabled: true
+        providers:
+          - "prometheus"
+          - "envoy"
+        customMetrics:
+          - name: "request_duration_milliseconds"
+            dimensions:
+              service: "service_name"
+              method: "http_method"
+              path: "url_path"
+              response_code: "response_code"
+            unit: "milliseconds"
+          - name: "request_size_bytes"
+            dimensions:
+              service: "service_name"
+              direction: "inbound|outbound"
+            unit: "bytes"
+          - name: "response_size_bytes"
+            dimensions:
+              service: "service_name"
+              direction: "inbound|outbound"
+            unit: "bytes"
+          - name: "tcp_connections_active"
+            dimensions:
+              service: "service_name"
+              direction: "inbound|outbound"
+            unit: "connections"
+      
+      # Distributed tracing
+      tracing:
+        enabled: true
+        samplingRate: 10.0 # 10% sampling rate
+        provider: tempo # Use integrated Tempo
+        customTags:
+          environment: "production"
+          region: "us-east-1"
+          cluster: "primary"
+          mesh: "istio"
+      
+      # Access logging
+      accessLogging:
+        enabled: true
+        format: JSON
+        filters:
+          # Log errors
+          - type: "status_code"
+            condition: "gte"
+            value: "400"
+          # Log slow requests
+          - type: "duration"
+            condition: "gte"
+            value: "1000" # milliseconds
+          # Log specific paths
+          - type: "path"
+            condition: "prefix"
+            value: "/api/"
+    
+    # mTLS for secure communication
+    mtls:
+      enabled: true
+      mode: STRICT
+      certificateRotation:
+        enabled: true
+        rotationInterval: "24h" # Daily rotation
+    
+    # Traffic management for observability
+    trafficManagement:
+      # Add tracing headers
+      retry:
+        attempts: 3
+        perTryTimeout: "10s"
+        retryOn:
+          - "5xx"
+          - "reset"
+      
+      timeout:
+        requestTimeout: "30s"
+        idleTimeout: "300s"
+    
+    # Health checks with observability
+    healthCheck:
+      enabled: true
+      interval: "10s"
+      timeout: "3s"
+  
+  # Components with full observability integration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1"
+        limits:
+          memory: "8Gi"
+          cpu: "2"
+      storage:
+        size: 200Gi
+        storageClassName: fast-ssd
+      
+      # Service mesh metrics scraping
+      additionalScrapeConfigs: |
+        # Istio control plane metrics
+        - job_name: 'istio-control-plane'
+          kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+              - istio-system
+          relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: 'istiod|istio-pilot'
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: 'http-monitoring'
+        
+        # Envoy sidecar metrics
+        - job_name: 'envoy-stats'
+          metrics_path: /stats/prometheus
+          kubernetes_sd_configs:
+          - role: pod
+          relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            action: keep
+            regex: '.*-envoy-prom'
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+          - source_labels: [__meta_kubernetes_pod_label_version]
+            target_label: version
+        
+        # Linkerd metrics (if using Linkerd)
+        - job_name: 'linkerd-proxy'
+          kubernetes_sd_configs:
+          - role: pod
+          relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_container_name]
+            action: keep
+            regex: linkerd-proxy
+          - source_labels: [__meta_kubernetes_pod_label_linkerd_io_proxy_job]
+            target_label: job
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      
+      # Pre-configured service mesh dashboards
+      dataSources:
+        - name: "prometheus"
+          type: prometheus
+          url: "http://prometheus:9090"
+          isDefault: true
+        - name: "loki"
+          type: loki
+          url: "http://loki:3100"
+        - name: "tempo"
+          type: tempo
+          url: "http://tempo:3200"
+      
+      # Service mesh specific dashboards
+      dashboardProviders:
+        - name: 'service-mesh'
+          folder: 'Service Mesh'
+          type: file
+          options:
+            path: /var/lib/grafana/dashboards/service-mesh
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 3
+      storage:
+        size: 200Gi
+        s3:
+          enabled: true
+          bucketName: "loki-service-mesh-logs"
+          region: "us-east-1"
+      
+      # Log labels for service mesh
+      config:
+        schema_config:
+          configs:
+            - from: 2024-01-01
+              store: boltdb-shipper
+              object_store: s3
+              schema: v11
+              index:
+                prefix: index_
+                period: 24h
+        
+        # Service mesh specific parsing
+        pipeline_stages:
+          - json:
+              expressions:
+                method: method
+                path: path
+                status: response_code
+                duration: duration
+                trace_id: trace_id
+          - labels:
+              method:
+              path:
+              status:
+          - metrics:
+              log_lines_total:
+                type: Counter
+                description: "Total log lines"
+                prefix: loki_
+                max_idle_duration: 24h
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 2
+      storage:
+        size: 100Gi
+      
+      # Trace sampling and processing
+      config:
+        distributor:
+          receivers:
+            jaeger:
+              protocols:
+                thrift_http:
+                  endpoint: 0.0.0.0:14268
+                grpc:
+                  endpoint: 0.0.0.0:14250
+            otlp:
+              protocols:
+                http:
+                  endpoint: 0.0.0.0:4318
+                grpc:
+                  endpoint: 0.0.0.0:4317
+        
+        ingester:
+          trace_idle_period: 10s
+          max_block_bytes: 1_000_000
+          max_block_duration: 5m
+        
+        compactor:
+          compaction:
+            compaction_window: 1h
+            max_compaction_objects: 1000000
+            block_retention: 336h # 14 days
+        
+        storage:
+          trace:
+            backend: s3
+            s3:
+              bucket: tempo-traces
+              endpoint: s3.us-east-1.amazonaws.com
+              region: us-east-1
+    
+    opentelemetryCollector:
+      enabled: true
+      version: "0.91.0"
+      mode: deployment
+      replicas: 2
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "250m"
+        limits:
+          memory: "1Gi"
+          cpu: "500m"
+  
+  # High availability for observability
+  highAvailability:
+    enabled: true
+    antiAffinity: hard
+  
+  # Global settings
+  global:
+    externalLabels:
+      cluster: "production"
+      mesh_enabled: "true"
+      observability: "enhanced"
+    logLevel: "info"
+    retentionPolicies:
+      metrics: "30d"
+      logs: "14d"
+      traces: "7d"

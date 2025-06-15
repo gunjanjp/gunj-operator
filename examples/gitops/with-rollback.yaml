@@ -1,0 +1,150 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-with-rollback
+  namespace: observability
+spec:
+  # Component configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "2"
+      storage:
+        size: 100Gi
+      retention: 30d
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      storage:
+        size: 200Gi
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+  
+  # GitOps configuration with comprehensive rollback settings
+  gitOps:
+    provider: argocd
+    
+    repository:
+      url: https://github.com/your-org/platform-configs.git
+      branch: main
+      path: platforms/production
+      secretRef: git-credentials
+      interval: 1m
+    
+    environments:
+      - name: production
+        namespace: observability-prod
+        path: platforms/production
+    
+    # Enable automatic synchronization
+    autoSync: true
+    
+    # Comprehensive rollback configuration
+    rollbackConfig:
+      # Enable automatic rollback on failures
+      autoRollback: true
+      
+      # Number of failures before triggering rollback
+      failureThreshold: 3
+      
+      # Time window for counting failures
+      window: 30m
+      
+      # Maximum number of revisions to keep for rollback
+      maxHistory: 20
+
+  # High availability for production
+  highAvailability:
+    enabled: true
+    minReplicas: 3
+
+---
+# Example of rollback scenarios and how they work:
+
+# Scenario 1: Component Failure
+# - Prometheus fails to start after upgrade
+# - 3 restart attempts within 30 minutes
+# - Automatic rollback triggered to last known good version
+
+# Scenario 2: Health Check Failure  
+# - Grafana becomes unhealthy after configuration change
+# - Health checks fail for 3 consecutive times
+# - Platform automatically rolls back to previous configuration
+
+# Scenario 3: Manual Rollback
+# - Issues detected in production
+# - Administrator triggers rollback:
+#   kubectl annotate observabilityplatform platform-with-rollback \
+#     observability.io/rollback-to=<revision> --overwrite
+
+---
+# ConfigMap tracking rollback history (managed by operator)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-with-rollback-gitops-history
+  namespace: observability
+data:
+  lastKnownGood: "git-sha-12345"
+  lastKnownGoodTime: "2025-06-13T09:00:00Z"
+  history: |
+    2025-06-13T09:00:00Z|git-sha-12345
+    2025-06-13T08:30:00Z|git-sha-12344
+    2025-06-13T08:00:00Z|git-sha-12343
+    2025-06-13T07:30:00Z|git-sha-12342
+    2025-06-13T07:00:00Z|git-sha-12341
+
+---
+# Event showing automatic rollback
+apiVersion: v1
+kind: Event
+metadata:
+  name: platform-rollback-example
+  namespace: observability
+type: Warning
+reason: AutomaticRollback
+message: "Automatically rolled back to revision git-sha-12344: Failure threshold exceeded: 3 failures in 30m"
+source:
+  component: gunj-operator-rollback-manager
+involvedObject:
+  kind: ObservabilityPlatform
+  name: platform-with-rollback
+  namespace: observability
+firstTimestamp: "2025-06-13T10:30:00Z"
+lastTimestamp: "2025-06-13T10:30:00Z"
+count: 1
+
+---
+# Example: Testing rollback in development
+# 1. Deploy a working configuration
+# 2. Introduce a breaking change (e.g., invalid Prometheus config)
+# 3. Watch the operator detect failures and rollback
+
+# Breaking change example - invalid Prometheus configuration:
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: prometheus-config-override
+# data:
+#   prometheus.yml: |
+#     global:
+#       scrape_interval: invalid-value  # This will cause Prometheus to fail
+#     scrape_configs:
+#       - job_name: 'broken'
+#         static_configs:
+#           - targets: ['nowhere:9999']

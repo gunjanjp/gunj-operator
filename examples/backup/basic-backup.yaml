@@ -1,0 +1,64 @@
+apiVersion: backup.observability.io/v1alpha1
+kind: Backup
+metadata:
+  name: manual-backup-1
+  namespace: gunj-system
+spec:
+  # Backup type - Full backup captures all data
+  type: Full
+  
+  # Include all namespaces except system ones
+  excludedNamespaces:
+    - kube-system
+    - kube-public
+    - kube-node-lease
+  
+  # Include all ObservabilityPlatform resources and related objects
+  includedResources:
+    - ObservabilityPlatform
+    - ConfigMap
+    - Secret
+    - PersistentVolumeClaim
+    - Service
+    - ServiceAccount
+  
+  # Storage configuration
+  storageLocation:
+    provider: S3
+    bucket: gunj-operator-backups
+    prefix: manual-backups
+    region: us-east-1
+    credential:
+      name: s3-credentials
+      key: access-key-id
+    config:
+      storageClass: STANDARD_IA  # Use infrequent access for cost savings
+  
+  # TTL - Keep backup for 30 days
+  ttl: 720h
+  
+  # Enable volume snapshots
+  snapshotVolumes: true
+  
+  # Include cluster-scoped resources
+  includeClusterResources: true
+  
+  # Basic hooks
+  hooks:
+    preBackup:
+      - name: notify-start
+        command:
+          - /bin/sh
+          - -c
+          - echo "Starting backup at $(date)"
+        onError: Continue
+        timeout: 30s
+    
+    postBackup:
+      - name: notify-complete
+        command:
+          - /bin/sh
+          - -c
+          - echo "Backup completed at $(date)"
+        onError: Continue
+        timeout: 30s

@@ -1,0 +1,194 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: multi-env-platform
+  namespace: observability
+spec:
+  # Component configuration (same for all environments)
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+      storage:
+        size: 50Gi
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      ingress:
+        enabled: true
+        # Host will be overridden per environment
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      storage:
+        size: 100Gi
+  
+  # Multi-environment GitOps configuration
+  gitOps:
+    provider: argocd  # Works with both ArgoCD and Flux
+    
+    repository:
+      url: https://github.com/your-org/platform-gitops.git
+      branch: main
+      path: environments
+      secretRef: git-credentials
+      interval: 1m
+    
+    environments:
+      # Development - Continuous deployment from main branch
+      - name: dev
+        namespace: platform-dev
+        branch: main  # Deploy latest from main
+        path: environments/dev
+        # No promotion policy - this is the source
+      
+      # QA - Promoted from dev after tests pass
+      - name: qa
+        namespace: platform-qa
+        path: environments/qa
+        promotionPolicy:
+          autoPromotion: true
+          dependsOn: dev
+          promoteAfter: 15m  # Wait 15 minutes after dev is ready
+          requiredTests:
+            - unit-tests
+            - integration-tests
+      
+      # Staging - Promoted from QA with additional tests
+      - name: staging
+        namespace: platform-staging
+        path: environments/staging
+        promotionPolicy:
+          autoPromotion: true
+          dependsOn: qa
+          promoteAfter: 30m  # Wait 30 minutes after QA is ready
+          requiredTests:
+            - unit-tests
+            - integration-tests
+            - performance-tests
+            - security-scan
+      
+      # Production - Manual promotion with approval
+      - name: production
+        namespace: platform-prod
+        path: environments/production
+        promotionPolicy:
+          autoPromotion: false  # Require manual trigger
+          approvalRequired: true
+          dependsOn: staging
+          requiredTests:
+            - unit-tests
+            - integration-tests
+            - performance-tests
+            - security-scan
+            - chaos-tests
+    
+    # Automatic promotion configuration
+    autoPromotion:
+      enabled: true
+      strategy: sequential  # One environment at a time
+      # For parallel promotion (e.g., multiple regions):
+      # strategy: parallel
+      # maxParallel: 3
+    
+    # Rollback configuration with different thresholds per environment
+    rollbackConfig:
+      autoRollback: true
+      failureThreshold: 5   # Default threshold
+      window: 30m
+      maxHistory: 20
+
+---
+# Example: Environment-specific overrides in Git repository
+# File: environments/dev/kustomization.yaml
+#
+# apiVersion: kustomize.config.k8s.io/v1beta1
+# kind: Kustomization
+# 
+# resources:
+#   - ../../base
+# 
+# patches:
+#   - target:
+#       kind: ObservabilityPlatform
+#       name: multi-env-platform
+#     patch: |
+#       - op: replace
+#         path: /spec/components/prometheus/resources/requests/memory
+#         value: 1Gi
+#       - op: replace
+#         path: /spec/components/prometheus/retention
+#         value: 7d
+#       - op: replace
+#         path: /spec/components/grafana/ingress/host
+#         value: grafana-dev.example.com
+
+---
+# Example: Production overrides
+# File: environments/production/kustomization.yaml
+#
+# apiVersion: kustomize.config.k8s.io/v1beta1
+# kind: Kustomization
+# 
+# resources:
+#   - ../../base
+# 
+# patches:
+#   - target:
+#       kind: ObservabilityPlatform
+#       name: multi-env-platform
+#     patch: |
+#       - op: replace
+#         path: /spec/components/prometheus/resources/requests/memory
+#         value: 8Gi
+#       - op: replace
+#         path: /spec/components/prometheus/replicas
+#         value: 3
+#       - op: replace
+#         path: /spec/components/prometheus/retention
+#         value: 90d
+#       - op: replace
+#         path: /spec/components/grafana/ingress/host
+#         value: grafana.example.com
+#       - op: add
+#         path: /spec/highAvailability
+#         value:
+#           enabled: true
+#           minReplicas: 3
+
+---
+# ConfigMap to track promotion status (created by operator)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: multi-env-platform-promotion-status
+  namespace: observability
+data:
+  status: |
+    environments:
+      dev:
+        lastDeployment: "2025-06-13T10:00:00Z"
+        revision: "abc123"
+        status: "ready"
+      qa:
+        lastDeployment: "2025-06-13T10:15:00Z"
+        revision: "abc123"
+        status: "ready"
+        promotedFrom: "dev"
+      staging:
+        lastDeployment: "2025-06-13T10:45:00Z"
+        revision: "abc123"
+        status: "ready"
+        promotedFrom: "qa"
+      production:
+        lastDeployment: "2025-06-13T14:00:00Z"
+        revision: "def456"
+        status: "ready"
+        promotedFrom: "staging"
+        approvedBy: "platform-admin"

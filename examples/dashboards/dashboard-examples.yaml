@@ -1,0 +1,1107 @@
+# Basic Prometheus Dashboard
+apiVersion: observability.io/v1beta1
+kind: Dashboard
+metadata:
+  name: kubernetes-cluster-overview
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: production-platform
+    
+  title: Kubernetes Cluster Overview
+  description: High-level overview of Kubernetes cluster health and resource usage
+  tags:
+    - kubernetes
+    - infrastructure
+    - overview
+    
+  folder: Infrastructure
+  editable: false
+  
+  timeSettings:
+    from: now-1h
+    to: now
+    refreshInterval: 30s
+    timezone: browser
+    
+  variables:
+  - name: datasource
+    type: datasource
+    label: Data Source
+    query:
+      queryType: prometheus
+    current:
+      text: Prometheus
+      value: prometheus
+    hide: false
+    
+  - name: cluster
+    type: query
+    label: Cluster
+    query:
+      query: label_values(up{job="kube-state-metrics"}, cluster)
+      dataSource:
+        name: "$datasource"
+    refresh: onDashLoad
+    includeAll: true
+    allValue: ".*"
+    multi: false
+    sort: alphabetical
+    
+  - name: namespace
+    type: query
+    label: Namespace
+    query:
+      query: label_values(kube_namespace_created{cluster=~"$cluster"}, namespace)
+      dataSource:
+        name: "$datasource"
+    refresh: onTimeRangeChanged
+    includeAll: true
+    allValue: ".*"
+    multi: true
+    sort: alphabetical
+    
+  panels:
+  - id: 1
+    title: Cluster Health Score
+    type: stat
+    gridPos:
+      x: 0
+      y: 0
+      w: 6
+      h: 4
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      expr: |
+        (
+          sum(up{job="kube-apiserver",cluster=~"$cluster"}) /
+          count(up{job="kube-apiserver",cluster=~"$cluster"})
+        ) * 100
+      legendFormat: "API Server Health"
+      instant: true
+    fieldConfig:
+      defaults:
+        unit: percent
+        decimals: 1
+        thresholds:
+          mode: absolute
+          steps:
+          - value: 
+            color: red
+          - value: 90
+            color: yellow
+          - value: 95
+            color: green
+        color:
+          mode: thresholds
+          
+  - id: 2
+    title: Node Status
+    type: stat
+    gridPos:
+      x: 6
+      y: 0
+      w: 6
+      h: 4
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      expr: |
+        sum(kube_node_info{cluster=~"$cluster"})
+      legendFormat: "Total"
+      instant: true
+    - refId: B
+      expr: |
+        sum(kube_node_status_condition{condition="Ready",status="true",cluster=~"$cluster"})
+      legendFormat: "Ready"
+      instant: true
+    - refId: C
+      expr: |
+        sum(kube_node_status_condition{condition="Ready",status="false",cluster=~"$cluster"})
+      legendFormat: "Not Ready"
+      instant: true
+    fieldConfig:
+      defaults:
+        mappings:
+        - type: special
+          options:
+            match: "null"
+            result:
+              text: "0"
+        thresholds:
+          mode: absolute
+          steps:
+          - value: 
+            color: green
+          - value: 1
+            color: red
+        color:
+          mode: fixed
+          fixedColor: green
+          
+  - id: 3
+    title: Namespace Count
+    type: stat
+    gridPos:
+      x: 12
+      y: 0
+      w: 6
+      h: 4
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      expr: |
+        count(count by (namespace) (kube_namespace_created{cluster=~"$cluster"}))
+      instant: true
+    fieldConfig:
+      defaults:
+        unit: none
+        decimals: 0
+        color:
+          mode: fixed
+          fixedColor: blue
+          
+  - id: 4
+    title: Pod Count
+    type: stat
+    gridPos:
+      x: 18
+      y: 0
+      w: 6
+      h: 4
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      expr: |
+        sum(kube_pod_info{cluster=~"$cluster",namespace=~"$namespace"})
+      instant: true
+    fieldConfig:
+      defaults:
+        unit: none
+        decimals: 0
+        color:
+          mode: fixed
+          fixedColor: purple
+          
+  - id: 5
+    title: CPU Usage
+    type: timeseries
+    gridPos:
+      x: 0
+      y: 4
+      w: 12
+      h: 8
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      expr: |
+        sum(rate(container_cpu_usage_seconds_total{cluster=~"$cluster",namespace=~"$namespace",container!=""}[5m])) by (namespace)
+      legendFormat: "{{ namespace }}"
+    fieldConfig:
+      defaults:
+        unit: cores
+        decimals: 2
+        displayName: "${__series.name}"
+        thresholds:
+          mode: absolute
+          steps:
+          - value: 
+            color: green
+          - value: 0.8
+            color: yellow
+          - value: 1
+            color: red
+        custom:
+          lineInterpolation: smooth
+          lineWidth: 2
+          fillOpacity: 10
+          gradientMode: opacity
+          showPoints: never
+          spanNulls: true
+          
+  - id: 6
+    title: Memory Usage
+    type: timeseries
+    gridPos:
+      x: 12
+      y: 4
+      w: 12
+      h: 8
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      expr: |
+        sum(container_memory_working_set_bytes{cluster=~"$cluster",namespace=~"$namespace",container!=""}) by (namespace)
+      legendFormat: "{{ namespace }}"
+    fieldConfig:
+      defaults:
+        unit: bytes
+        decimals: 2
+        displayName: "${__series.name}"
+        custom:
+          lineInterpolation: smooth
+          lineWidth: 2
+          fillOpacity: 10
+          gradientMode: opacity
+          showPoints: never
+          spanNulls: true
+          
+  - id: 7
+    title: Network I/O
+    type: timeseries
+    gridPos:
+      x: 0
+      y: 12
+      w: 12
+      h: 8
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      expr: |
+        sum(rate(container_network_receive_bytes_total{cluster=~"$cluster",namespace=~"$namespace"}[5m])) by (namespace)
+      legendFormat: "{{ namespace }} - RX"
+    - refId: B
+      expr: |
+        -sum(rate(container_network_transmit_bytes_total{cluster=~"$cluster",namespace=~"$namespace"}[5m])) by (namespace)
+      legendFormat: "{{ namespace }} - TX"
+    fieldConfig:
+      defaults:
+        unit: Bps
+        decimals: 2
+        custom:
+          lineInterpolation: smooth
+          lineWidth: 2
+          fillOpacity: 10
+          gradientMode: opacity
+          showPoints: never
+          spanNulls: true
+          drawStyle: line
+          
+  - id: 8
+    title: Pod Phase Distribution
+    type: pieChart
+    gridPos:
+      x: 12
+      y: 12
+      w: 12
+      h: 8
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      expr: |
+        sum by (phase) (kube_pod_status_phase{cluster=~"$cluster",namespace=~"$namespace"})
+      format: table
+      instant: true
+    fieldConfig:
+      defaults:
+        unit: none
+        decimals: 0
+        custom:
+          hideFrom:
+            tooltip: false
+            viz: false
+            legend: false
+          pieType: pie
+          
+  - id: 9
+    title: Top CPU Consuming Pods
+    type: table
+    gridPos:
+      x: 0
+      y: 20
+      w: 12
+      h: 8
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      expr: |
+        topk(10, 
+          sum by (namespace, pod) (
+            rate(container_cpu_usage_seconds_total{cluster=~"$cluster",namespace=~"$namespace",container!="",pod!=""}[5m])
+          )
+        )
+      format: table
+      instant: true
+    transformations:
+    - id: organize
+      options:
+        excludeByName:
+          Time: true
+        indexByName:
+          namespace: 0
+          pod: 1
+          Value: 2
+        renameByName:
+          namespace: Namespace
+          pod: Pod
+          Value: CPU (cores)
+    fieldConfig:
+      defaults:
+        unit: cores
+        decimals: 3
+        custom:
+          align: auto
+          displayMode: auto
+          inspect: false
+      overrides:
+      - matcher:
+          id: byName
+          options: CPU (cores)
+        properties:
+        - id: custom.displayMode
+          value: lcd-gauge
+        - id: thresholds
+          value:
+            mode: absolute
+            steps:
+            - value: 
+              color: green
+            - value: 0.8
+              color: yellow
+            - value: 1
+              color: red
+        - id: custom.align
+          value: center
+          
+  - id: 10
+    title: Top Memory Consuming Pods
+    type: table
+    gridPos:
+      x: 12
+      y: 20
+      w: 12
+      h: 8
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      expr: |
+        topk(10, 
+          sum by (namespace, pod) (
+            container_memory_working_set_bytes{cluster=~"$cluster",namespace=~"$namespace",container!="",pod!=""}
+          )
+        )
+      format: table
+      instant: true
+    transformations:
+    - id: organize
+      options:
+        excludeByName:
+          Time: true
+        indexByName:
+          namespace: 0
+          pod: 1
+          Value: 2
+        renameByName:
+          namespace: Namespace
+          pod: Pod
+          Value: Memory
+    fieldConfig:
+      defaults:
+        unit: bytes
+        decimals: 2
+        custom:
+          align: auto
+          displayMode: auto
+          inspect: false
+      overrides:
+      - matcher:
+          id: byName
+          options: Memory
+        properties:
+        - id: custom.displayMode
+          value: color-background-solid
+        - id: thresholds
+          value:
+            mode: absolute
+            steps:
+            - value: 
+              color: green
+            - value: 1073741824  # 1GB
+              color: yellow
+            - value: 2147483648  # 2GB
+              color: red
+        - id: custom.align
+          value: center
+          
+  annotations:
+  - name: Deployments
+    enable: true
+    datasource:
+      name: "$datasource"
+    expr: |
+      changes(kube_deployment_created{cluster=~"$cluster",namespace=~"$namespace"}[5m]) > 0
+    titleFormat: "Deployment Event"
+    textFormat: "Deployment changed in namespace {{ namespace }}"
+    iconColor: "rgba(0, 211, 255, 1)"
+    
+  - name: Node Issues
+    enable: true
+    datasource:
+      name: "$datasource"
+    expr: |
+      kube_node_status_condition{condition="Ready",status="false",cluster=~"$cluster"} == 1
+    titleFormat: "Node Not Ready"
+    textFormat: "Node {{ node }} is not ready"
+    iconColor: "rgba(255, 96, 96, 1)"
+    
+  links:
+  - title: Cluster Details
+    type: dashboards
+    tags:
+    - kubernetes
+    - detailed
+    includeVars: true
+    keepTime: true
+    
+  - title: Documentation
+    type: link
+    url: https://kubernetes.io/docs/
+    tooltip: Kubernetes Documentation
+    icon: doc
+    targetBlank: true
+    
+  metadata:
+    team: platform-engineering
+    service: kubernetes
+    environment: production
+    purpose: Monitor overall Kubernetes cluster health and resource usage
+    documentationUrl: https://wiki.company.com/kubernetes-monitoring
+
+---
+# Loki Logs Dashboard
+apiVersion: observability.io/v1beta1
+kind: Dashboard
+metadata:
+  name: application-logs-analysis
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: production-platform
+    
+  title: Application Logs Analysis
+  description: Analyze application logs with Loki
+  tags:
+    - logs
+    - loki
+    - applications
+    
+  folder: Applications
+  
+  timeSettings:
+    from: now-3h
+    to: now
+    refreshInterval: 10s
+    
+  variables:
+  - name: datasource
+    type: datasource
+    label: Data Source
+    query:
+      queryType: loki
+    current:
+      text: Loki
+      value: loki
+      
+  - name: namespace
+    type: query
+    label: Namespace
+    query:
+      query: label_values({job="fluentbit"}, namespace)
+      dataSource:
+        name: "$datasource"
+    refresh: onDashLoad
+    includeAll: true
+    multi: true
+    
+  - name: app
+    type: query
+    label: Application
+    query:
+      query: label_values({namespace=~"$namespace"}, app)
+      dataSource:
+        name: "$datasource"
+    refresh: onTimeRangeChanged
+    includeAll: true
+    multi: true
+    
+  - name: level
+    type: custom
+    label: Log Level
+    options:
+    - text: All
+      value: ".*"
+      selected: true
+    - text: Error
+      value: "ERROR|error|Error"
+    - text: Warning
+      value: "WARN|warn|Warning|WARNING"
+    - text: Info
+      value: "INFO|info|Info"
+    - text: Debug
+      value: "DEBUG|debug|Debug"
+    multi: false
+    
+  panels:
+  - id: 1
+    title: Log Volume
+    type: timeseries
+    gridPos:
+      x: 0
+      y: 0
+      w: 24
+      h: 6
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      logQuery:
+        query: |
+          sum by (namespace) (
+            rate({namespace=~"$namespace", app=~"$app"} |~ "$level" [1m])
+          )
+        queryType: range
+      legendFormat: "{{ namespace }}"
+    fieldConfig:
+      defaults:
+        unit: logs/sec
+        custom:
+          lineInterpolation: smooth
+          lineWidth: 2
+          fillOpacity: 20
+          gradientMode: opacity
+          showPoints: never
+          spanNulls: false
+          stacking:
+            mode: normal
+          drawStyle: line
+          
+  - id: 2
+    title: Error Rate
+    type: stat
+    gridPos:
+      x: 0
+      y: 6
+      w: 6
+      h: 4
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      logQuery:
+        query: |
+          sum(rate({namespace=~"$namespace", app=~"$app"} |~ "ERROR|error|Error" [5m]))
+        queryType: instant
+    fieldConfig:
+      defaults:
+        unit: logs/sec
+        decimals: 2
+        thresholds:
+          mode: absolute
+          steps:
+          - value: 
+            color: green
+          - value: 0.1
+            color: yellow
+          - value: 1
+            color: red
+        color:
+          mode: thresholds
+          
+  - id: 3
+    title: Total Logs
+    type: stat
+    gridPos:
+      x: 6
+      y: 6
+      w: 6
+      h: 4
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      logQuery:
+        query: |
+          sum(count_over_time({namespace=~"$namespace", app=~"$app"} |~ "$level" [1h]))
+        queryType: instant
+    fieldConfig:
+      defaults:
+        unit: none
+        decimals: 0
+        color:
+          mode: fixed
+          fixedColor: blue
+          
+  - id: 4
+    title: Log Stream
+    type: logs
+    gridPos:
+      x: 12
+      y: 6
+      w: 12
+      h: 14
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      logQuery:
+        query: |
+          {namespace=~"$namespace", app=~"$app"} |~ "$level"
+        queryType: stream
+        maxLines: 500
+    options:
+      showTime: true
+      showLabels: true
+      showCommonLabels: false
+      wrapLogMessage: false
+      prettifyLogMessage: true
+      enableLogDetails: true
+      dedupStrategy: none
+      sortOrder: Descending
+      
+  - id: 5
+    title: Top Error Messages
+    type: table
+    gridPos:
+      x: 0
+      y: 10
+      w: 12
+      h: 10
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      logQuery:
+        query: |
+          topk(10,
+            sum by (message) (
+              count_over_time({namespace=~"$namespace", app=~"$app"} 
+                |~ "ERROR|error|Error" 
+                | regexp `(?P<message>(ERROR|error|Error).*)`
+                | line_format "{{.message}}"
+              [1h])
+            )
+          )
+        queryType: instant
+      format: table
+    transformations:
+    - id: organize
+      options:
+        excludeByName:
+          Time: true
+        renameByName:
+          message: Error Message
+          Value: Count
+    fieldConfig:
+      defaults:
+        custom:
+          align: auto
+          displayMode: auto
+      overrides:
+      - matcher:
+          id: byName
+          options: Count
+        properties:
+        - id: custom.width
+          value: 100
+        - id: custom.align
+          value: center
+          
+  - id: 6
+    title: Log Level Distribution
+    type: pieChart
+    gridPos:
+      x: 0
+      y: 20
+      w: 8
+      h: 8
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      logQuery:
+        query: |
+          sum(count_over_time({namespace=~"$namespace", app=~"$app"} |~ "ERROR|error|Error" [1h]))
+        queryType: instant
+        legendFormat: "Error"
+    - refId: B
+      logQuery:
+        query: |
+          sum(count_over_time({namespace=~"$namespace", app=~"$app"} |~ "WARN|warn|Warning" [1h]))
+        queryType: instant
+        legendFormat: "Warning"
+    - refId: C
+      logQuery:
+        query: |
+          sum(count_over_time({namespace=~"$namespace", app=~"$app"} |~ "INFO|info|Info" [1h]))
+        queryType: instant
+        legendFormat: "Info"
+    - refId: D
+      logQuery:
+        query: |
+          sum(count_over_time({namespace=~"$namespace", app=~"$app"} |~ "DEBUG|debug|Debug" [1h]))
+        queryType: instant
+        legendFormat: "Debug"
+    fieldConfig:
+      defaults:
+        unit: none
+        decimals: 0
+        mappings:
+        - type: special
+          options:
+            match: "null"
+            result:
+              text: "0"
+        custom:
+          hideFrom:
+            tooltip: false
+            viz: false
+            legend: false
+          pieType: donut
+          
+  - id: 7
+    title: Response Time Analysis
+    type: timeseries
+    gridPos:
+      x: 8
+      y: 20
+      w: 16
+      h: 8
+    dataSource:
+      name: "$datasource"
+    targets:
+    - refId: A
+      logQuery:
+        query: |
+          quantile_over_time(0.50,
+            {namespace=~"$namespace", app=~"$app"} 
+            | json 
+            | response_time > 0 
+            | unwrap response_time [5m]
+          ) by (namespace)
+        queryType: range
+        legendFormat: "{{ namespace }} - p50"
+    - refId: B
+      logQuery:
+        query: |
+          quantile_over_time(0.95,
+            {namespace=~"$namespace", app=~"$app"} 
+            | json 
+            | response_time > 0 
+            | unwrap response_time [5m]
+          ) by (namespace)
+        queryType: range
+        legendFormat: "{{ namespace }} - p95"
+    - refId: C
+      logQuery:
+        query: |
+          quantile_over_time(0.99,
+            {namespace=~"$namespace", app=~"$app"} 
+            | json 
+            | response_time > 0 
+            | unwrap response_time [5m]
+          ) by (namespace)
+        queryType: range
+        legendFormat: "{{ namespace }} - p99"
+    fieldConfig:
+      defaults:
+        unit: ms
+        decimals: 0
+        custom:
+          lineInterpolation: smooth
+          lineWidth: 2
+          fillOpacity: 10
+          gradientMode: opacity
+          showPoints: never
+          spanNulls: false
+          
+  annotations:
+  - name: Deployments
+    enable: true
+    datasource:
+      type: prometheus
+      uid: prometheus
+    expr: |
+      changes(kube_deployment_created{namespace=~"$namespace"}[5m]) > 0
+    titleFormat: "Deployment"
+    textFormat: "Deployment updated in {{ namespace }}"
+    iconColor: "rgba(0, 211, 255, 1)"
+    
+  links:
+  - title: Application Metrics
+    type: dashboards
+    tags:
+    - application
+    - metrics
+    includeVars: true
+    keepTime: true
+    
+  metadata:
+    team: application-team
+    service: logging
+    environment: production
+    purpose: Analyze application logs and errors
+    documentationUrl: https://wiki.company.com/logging
+
+---
+# Advanced Multi-Source Dashboard with Import
+apiVersion: observability.io/v1beta1
+kind: Dashboard
+metadata:
+  name: sre-golden-signals
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: production-platform
+    
+  title: SRE Golden Signals
+  description: Monitor the four golden signals - latency, traffic, errors, and saturation
+  tags:
+    - sre
+    - golden-signals
+    - performance
+    
+  folder: SRE
+  editable: true
+  
+  timeSettings:
+    from: now-6h
+    to: now
+    refreshInterval: 1m
+    quickRanges:
+    - display: Last 5 minutes
+      from: now-5m
+      to: now
+      section: Quick
+    - display: Last hour
+      from: now-1h
+      to: now
+      section: Quick
+    - display: Today
+      from: now/d
+      to: now
+      section: Quick
+    - display: This week
+      from: now/w
+      to: now
+      section: Quick
+      
+  # Import base dashboard and customize
+  importConfig:
+    dashboardId: 12345  # From Grafana.com
+    dataSourceMapping:
+      "${DS_PROMETHEUS}": prometheus
+      "${DS_LOKI}": loki
+    overwrite: true
+    
+  # Override imported panels
+  panels:
+  - id: 100
+    title: Custom Error Budget Burn Rate
+    type: gauge
+    gridPos:
+      x: 0
+      y: 0
+      w: 8
+      h: 8
+    dataSource:
+      type: prometheus
+      uid: prometheus
+    targets:
+    - refId: A
+      expr: |
+        (
+          1 - (
+            sum(rate(http_requests_total{code!~"5.."}[1h])) /
+            sum(rate(http_requests_total[1h]))
+          )
+        ) / 0.001 * 100
+      instant: true
+    fieldConfig:
+      defaults:
+        unit: percent
+        decimals: 2
+        min: 0
+        max: 100
+        thresholds:
+          mode: percentage
+          steps:
+          - value: 
+            color: green
+          - value: 50
+            color: yellow
+          - value: 80
+            color: orange
+          - value: 100
+            color: red
+        custom:
+          showThresholdLabels: true
+          showThresholdMarkers: true
+          
+  # Multi-datasource panel
+  - id: 101
+    title: Correlated Metrics and Logs
+    type: timeseries
+    gridPos:
+      x: 8
+      y: 0
+      w: 16
+      h: 8
+    targets:
+    - refId: A
+      dataSource:
+        type: prometheus
+        uid: prometheus
+      expr: |
+        sum(rate(http_requests_total{status=~"5.."}[5m])) by (service)
+      legendFormat: "{{ service }} - Errors (Prometheus)"
+    - refId: B
+      dataSource:
+        type: loki
+        uid: loki
+      logQuery:
+        query: |
+          sum by (service) (rate({job="application"} |~ "ERROR" [5m]))
+        queryType: range
+      legendFormat: "{{ service }} - Errors (Logs)"
+    fieldConfig:
+      defaults:
+        unit: reqps
+        custom:
+          lineInterpolation: smooth
+          lineWidth: 2
+          fillOpacity: 10
+          showPoints: never
+          spanNulls: false
+      overrides:
+      - matcher:
+          id: byRegexp
+          options: ".*Logs.*"
+        properties:
+        - id: custom.lineStyle
+          value:
+            fill: dash
+            dash: [10, 10]
+            
+  accessControl:
+    canEdit: true
+    canSave: true
+    permissions:
+    - team: sre-team
+      permission: Admin
+    - team: dev-team
+      permission: View
+    - role: Editor
+      permission: Edit
+      
+  version:
+    version: 2
+    message: Added custom error budget panel
+    
+  metadata:
+    team: sre
+    service: all
+    environment: production
+    purpose: Monitor SRE golden signals across all services
+    sloReferences:
+    - availability-99.9
+    - latency-p99-1s
+    - error-rate-0.1
+    documentationUrl: https://sre.google/sre-book/monitoring-distributed-systems/
+    relatedDashboards:
+    - service-details
+    - infrastructure-overview
+
+---
+# JSON Model Import Example
+apiVersion: observability.io/v1beta1
+kind: Dashboard
+metadata:
+  name: custom-json-dashboard
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: production-platform
+    
+  # Import from raw JSON - useful for complex dashboards
+  jsonModel: |
+    {
+      "id": null,
+      "uid": null,
+      "title": "Custom JSON Dashboard",
+      "tags": ["json", "import"],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "timepicker": {
+        "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h", "2h", "1d"]
+      },
+      "templating": {
+        "list": []
+      },
+      "annotations": {
+        "list": []
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "text",
+          "title": "Welcome",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 3
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "# Custom Dashboard\n\nThis dashboard was imported from JSON."
+          }
+        }
+      ]
+    }
+
+---
+# ConfigMap-based Dashboard Import
+apiVersion: observability.io/v1beta1
+kind: Dashboard
+metadata:
+  name: configmap-dashboard
+  namespace: monitoring
+spec:
+  targetPlatform:
+    name: production-platform
+    
+  importConfig:
+    configMapRef:
+      name: grafana-dashboards
+      key: nginx-dashboard.json
+    dataSourceMapping:
+      "${DS_PROMETHEUS}": prometheus
+    overwrite: true
+    
+  # Additional customizations after import
+  tags:
+    - nginx
+    - imported
+    - configmap
+    
+  accessControl:
+    teams:
+    - web-team
+    - sre-team

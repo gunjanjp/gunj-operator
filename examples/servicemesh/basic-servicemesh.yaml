@@ -1,0 +1,95 @@
+# Basic Service Mesh Integration Example
+# This example shows how to enable service mesh integration with automatic detection
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: platform-with-mesh
+  namespace: monitoring
+spec:
+  # Service Mesh Configuration
+  serviceMesh:
+    # Enable service mesh integration
+    enabled: true
+    
+    # Auto-detect the service mesh type (istio or linkerd)
+    # You can also explicitly set: istio, linkerd
+    type: auto
+    
+    # mTLS Configuration
+    mtls:
+      enabled: true
+      mode: STRICT  # Options: STRICT, PERMISSIVE, DISABLE
+    
+    # Basic Traffic Management
+    trafficManagement:
+      # Retry configuration
+      retry:
+        attempts: 3
+        perTryTimeout: "10s"
+        retryOn: "5xx,reset,connect-failure,refused-stream"
+      
+      # Timeout configuration
+      timeout:
+        request: "30s"
+        idle: "900s"
+      
+      # Load balancing
+      loadBalancing:
+        algorithm: ROUND_ROBIN  # Options: ROUND_ROBIN, LEAST_REQUEST, RANDOM, PASSTHROUGH
+    
+    # Observability settings
+    observability:
+      metrics:
+        enabled: true
+      tracing:
+        enabled: true
+        samplingRate: 0.01  # 1% sampling
+      accessLogs:
+        enabled: false
+        format: JSON
+  
+  # Components Configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "500m"
+        limits:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 50Gi
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      ingress:
+        enabled: true
+        host: grafana.example.com
+        
+    loki:
+      enabled: true
+      version: "2.9.0"
+      storage:
+        size: 100Gi
+        
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      storage:
+        size: 50Gi
+
+---
+# After applying this configuration, the operator will:
+# 1. Detect which service mesh is installed (Istio or Linkerd)
+# 2. Enable sidecar injection for the namespace
+# 3. Configure mTLS between all components
+# 4. Set up traffic management policies
+# 5. Enable metrics and tracing collection
+#
+# Verify with:
+# kubectl get observabilityplatform platform-with-mesh -n monitoring -o yaml
+# kubectl get pods -n monitoring -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].name}{"\n"}{end}'

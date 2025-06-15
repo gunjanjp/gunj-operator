@@ -1,0 +1,341 @@
+# Multi-Tenant ObservabilityPlatform Configuration
+# This example demonstrates how to configure a shared observability platform
+# that serves multiple teams with proper isolation and resource allocation
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: multi-tenant-platform
+  namespace: shared-monitoring
+  labels:
+    type: multi-tenant
+    shared: "true"
+  annotations:
+    observability.io/tenant-model: "namespace-based"
+    observability.io/max-tenants: "50"
+spec:
+  # Multi-tenancy configuration
+  multiTenancy:
+    enabled: true
+    isolationLevel: namespace  # namespace or label-based isolation
+    
+    # Default tenant quotas
+    defaultTenantQuota:
+      maxSeries: 1000000
+      maxSamplesPerSecond: 100000
+      maxLogsPerSecond: 50000
+      maxTracesPerSecond: 10000
+      maxDashboards: 100
+      maxAlerts: 500
+      
+    # Tenant configurations
+    tenants:
+    - name: team-alpha
+      namespace: team-alpha
+      quota:
+        maxSeries: 2000000  # Override default
+        maxSamplesPerSecond: 200000
+      labels:
+        team: alpha
+        cost-center: engineering
+        
+    - name: team-beta
+      namespace: team-beta
+      quota:
+        maxSeries: 500000
+        maxSamplesPerSecond: 50000
+      labels:
+        team: beta
+        cost-center: product
+        
+    - name: team-gamma
+      namespace: team-gamma
+      quota:
+        maxSeries: 1500000
+        maxSamplesPerSecond: 150000
+      labels:
+        team: gamma
+        cost-center: infrastructure
+        
+  # Components with multi-tenant support
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3
+      
+      # Tenant-aware configuration
+      config:
+        multiTenant:
+          enabled: true
+          tenantLabelName: tenant_id
+          enforceQuotas: true
+          
+        # Per-tenant service discovery
+        serviceDiscoveryConfigs:
+          - kubernetes_sd_configs:
+            - role: pod
+              namespaces:
+                names: ["team-alpha", "team-beta", "team-gamma"]
+            relabel_configs:
+            # Add tenant label based on namespace
+            - source_labels: [__meta_kubernetes_namespace]
+              target_label: tenant_id
+              
+      # Vertical sharding by tenant
+      sharding:
+        enabled: true
+        strategy: tenant-hash
+        shards: 6  # 2x number of tenants for growth
+        
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1"
+        limits:
+          memory: "8Gi"
+          cpu: "2"
+          
+      storage:
+        size: 200Gi
+        storageClassName: fast-ssd
+        retention: 30d
+        
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 2
+      
+      # Multi-tenant Grafana configuration
+      multiTenant:
+        enabled: true
+        defaultOrg: "shared"
+        autoAssignOrg: false
+        
+        # Organization mapping
+        organizations:
+        - name: "Team Alpha"
+          id: 2
+          namespace: team-alpha
+          dataSourceAccess:
+          - prometheus-team-alpha
+          - loki-team-alpha
+          
+        - name: "Team Beta"
+          id: 3
+          namespace: team-beta
+          dataSourceAccess:
+          - prometheus-team-beta
+          - loki-team-beta
+          
+        - name: "Team Gamma"
+          id: 4
+          namespace: team-gamma
+          dataSourceAccess:
+          - prometheus-team-gamma
+          - loki-team-gamma
+          
+      # RBAC configuration for multi-tenancy
+      rbac:
+        enabled: true
+        # Map teams to Grafana roles
+        teamMappings:
+          team-alpha-viewers:
+            role: Viewer
+            organizations: [2]
+          team-alpha-editors:
+            role: Editor
+            organizations: [2]
+          team-beta-viewers:
+            role: Viewer
+            organizations: [3]
+          team-beta-editors:
+            role: Editor
+            organizations: [3]
+          platform-admins:
+            role: Admin
+            organizations: [1, 2, 3, 4]  # Access to all orgs
+            
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+          
+    loki:
+      enabled: true
+      version: "2.9.0"
+      
+      # Multi-tenant Loki configuration
+      multiTenant:
+        enabled: true
+        authEnabled: true
+        
+      # Per-tenant limits
+      limits:
+        perTenantLimitsConfig:
+          team-alpha:
+            ingestionRate: 100MB
+            ingestionBurstSize: 150MB
+            maxStreamsPerUser: 5000
+          team-beta:
+            ingestionRate: 50MB
+            ingestionBurstSize: 75MB
+            maxStreamsPerUser: 2500
+          team-gamma:
+            ingestionRate: 75MB
+            ingestionBurstSize: 100MB
+            maxStreamsPerUser: 3750
+            
+      distributor:
+        replicas: 3
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+            
+      storage:
+        type: filesystem  # Can be S3 with per-tenant buckets
+        filesystem:
+          directory: /loki/chunks
+        retention: 168h  # 7 days
+        
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      
+      # Multi-tenant tracing
+      multiTenant:
+        enabled: true
+        
+      # Per-tenant rate limits
+      overrides:
+        team-alpha:
+          ingestionRateLimitBytes: 50000000  # 50MB/s
+          ingestionBurstSizeBytes: 100000000  # 100MB
+          maxTracesPerUser: 100000
+        team-beta:
+          ingestionRateLimitBytes: 25000000  # 25MB/s
+          ingestionBurstSizeBytes: 50000000  # 50MB
+          maxTracesPerUser: 50000
+        team-gamma:
+          ingestionRateLimitBytes: 37500000  # 37.5MB/s
+          ingestionBurstSizeBytes: 75000000  # 75MB
+          maxTracesPerUser: 75000
+          
+      distributor:
+        replicas: 2
+        
+      storage:
+        type: filesystem
+        retention: 72h  # 3 days
+        
+  # Tenant-aware alerting
+  alerting:
+    alertmanager:
+      enabled: true
+      replicas: 2
+      
+      # Multi-tenant routing
+      config:
+        route:
+          receiver: 'null'
+          group_by: ['tenant_id', 'alertname']
+          routes:
+          - match:
+              tenant_id: team-alpha
+            receiver: team-alpha-alerts
+            continue: false
+          - match:
+              tenant_id: team-beta
+            receiver: team-beta-alerts
+            continue: false
+          - match:
+              tenant_id: team-gamma
+            receiver: team-gamma-alerts
+            continue: false
+            
+        receivers:
+        - name: 'null'
+        
+        - name: team-alpha-alerts
+          webhook_configs:
+          - url: http://team-alpha-webhook.team-alpha.svc.cluster.local/alerts
+          email_configs:
+          - to: team-alpha@company.com
+          
+        - name: team-beta-alerts
+          webhook_configs:
+          - url: http://team-beta-webhook.team-beta.svc.cluster.local/alerts
+          slack_configs:
+          - api_url: https://hooks.slack.com/services/BETA/WEBHOOK
+            channel: '#team-beta-alerts'
+            
+        - name: team-gamma-alerts
+          pagerduty_configs:
+          - service_key: team-gamma-pagerduty-key
+          
+  # Ingress configuration with tenant paths
+  ingress:
+    enabled: true
+    className: nginx
+    host: monitoring.company.com
+    
+    # Tenant-specific paths
+    tenantPaths:
+      grafana:
+        team-alpha: /team-alpha/grafana
+        team-beta: /team-beta/grafana
+        team-gamma: /team-gamma/grafana
+      prometheus:
+        team-alpha: /team-alpha/prometheus
+        team-beta: /team-beta/prometheus
+        team-gamma: /team-gamma/prometheus
+        
+    annotations:
+      nginx.ingress.kubernetes.io/auth-url: "https://auth.company.com/validate"
+      nginx.ingress.kubernetes.io/auth-signin: "https://auth.company.com/signin"
+      
+  # Cost allocation
+  costAllocation:
+    enabled: true
+    # Track resource usage per tenant
+    trackingLabels:
+    - tenant_id
+    - cost-center
+    - team
+    
+    # Export cost data
+    export:
+      enabled: true
+      format: csv
+      schedule: "0 0 1 * *"  # Monthly
+      destination:
+        type: s3
+        bucket: company-cost-reports
+        prefix: observability/
+        
+  # Tenant isolation policies
+  security:
+    networkPolicy:
+      enabled: true
+      # Each tenant can only access their namespace
+      tenantIsolation:
+        enabled: true
+        allowCrossNamespace: false
+        
+    podSecurityPolicy:
+      enabled: true
+      perTenant: true  # Create PSP per tenant
+      
+  # Audit logging
+  audit:
+    enabled: true
+    # Log all tenant activities
+    logLevel: all
+    destinations:
+    - type: loki
+      labels:
+        audit: "true"
+        component: "multi-tenant-platform"

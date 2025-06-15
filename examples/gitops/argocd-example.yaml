@@ -1,0 +1,140 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: production-platform
+  namespace: observability
+spec:
+  # Component configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "1"
+      storage:
+        size: 100Gi
+      retention: 30d
+    
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      ingress:
+        enabled: true
+        host: grafana.example.com
+    
+    loki:
+      enabled: true
+      version: "2.9.0"
+      storage:
+        size: 200Gi
+    
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      storage:
+        size: 50Gi
+  
+  # GitOps configuration with ArgoCD
+  gitOps:
+    provider: argocd
+    
+    repository:
+      url: https://github.com/your-org/observability-configs.git
+      branch: main
+      path: platforms
+      secretRef: git-credentials  # Kubernetes secret with Git credentials
+      interval: 1m
+    
+    environments:
+      # Development environment
+      - name: dev
+        namespace: observability-dev
+        branch: develop
+        path: platforms/dev
+        
+      # Staging environment  
+      - name: staging
+        namespace: observability-staging
+        path: platforms/staging
+        promotionPolicy:
+          autoPromotion: true
+          dependsOn: dev
+          promoteAfter: 1h
+          requiredTests:
+            - integration-tests
+            - smoke-tests
+      
+      # Production environment
+      - name: production
+        namespace: observability-prod
+        path: platforms/production
+        promotionPolicy:
+          autoPromotion: false  # Manual approval required
+          approvalRequired: true
+          dependsOn: staging
+          requiredTests:
+            - integration-tests
+            - performance-tests
+            - security-scan
+    
+    # Enable automatic synchronization
+    autoSync: true
+    
+    # Automatic promotion configuration
+    autoPromotion:
+      enabled: true
+      strategy: sequential  # Promote one environment at a time
+    
+    # Rollback configuration
+    rollbackConfig:
+      autoRollback: true
+      failureThreshold: 3
+      window: 30m
+      maxHistory: 10
+
+---
+# Secret for Git repository access
+apiVersion: v1
+kind: Secret
+metadata:
+  name: git-credentials
+  namespace: observability
+type: Opaque
+stringData:
+  username: git-username
+  password: git-token  # Use a personal access token or deploy key
+
+---
+# ArgoCD will create Applications automatically when the operator creates them
+# Example of what will be created:
+#
+# apiVersion: argoproj.io/v1alpha1
+# kind: Application
+# metadata:
+#   name: production-platform-dev
+#   namespace: argocd
+#   labels:
+#     app.kubernetes.io/managed-by: gunj-operator
+#     observability.io/platform: production-platform
+#     observability.io/environment: dev
+# spec:
+#   project: production-platform-project
+#   source:
+#     repoURL: https://github.com/your-org/observability-configs.git
+#     path: platforms/dev
+#     targetRevision: develop
+#   destination:
+#     server: https://kubernetes.default.svc
+#     namespace: observability-dev
+#   syncPolicy:
+#     automated:
+#       prune: true
+#       selfHeal: true
+#     retry:
+#       limit: 5
+#       backoff:
+#         duration: 5s
+#         factor: 2
+#         maxDuration: 3m

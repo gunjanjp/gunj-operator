@@ -1,0 +1,295 @@
+# Example: Cluster Registration
+# This example shows how to register multiple Kubernetes clusters with the Gunj Operator
+---
+# Hub Cluster Registration (self-registration)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-hub
+  namespace: gunj-multicluster
+type: Opaque
+data:
+  # Base64 encoded kubeconfig for hub cluster
+  # In production, use proper RBAC and service accounts
+  kubeconfig: <base64-encoded-kubeconfig>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-hub-config
+  namespace: gunj-multicluster
+data:
+  cluster.yaml: |
+    name: hub-cluster
+    displayName: "Central Hub Cluster"
+    description: "Primary management cluster for federation"
+    role: Hub
+    region: us-central
+    zone: us-central1-a
+    provider: gcp
+    endpoint: https://hub.k8s.example.com
+    labels:
+      environment: production
+      tier: control-plane
+    features:
+      - prometheus-operator
+      - istio
+      - cert-manager
+---
+# US East Cluster Registration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-us-east-1
+  namespace: gunj-multicluster
+type: Opaque
+data:
+  # For production, use service account tokens instead of full kubeconfig
+  token: <base64-encoded-service-account-token>
+  ca-bundle: <base64-encoded-ca-certificate>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-us-east-1-config
+  namespace: gunj-multicluster
+data:
+  cluster.yaml: |
+    name: us-east-1
+    displayName: "US East Production"
+    description: "Production cluster in US East region"
+    role: Spoke
+    region: us-east
+    zone: us-east1-b
+    provider: gcp
+    endpoint: https://us-east-1.k8s.example.com
+    labels:
+      environment: production
+      tier: workload
+      geo: americas
+    features:
+      - prometheus-operator
+      - linkerd
+---
+# EU West Cluster Registration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-eu-west-1
+  namespace: gunj-multicluster
+type: Opaque
+data:
+  # Using certificate-based authentication
+  client-cert: <base64-encoded-client-certificate>
+  client-key: <base64-encoded-client-key>
+  ca-bundle: <base64-encoded-ca-certificate>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-eu-west-1-config
+  namespace: gunj-multicluster
+data:
+  cluster.yaml: |
+    name: eu-west-1
+    displayName: "EU West Production"
+    description: "Production cluster in EU West region"
+    role: Spoke
+    region: eu-west
+    zone: eu-west1-c
+    provider: gcp
+    endpoint: https://eu-west-1.k8s.example.com
+    labels:
+      environment: production
+      tier: workload
+      geo: europe
+      compliance: gdpr
+    features:
+      - prometheus-operator
+      - istio
+---
+# Asia Pacific Cluster Registration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-ap-south-1
+  namespace: gunj-multicluster
+type: Opaque
+stringData:
+  # Can use stringData for non-base64 encoded values
+  token: "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMzQ1Njc4OTAifQ..."
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-ap-south-1-config
+  namespace: gunj-multicluster
+data:
+  cluster.yaml: |
+    name: ap-south-1
+    displayName: "Asia Pacific Production"
+    description: "Production cluster in Asia Pacific region"
+    role: Spoke
+    region: ap-south
+    zone: ap-south1-a
+    provider: aws
+    endpoint: https://ap-south-1.k8s.example.com
+    labels:
+      environment: production
+      tier: workload
+      geo: apac
+    features:
+      - prometheus-operator
+---
+# Development Cluster Registration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-dev
+  namespace: gunj-multicluster
+type: Opaque
+data:
+  kubeconfig: <base64-encoded-kubeconfig>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-dev-config
+  namespace: gunj-multicluster
+data:
+  cluster.yaml: |
+    name: dev-cluster
+    displayName: "Development Cluster"
+    description: "Development and testing cluster"
+    role: Spoke
+    region: us-central
+    zone: us-central1-b
+    provider: gcp
+    endpoint: https://dev.k8s.example.com
+    labels:
+      environment: development
+      tier: non-production
+    features:
+      - prometheus-operator
+---
+# Staging Cluster Registration
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-staging
+  namespace: gunj-multicluster
+type: Opaque
+data:
+  kubeconfig: <base64-encoded-kubeconfig>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-staging-config
+  namespace: gunj-multicluster
+data:
+  cluster.yaml: |
+    name: staging-cluster
+    displayName: "Staging Cluster"
+    description: "Pre-production staging cluster"
+    role: Spoke
+    region: us-central
+    zone: us-central1-c
+    provider: gcp
+    endpoint: https://staging.k8s.example.com
+    labels:
+      environment: staging
+      tier: non-production
+    features:
+      - prometheus-operator
+      - istio
+---
+# Job to register clusters (optional automation)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: register-clusters
+  namespace: gunj-multicluster
+spec:
+  template:
+    spec:
+      serviceAccountName: gunj-cluster-registry
+      containers:
+      - name: register
+        image: docker.io/gunjanjp/gunj-cli:v2.0.0
+        command:
+        - /gunj-cli
+        - cluster
+        - register
+        - --config-dir=/configs
+        - --credentials-dir=/secrets
+        volumeMounts:
+        - name: configs
+          mountPath: /configs
+        - name: secrets
+          mountPath: /secrets
+      volumes:
+      - name: configs
+        projected:
+          sources:
+          - configMap:
+              name: cluster-hub-config
+          - configMap:
+              name: cluster-us-east-1-config
+          - configMap:
+              name: cluster-eu-west-1-config
+          - configMap:
+              name: cluster-ap-south-1-config
+          - configMap:
+              name: cluster-dev-config
+          - configMap:
+              name: cluster-staging-config
+      - name: secrets
+        projected:
+          sources:
+          - secret:
+              name: cluster-hub
+          - secret:
+              name: cluster-us-east-1
+          - secret:
+              name: cluster-eu-west-1
+          - secret:
+              name: cluster-ap-south-1
+          - secret:
+              name: cluster-dev
+          - secret:
+              name: cluster-staging
+      restartPolicy: OnFailure
+---
+# ServiceAccount for cluster registration
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gunj-cluster-registry
+  namespace: gunj-multicluster
+---
+# Role for cluster registration
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gunj-cluster-registry
+  namespace: gunj-multicluster
+rules:
+- apiGroups: [""]
+  resources: ["secrets", "configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gunj-cluster-registry
+  namespace: gunj-multicluster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gunj-cluster-registry
+subjects:
+- kind: ServiceAccount
+  name: gunj-cluster-registry
+  namespace: gunj-multicluster

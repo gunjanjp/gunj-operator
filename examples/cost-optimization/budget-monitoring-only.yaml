@@ -1,0 +1,172 @@
+apiVersion: observability.io/v1beta1
+kind: ObservabilityPlatform
+metadata:
+  name: budget-monitoring-only
+  namespace: monitoring
+spec:
+  # Enable only budget monitoring without automatic optimization
+  costOptimization:
+    enabled: true
+    resourceOptimization: false  # No automatic resource changes
+    autoScaling: false          # No automatic scaling
+    spotInstances:
+      enabled: false            # No spot instances
+    
+    # Budget monitoring and alerts
+    budget:
+      monthlyLimit: 2000.0      # $2000 USD per month
+      alertThresholds: [50, 70, 80, 90, 95, 100]  # Multiple thresholds
+      
+      # Multiple alert channels
+      alertChannels:
+        - type: email
+          target: finance@example.com
+        - type: email
+          target: platform-team@example.com
+        - type: slack
+          target: https://hooks.slack.com/services/xxx/yyy/zzz
+        - type: webhook
+          target: https://api.pagerduty.com/incidents
+      
+      # Only alerting actions, no automatic changes
+      actions:
+        - threshold: 50
+          action: alert  # Early warning
+        - threshold: 80
+          action: alert  # Urgent warning
+        - threshold: 95
+          action: alert  # Critical warning
+        - threshold: 100
+          action: preventNewDeployments  # Only prevent new deployments
+    
+    # Detailed cost allocation for reporting
+    costAllocation:
+      enabled: true
+      department: Operations
+      costCenter: CC-OPS-2024
+      team: Platform Operations
+      tags:
+        environment: production
+        project: core-observability
+        owner: ops-team@example.com
+        business-unit: infrastructure
+        cost-type: operational
+        budget-year: "2024"
+
+  # Standard platform configuration
+  components:
+    prometheus:
+      enabled: true
+      version: v2.48.0
+      replicas: 3
+      resources:
+        requests:
+          memory: "8Gi"
+          cpu: "2"
+        limits:
+          memory: "16Gi"
+          cpu: "4"
+      storage:
+        size: 500Gi
+        storageClassName: fast-ssd
+      retention: 90d
+
+    grafana:
+      enabled: true
+      version: "10.2.0"
+      replicas: 3
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+
+    loki:
+      enabled: true
+      version: "2.9.0"
+      replicas: 3
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "2"
+        limits:
+          memory: "8Gi"
+          cpu: "4"
+      storage:
+        size: 100Gi
+        storageClassName: fast-ssd
+      s3:
+        enabled: true
+        bucketName: production-loki-logs
+        region: us-east-1
+
+    tempo:
+      enabled: true
+      version: "2.3.0"
+      replicas: 3
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "2"
+        limits:
+          memory: "8Gi"
+          cpu: "4"
+      storage:
+        size: 100Gi
+        storageClassName: fast-ssd
+
+---
+# Example of PrometheusRule for custom budget alerts
+apiVersion: observability.io/v1beta1
+kind: PrometheusRule
+metadata:
+  name: custom-budget-alerts
+  namespace: monitoring
+spec:
+  groups:
+    - name: budget_custom
+      interval: 5m
+      rules:
+        - alert: PlatformCostTrending
+          expr: |
+            predict_linear(
+              gunj_operator_platform_cost_estimate_dollars{platform="budget-monitoring-only"}[7d], 
+              30 * 24 * 3600
+            ) > 2000
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Platform costs trending to exceed budget"
+            description: "Based on 7-day trend, platform {{ $labels.platform }} is projected to exceed monthly budget of $2000"
+            
+        - alert: ComponentCostAnomaly
+          expr: |
+            abs(
+              gunj_operator_platform_cost_estimate_dollars{component!="total"} 
+              - 
+              avg_over_time(gunj_operator_platform_cost_estimate_dollars{component!="total"}[7d])
+            ) 
+            > 
+            2 * stddev_over_time(gunj_operator_platform_cost_estimate_dollars{component!="total"}[7d])
+          for: 30m
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            summary: "Unusual cost pattern detected for {{ $labels.component }}"
+            description: "Component {{ $labels.component }} in platform {{ $labels.platform }} shows unusual cost pattern: ${{ $value }}"
+            
+        - alert: StorageCostGrowth
+          expr: |
+            rate(gunj_operator_platform_cost_estimate_dollars{component=~".*storage.*"}[1d]) > 0.1
+          for: 6h
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            summary: "Storage costs growing rapidly"
+            description: "Storage costs for {{ $labels.platform }} growing at ${{ $value }}/day"

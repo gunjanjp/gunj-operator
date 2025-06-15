@@ -1,0 +1,181 @@
+apiVersion: restore.observability.io/v1alpha1
+kind: Restore
+metadata:
+  name: cross-namespace-restore
+  namespace: gunj-system
+spec:
+  # Restore from production backup
+  backupName: production-backup-1
+  
+  # Namespace mapping - restore to different namespaces
+  namespaceMapping:
+    production: staging            # Restore production to staging
+    production-db: staging-db      # Restore production-db to staging-db
+    monitoring: monitoring-staging # Restore monitoring to monitoring-staging
+  
+  # Include all resources
+  # Resources will be created in mapped namespaces
+  
+  # Don't restore PVs (create new ones in staging)
+  restorePVs: false
+  
+  # Don't preserve node ports
+  preserveNodePorts: false
+  
+  # Label modifications during restore
+  labelSelector:
+    matchLabels:
+      app.kubernetes.io/managed-by: gunj-operator
+  
+  # Validation policy
+  validationPolicy:
+    verifyChecksums: true
+    verifyIntegrity: true
+    failOnWarning: false
+    maxRetries: 3
+  
+  # Cross-namespace restore hooks
+  hooks:
+    preRestore:
+      - name: create-target-namespaces
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Create target namespaces if they don't exist
+            kubectl create namespace staging --dry-run=client -o yaml | kubectl apply -f -
+            kubectl create namespace staging-db --dry-run=client -o yaml | kubectl apply -f -
+            kubectl create namespace monitoring-staging --dry-run=client -o yaml | kubectl apply -f -
+            
+            # Label namespaces
+            kubectl label namespace staging environment=staging --overwrite
+            kubectl label namespace staging-db environment=staging --overwrite
+            kubectl label namespace monitoring-staging environment=staging --overwrite
+        onError: Continue
+        timeout: 60s
+      
+      - name: prepare-staging-environment
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Prepare staging environment
+            echo "Setting up staging environment..."
+            
+            # Create staging-specific secrets
+            kubectl create secret generic staging-override \
+              --from-literal=environment=staging \
+              --from-literal=debug=true \
+              -n staging --dry-run=client -o yaml | kubectl apply -f -
+        onError: Continue
+        timeout: 120s
+    
+    postRestore:
+      - name: update-configurations
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Update configurations for staging
+            echo "Updating configurations for staging environment..."
+            
+            # Patch ObservabilityPlatforms with staging settings
+            kubectl get observabilityplatform -n staging -o name | while read platform; do
+              kubectl patch $platform -n staging --type merge -p '{
+                "metadata": {
+                  "annotations": {
+                    "environment": "staging",
+                    "restored-from": "production",
+                    "restore-timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+                  }
+                }
+              }'
+            done
+        onError: Continue
+        timeout: 180s
+      
+      - name: scale-down-staging
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Scale down staging resources to save costs
+            echo "Scaling down staging resources..."
+            
+            # Scale Prometheus replicas
+            kubectl scale statefulset -n monitoring-staging -l app=prometheus --replicas=1
+            
+            # Scale Grafana replicas
+            kubectl scale deployment -n monitoring-staging -l app=grafana --replicas=1
+        onError: Continue
+        timeout: 120s
+
+---
+apiVersion: restore.observability.io/v1alpha1
+kind: Restore
+metadata:
+  name: disaster-recovery-restore
+  namespace: gunj-system
+spec:
+  # Restore from latest backup
+  backupName: dr-backup-latest
+  
+  # Full cluster restore
+  includeClusterResources: true
+  restorePVs: true
+  preserveNodePorts: true
+  
+  # No namespace mapping - restore as-is
+  
+  # Include everything except
+  excludedNamespaces:
+    - kube-system
+    - kube-public
+    - kube-node-lease
+    - gunj-system  # Don't restore the operator itself
+  
+  # Lenient validation for DR scenarios
+  validationPolicy:
+    verifyChecksums: false  # Skip for speed in DR
+    verifyIntegrity: false  # Skip for speed in DR
+    failOnWarning: false
+    maxRetries: 10  # More retries for DR
+  
+  # DR-specific hooks
+  hooks:
+    preRestore:
+      - name: emergency-notification
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Send emergency notification
+            echo "DISASTER RECOVERY: Starting restore at $(date)"
+            # Add actual notification command (Slack, PagerDuty, etc.)
+        onError: Continue
+        timeout: 30s
+    
+    postRestore:
+      - name: verify-critical-services
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Verify critical services are running
+            CRITICAL_SERVICES="prometheus grafana alertmanager"
+            for service in $CRITICAL_SERVICES; do
+              kubectl wait --for=condition=available deployment/$service -n monitoring --timeout=300s || exit 1
+            done
+        onError: Fail
+        timeout: 600s
+      
+      - name: dr-complete-notification
+        command:
+          - /bin/sh
+          - -c
+          - |
+            # Send completion notification
+            echo "DISASTER RECOVERY: Restore completed at $(date)"
+            # Add actual notification command
+        onError: Continue
+        timeout: 30s

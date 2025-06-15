@@ -1,0 +1,113 @@
+apiVersion: backup.observability.io/v1alpha1
+kind: Backup
+metadata:
+  name: encrypted-backup-1
+  namespace: gunj-system
+spec:
+  # Full backup with encryption
+  type: Full
+  
+  # Target production namespace with sensitive data
+  includedNamespaces:
+    - production
+    - secure-apps
+  
+  # Include sensitive resources
+  includedResources:
+    - ObservabilityPlatform
+    - Secret
+    - ConfigMap
+    - Certificate
+    - SealedSecret
+  
+  # Azure Blob Storage configuration
+  storageLocation:
+    provider: AzureBlob
+    bucket: gunj-encrypted-backups
+    prefix: secure/production
+    region: eastus
+    credential:
+      name: azure-credentials
+      key: connection-string
+    config:
+      tier: Cool  # For long-term storage
+      redundancy: GRS  # Geo-redundant storage
+  
+  # Encryption configuration
+  encryptionConfig:
+    algorithm: AES-256-GCM
+    keyRef:
+      name: backup-encryption-key
+      key: key
+    keyRotationPolicy:
+      rotationPeriod: 720h  # Rotate every 30 days
+      retainOldKeys: 3      # Keep 3 old keys for decryption
+  
+  # Compression before encryption
+  compressionConfig:
+    algorithm: gzip
+    level: 9  # Maximum compression for encrypted data
+  
+  # Extended TTL for compliance
+  ttl: 2160h  # 90 days
+  
+  # Enable volume snapshots with encryption
+  snapshotVolumes: true
+  
+  # Security hooks
+  hooks:
+    preBackup:
+      - name: security-scan
+        command:
+          - /bin/sh
+          - -c
+          - |
+            echo "Running security scan before backup..."
+            # Add actual security scanning command here
+        onError: Fail  # Fail backup if security scan fails
+        timeout: 300s
+    
+    postBackup:
+      - name: audit-log
+        command:
+          - /bin/sh
+          - -c
+          - |
+            echo "Backup completed. Logging to audit system..."
+            echo "Backup: encrypted-backup-1"
+            echo "Timestamp: $(date)"
+            echo "Encryption: AES-256-GCM"
+            # Add actual audit logging here
+        onError: Continue
+        timeout: 60s
+
+---
+# Encryption key secret example
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backup-encryption-key
+  namespace: gunj-system
+type: Opaque
+stringData:
+  # Generate a strong key: openssl rand -base64 32
+  key: "YOUR_BASE64_ENCODED_32_BYTE_KEY_HERE"
+  
+  # Backup keys for rotation
+  key-2024-12: "PREVIOUS_KEY_1"
+  key-2024-11: "PREVIOUS_KEY_2"
+  key-2024-10: "PREVIOUS_KEY_3"
+
+---
+# Key rotation ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: encryption-key-metadata
+  namespace: gunj-system
+data:
+  current-key-id: "key"
+  key-created: "2025-01-01T00:00:00Z"
+  key-rotation-schedule: "monthly"
+  compliance-standard: "FIPS-140-2"
+  algorithm: "AES-256-GCM"

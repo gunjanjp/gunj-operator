@@ -1,0 +1,32 @@
+apiVersion: observability.io/v1beta1
+kind: PrometheusConfig
+metadata:
+  name: basic-prometheus-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus-config
+    app.kubernetes.io/instance: basic
+spec:
+  # Reference to the target ObservabilityPlatform
+  targetPlatform:
+    name: production-platform
+  
+  # Basic global configuration
+  globalConfig:
+    scrapeInterval: "30s"
+    scrapeTimeout: "10s"
+    evaluationInterval: "30s"
+    externalLabels:
+      cluster: production
+      region: us-east-1
+  
+  # Simple service discovery
+  serviceDiscovery:
+    # Kubernetes service discovery for pods
+    kubernetesSD:
+    - role: pod
+      namespaces:
+        allNamespaces: true
+      selectors:
+      - role: pod
+        label: "app=prometheus-scrape-target"
